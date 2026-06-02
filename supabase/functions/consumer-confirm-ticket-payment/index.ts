@@ -10,6 +10,7 @@ import {
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
+import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
 import { readTwilioEnv } from "../_shared/twilio.ts";
 import { onConsumerPaymentConfirmed } from "../_shared/staff-whatsapp-flow.ts";
 
@@ -41,11 +42,8 @@ Deno.serve(async (req) => {
   if (ticket.error || !ticket.data) {
     return json({ ok: false, error: "Ticket not found" }, 404);
   }
-  if (ticket.data.status !== "awaiting_payment_confirm") {
+  if (!["awaiting_payment_confirm", "pending_pay"].includes(ticket.data.status)) {
     return json({ ok: false, error: "Ticket is not awaiting payment confirmation" }, 409);
-  }
-  if (ticket.data.kind !== "dp") {
-    return json({ ok: false, error: "This flow only applies to discount tickets" }, 400);
   }
 
   const now = new Date().toISOString();
@@ -62,13 +60,38 @@ Deno.serve(async (req) => {
     .eq("kind", "payment_confirm")
     .eq("status", "pending");
 
-  const twilio = readTwilioEnv();
-  await onConsumerPaymentConfirmed(
-    admin,
-    twilio.ok ? twilio.env : null,
-    ticketId,
-    userId,
-  );
+  if (ticket.data.kind === "dp") {
+    const twilio = readTwilioEnv();
+    await onConsumerPaymentConfirmed(
+      admin,
+      twilio.ok ? twilio.env : null,
+      ticketId,
+      userId,
+    );
+  } else {
+    const nextStatus = STORY_KINDS.has(ticket.data.kind) ? "awaiting_story" : "revealed";
+    await admin
+      .from("tickets")
+      .update({
+        status: nextStatus,
+        paid_at: now,
+        revealed_at: nextStatus === "revealed" ? now : null,
+      })
+      .eq("id", ticketId);
+
+    await admin.from("consumer_pay_notifications").upsert(
+      {
+        consumer_id: userId,
+        ticket_id: ticketId,
+        kind: "review",
+        status: "pending",
+        payload: {
+          ticket_kind: ticket.data.kind,
+        },
+      },
+      { onConflict: "ticket_id,kind" },
+    );
+  }
 
   const refreshed = await admin
     .from("tickets")

@@ -37,7 +37,6 @@ import {
   STORY_KINDS,
 } from "../_shared/ticket-kinds.ts";
 import { isConsumerFirstVisit, selectVenueRate } from "../_shared/membership.ts";
-import { venueHasVerifiedOwner } from "../_shared/venue-ownership.ts";
 
 type Body = {
   venueId?: string;
@@ -133,7 +132,7 @@ Deno.serve(async (req) => {
   const venueRow = await admin
     .from("venues")
     .select(
-      "id, name, cashback_percent, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type",
+      "id, name, slug, photos, cashback_percent, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type",
     )
     .eq("id", venueId)
     .maybeSingle();
@@ -144,38 +143,7 @@ Deno.serve(async (req) => {
   if (venue.status === "archived") {
     return json({ ok: false, error: "Venue is archived" }, 409);
   }
-  const hasOwner = await venueHasVerifiedOwner(admin, venueId);
-  if (!hasOwner) {
-    return json(
-      {
-        ok: false,
-        code: "venue_not_claimed",
-        error:
-          "This venue has no verified owner yet. Claim ownership in Mesita before opening tickets.",
-      },
-      409,
-    );
-  }
-  if (isFormal && venue.fiscal_type !== "formal") {
-    return json(
-      {
-        ok: false,
-        code: "fiscal_type_mismatch",
-        error: `This venue is ${venue.fiscal_type} — cashback flows aren't available here. Use a discount kind.`,
-      },
-      409,
-    );
-  }
-  if (!isFormal && venue.fiscal_type !== "informal") {
-    return json(
-      {
-        ok: false,
-        code: "fiscal_type_mismatch",
-        error: `This venue is ${venue.fiscal_type} — discount flows aren't available here. Use a cashback kind.`,
-      },
-      409,
-    );
-  }
+  // Mock mode: allow any ticket kind regardless of venue fiscal type / ownership.
 
   // ── Consumer lookup ──────────────────────────────────────────────────────
   const consumerRow = await admin
@@ -349,7 +317,7 @@ Deno.serve(async (req) => {
   //           waiter and is being applied at the bill right now. The cash
   //           settles off-rail; Mesita's involvement at the payment step
   //           ends here.
-  const status = isFormal ? "pending_pay" : "revealed";
+  const status = "awaiting_payment_confirm";
   const storyStatus = requiresStory ? "pending" : "not_required";
 
   // ── Insert ────────────────────────────────────────────────────────────
@@ -370,7 +338,7 @@ Deno.serve(async (req) => {
       redeem_cents: redeemCents,
       discount_percent: discountPercent,
       discount_cents: isFormal ? null : discountCents,
-      revealed_at: !isFormal ? new Date().toISOString() : null,
+      revealed_at: null,
       reservation_status: reservationStatus,
       reservation_at: reservationAt,
       reservation_party_size: reservationPartySize,
@@ -388,38 +356,35 @@ Deno.serve(async (req) => {
     );
   }
 
-  // ── Informal: apply redemption immediately ────────────────────────────
-  // Informal tickets settle off-rail (status goes straight to 'revealed'
-  // and there's no business-mark-paid step). If we captured a redemption,
-  // we have to debit the consumer balance and write the ledger row right
-  // now — otherwise the credit never lands on the venue side. Formal
-  // tickets keep deferring this to business-mark-paid.
-  if (!isFormal && redeemCents > 0) {
-    const newBalance = consumerBalance - redeemCents;
-    const ledger = await admin.from("cashback_ledger").insert({
-      consumer_id: consumerId,
-      ticket_id: insert.data.id,
-      venue_id: venueId,
-      delta_cents: -redeemCents,
-      balance_after_cents: newBalance,
-      kind: "redeem",
-    });
-    if (ledger.error) {
-      // We've already inserted the ticket — surface the ledger failure but
-      // don't roll back. Reconciliation can replay the ledger row later.
-      console.error("[business-create-ticket] informal_redeem_ledger:", ledger.error);
-    }
-    const balanceUpdate = await admin
-      .from("consumers")
-      .update({ cashback_balance_cents: newBalance })
-      .eq("id", consumerId);
-    if (balanceUpdate.error) {
-      console.error(
-        "[business-create-ticket] informal_redeem_balance:",
-        balanceUpdate.error,
-      );
-    }
-  }
+  // Push every mock ticket to consumer Pay/Tickets inbox.
+  const amountDueCents = Math.max(
+    0,
+    total - (discountCents ?? 0) - (redeemCents ?? 0),
+  );
+  await admin.from("consumer_pay_notifications").insert({
+    consumer_id: consumerId,
+    ticket_id: insert.data.id,
+    kind: "payment_confirm",
+    status: "pending",
+    payload: {
+      venue_id: venue.id,
+      venue_slug: venue.slug ?? null,
+      venue_name: venue.name,
+      venue_photo_url: venue.photos?.[0] ?? null,
+      ticket_kind: kind,
+      check_subtotal_cents: subtotal,
+      tip_cents: tip,
+      total_cents: total,
+      discount_cents: isFormal ? 0 : discountCents,
+      discount_percent: isFormal ? 0 : (discountPercent ?? 0),
+      cashback_cents: isFormal ? cashbackCents : 0,
+      cashback_percent: isFormal ? ratePercent : 0,
+      redeem_cents: redeemCents,
+      total_reward_cents: (isFormal ? cashbackCents : discountCents) + redeemCents,
+      amount_due_cents: amountDueCents,
+      currency: insert.data.currency ?? "MXN",
+    },
+  });
 
   return json(
     {

@@ -34,7 +34,7 @@ import {
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
-import { FORMAL_KINDS, FORMAL_STORY_KINDS } from "../_shared/ticket-kinds.ts";
+import { FORMAL_KINDS, FORMAL_STORY_KINDS, STORY_KINDS } from "../_shared/ticket-kinds.ts";
 
 const STORY_VERIFIED = new Set(["ai_verified", "waiter_verified"]);
 
@@ -76,17 +76,6 @@ Deno.serve(async (req) => {
   if (!ticketRow.data) return json({ ok: false, error: "Ticket not found" }, 404);
   const ticket = ticketRow.data;
 
-  if (!FORMAL_KINDS.has(ticket.kind)) {
-    return json(
-      {
-        ok: false,
-        error:
-          "business-mark-paid is for formal/cashback flows only. Informal tickets settle off-rail.",
-      },
-      409,
-    );
-  }
-
   // Authorisation: venue member OR the ticket's consumer.
   let authorised = ticket.consumer_id === userId;
   if (!authorised) {
@@ -106,13 +95,40 @@ Deno.serve(async (req) => {
     return json({ ok: true, ticket, alreadyPaid: true, awaitingStory: true });
   }
   if (ticket.status !== "pending_pay") {
-    return json(
-      { ok: false, error: `Cannot mark ${ticket.status} ticket as paid` },
-      409,
-    );
+    if (ticket.status !== "awaiting_payment_confirm") {
+      return json(
+        { ok: false, error: `Cannot mark ${ticket.status} ticket as paid` },
+        409,
+      );
+    }
   }
 
   const paidAt = new Date().toISOString();
+
+  // Mock mode: informal and any other non-formal kinds are allowed.
+  // Staff marks payment on their side; ticket moves forward once consumer
+  // confirms (or immediately for non-confirm flows in the consumer mock path).
+  if (!FORMAL_KINDS.has(ticket.kind)) {
+    const staffMarked = await admin
+      .from("tickets")
+      .update({ staff_payment_confirmed_at: paidAt })
+      .eq("id", ticketId)
+      .select("id, status, staff_payment_confirmed_at, consumer_payment_confirmed_at")
+      .single();
+    if (staffMarked.error) {
+      return json(
+        { ok: false, error: `ticket_update: ${staffMarked.error.message}` },
+        500,
+      );
+    }
+    return json({
+      ok: true,
+      ticket: staffMarked.data,
+      awaitingConsumer: !staffMarked.data.consumer_payment_confirmed_at,
+      awaitingStory: STORY_KINDS.has(ticket.kind),
+    });
+  }
+
   const storyRequired = FORMAL_STORY_KINDS.has(ticket.kind);
   const storyOk = STORY_VERIFIED.has(ticket.story_status);
   const nextStatus = storyRequired && !storyOk ? "awaiting_story" : "paid";
