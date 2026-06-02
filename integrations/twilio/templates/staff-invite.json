@@ -4,16 +4,11 @@
   "category": "UTILITY",
   "variables": {
     "1": "Venue name",
-    "2": "Staff invite token (flow_token)"
+    "2": "Staff invite token (logged for support; accept via SI or Flow)"
   },
   "types": {
-    "whatsapp/flows": {
-      "body": "{{1}} te invita al equipo Mesita como mesero/a. Toca el botón para confirmar en WhatsApp (sin links).",
-      "button_text": "Unirme",
-      "flow_id": "__FLOW_ID_STAFF_INVITE_ACCEPT__",
-      "flow_token": "{{2}}",
-      "flow_first_page_id": "JOIN_TEAM",
-      "is_flow_first_page_endpoint": false
+    "twilio/text": {
+      "body": "Mesita · {{1}} te invita como mesero/a. Toca «Unirme» si ves el botón, o responde SI en este chat. Todo aquí, sin links."
     }
   }
 }

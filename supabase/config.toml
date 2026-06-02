@@ -398,3 +398,6 @@ verify_jwt = false
 
 [functions.twilio-whatsapp-status]
 verify_jwt = false
+
+[functions.twilio-bootstrap-staff-invite]
+verify_jwt = false

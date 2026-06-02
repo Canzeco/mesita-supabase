@@ -7,3 +7,9 @@ if [[ -f "${ROOT}/.env.twilio.local" ]]; then
   source "${ROOT}/.env.twilio.local"
   set +a
 fi
+if [[ -f "${ROOT}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${ROOT}/.env"
+  set +a
+fi

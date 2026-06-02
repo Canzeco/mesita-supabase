@@ -42,9 +42,7 @@ raw = json.dumps(tpl)
 if "__FLOW_ID_STAFF_INVITE_ACCEPT__" in raw:
     flow_id = reg.get("staff-invite-accept", {}).get("flow_id", "")
     if not flow_id:
-        raise SystemExit(
-            "staff-invite needs flow_id — run ./scripts/twilio-apply-flows.sh or set registry.json"
-        )
+        raise SystemExit("SKIP_FLOW_TEMPLATE")
     raw = raw.replace("__FLOW_ID_STAFF_INVITE_ACCEPT__", flow_id)
 print(raw)
 PY
@@ -94,15 +92,28 @@ PY
 mkdir -p "$(dirname "${OUT}")"
 echo '{}' > "${OUT}"
 
+FLOW_ID="$(flow_id_for_staff_invite)"
+
 for f in "${TEMPLATES_DIR}"/*.json; do
   [[ -f "${f}" ]] || continue
+  base="$(basename "${f}" .json)"
+  if [[ "${base}" == *-flow ]] && [[ -z "${FLOW_ID}" ]]; then
+    echo "==> Template: ${base} (skipped — no Meta flow_id)"
+    continue
+  fi
   apply_one "${f}"
 done
 
 echo ""
-echo "Set Supabase secret (prod):"
-staff_sid="$(python3 -c "import json; print(json.load(open('${OUT}')).get('staff-invite',{}).get('content_sid',''))")"
+staff_sid="$(python3 -c "
+import json
+d=json.load(open('${OUT}'))
+print(d.get('staff-invite-flow',{}).get('content_sid') or d.get('staff-invite',{}).get('content_sid',''))
+")"
 if [[ -n "${staff_sid}" ]]; then
-  echo "  supabase secrets set TWILIO_CONTENT_SID_STAFF_INVITE=${staff_sid}"
+  echo "Primary ContentSid for TWILIO_CONTENT_SID_STAFF_INVITE: ${staff_sid}"
+  echo "Or run: ./scripts/twilio-setup-staff-invite.sh  (applies + sets Supabase secret + deploys)"
+else
+  echo "No staff-invite ContentSid created." >&2
+  exit 1
 fi
-echo "Deploy: supabase functions deploy business-invite-waiter twilio-whatsapp-inbound"
