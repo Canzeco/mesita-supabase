@@ -1,7 +1,7 @@
 // Supabase Edge Function — business-invite-waiter
 //
-// Creates a staff_invites row and, for WhatsApp + phone, sends one session
-// message from Mesita Ops. Staff accept by replying SI in WhatsApp (no links).
+// Creates a staff_invites row and sends the staff-invite Content template
+// (whatsapp/flows — «Unirme»). Session text is fallback if template unset.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
@@ -11,9 +11,9 @@ import {
   readEFEnv,
   requireMembership,
 } from "../_shared/auth.ts";
-import { buildStaffInviteWhatsAppBody } from "../_shared/staff-invite-message.ts";
+import { sendStaffInviteWhatsApp } from "../_shared/staff-invite-send.ts";
 import { newInviteToken } from "../_shared/tokens.ts";
-import { readTwilioEnv, sendWhatsAppText } from "../_shared/twilio.ts";
+import { readTwilioEnv } from "../_shared/twilio.ts";
 
 type Body = {
   venueId?: string;
@@ -78,21 +78,23 @@ Deno.serve(async (req) => {
   let sent = false;
   let sendError: string | null = null;
   let messageSid: string | null = null;
+  let sendMode: "template" | "session" | null = null;
 
   if (channel === "whatsapp" && phone) {
     const twilio = readTwilioEnv();
     if (!twilio.ok) {
       sendError = twilio.error;
     } else {
-      const wa = await sendWhatsAppText({
+      const wa = await sendStaffInviteWhatsApp({
         env: twilio.env,
-        from: twilio.env.whatsappFromStaff,
-        to: phone,
-        body: buildStaffInviteWhatsAppBody({ venueName }),
+        toPhoneE164: phone,
+        venueName,
+        inviteToken: token,
       });
       if (wa.ok) {
         sent = true;
         messageSid = wa.sid;
+        sendMode = wa.mode;
       } else {
         sendError = wa.error;
       }
@@ -101,7 +103,7 @@ Deno.serve(async (req) => {
     sendError = "Add a phone number to send the WhatsApp invite automatically.";
   } else if (channel === "sms") {
     sendError =
-      "SMS waiter invites are not enabled — use WhatsApp; staff accept by replying SI in Ops chat.";
+      "SMS waiter invites are not enabled — use WhatsApp with the Unirme flow template.";
   }
 
   return json({
@@ -115,6 +117,7 @@ Deno.serve(async (req) => {
     sent,
     sendError,
     messageSid,
+    sendMode,
   });
 });
 

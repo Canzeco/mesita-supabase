@@ -1,0 +1,35 @@
+{
+  "version": "7.2",
+  "screens": [
+    {
+      "id": "JOIN_TEAM",
+      "title": "Mesita · equipo",
+      "terminal": true,
+      "success": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Unirte como mesero/a"
+          },
+          {
+            "type": "TextBody",
+            "text": "Tu manager te invitó al equipo. Al confirmar, podrás validar tickets desde Mesita Ops en este mismo WhatsApp."
+          },
+          {
+            "type": "Footer",
+            "label": "Unirme",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "action": "accept"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

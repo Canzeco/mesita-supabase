@@ -35,9 +35,28 @@ supabase secrets set \
 
 Local scripts: `.env.twilio.local` (see `.env.twilio.local.example`).
 
-## Templates
+## Templates & Flows (waiter invite)
 
-Definitions: `integrations/twilio/templates/`. Create in Twilio Content Builder or via future apply script — **not** in Meta UI alone.
+| Asset | Path | Apply |
+|---|---|---|
+| Meta Flow (in-chat «Unirme») | `integrations/twilio/flows/staff-invite-accept.flow.json` | `./scripts/twilio-apply-flows.sh` |
+| Content template `whatsapp/flows` | `integrations/twilio/templates/staff-invite.json` | `./scripts/twilio-apply-templates.sh` |
+| Content SIDs (generated) | `integrations/twilio/content-sids.json` | written by apply script |
+| Flow IDs (generated) | `integrations/twilio/flows/registry.json` | written by apply script |
+
+**Order:** flows → templates → Supabase secret → deploy EFs.
+
+```bash
+# .env.twilio.local: TWILIO_*, META_WHATSAPP_ACCESS_TOKEN, WHATSAPP_WABA_ID
+./scripts/twilio-apply-flows.sh
+./scripts/twilio-apply-templates.sh
+supabase secrets set TWILIO_CONTENT_SID_STAFF_INVITE=HX...
+supabase functions deploy business-invite-waiter twilio-whatsapp-inbound
+```
+
+Waiter accepts inside WhatsApp via the Flow button. `flow_token` = `staff_invites.token`. Fallback: reply **SI** if template not configured (session message).
+
+Other templates: `integrations/twilio/templates/`. **Do not** create only in Console — definitions live in repo.
 
 ## Meta (manual)
 

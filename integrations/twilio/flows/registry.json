@@ -1,0 +1,8 @@
+{
+  "staff-invite-accept": {
+    "friendly_name": "staff-invite-accept",
+    "first_page_id": "JOIN_TEAM",
+    "flow_id": "",
+    "notes": "Run ./scripts/twilio-apply-flows.sh after setting META_WHATSAPP_ACCESS_TOKEN"
+  }
+}

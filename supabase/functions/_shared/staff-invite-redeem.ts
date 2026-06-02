@@ -54,6 +54,34 @@ export function isStaffInviteAcceptMessage(body: string): boolean {
   return false;
 }
 
+export async function findPendingStaffInviteByToken(
+  admin: SupabaseClient,
+  token: string,
+): Promise<PendingStaffInvite | null> {
+  const t = token.trim();
+  if (!t) return null;
+  const { data, error } = await admin
+    .from("staff_invites")
+    .select(
+      "id, venue_id, phone, claimed_at, expires_at, created_by, venues(name)",
+    )
+    .eq("token", t)
+    .is("claimed_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+  if (error || !data) return null;
+  const join = data.venues as { name: string } | null;
+  return {
+    id: data.id,
+    venue_id: data.venue_id,
+    phone: data.phone,
+    claimed_at: data.claimed_at,
+    expires_at: data.expires_at,
+    created_by: data.created_by,
+    venue_name: join?.name ?? "your venue",
+  };
+}
+
 export async function findPendingStaffInviteForPhone(
   admin: SupabaseClient,
   phoneE164: string,

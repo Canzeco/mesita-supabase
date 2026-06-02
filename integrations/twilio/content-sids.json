@@ -1,0 +1,7 @@
+{
+  "staff-invite": {
+    "content_sid": "",
+    "whatsapp_approval": "",
+    "notes": "Run ./scripts/twilio-apply-templates.sh — then set TWILIO_CONTENT_SID_STAFF_INVITE in Supabase secrets"
+  }
+}

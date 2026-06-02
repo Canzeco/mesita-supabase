@@ -14,7 +14,7 @@ Categories to add for MVP:
 |---|---|
 | `reservation-confirmed` | Consumer booking confirmation |
 | `reservation-reminder` | Day-of reminder |
-| `staff-invite` | Waiter / PR invite link |
+| `staff-invite` | Waiter invite — `whatsapp/flows` + Meta Flow `staff-invite-accept` |
 | `story-confirmation` | Story validated — notify waiter |
 | `billing-form` | Bill entry link for waiter |
 

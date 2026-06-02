@@ -20,7 +20,9 @@ import {
   resolveStaffAccess,
 } from "../_shared/staff-whatsapp-flow.ts";
 import {
+  isWhatsAppFlowSubmission,
   promptPendingStaffInviteOnWhatsApp,
+  tryAcceptStaffInviteFromFlow,
   tryAcceptStaffInviteOnWhatsApp,
 } from "../_shared/staff-invite-whatsapp.ts";
 import { replyUnauthorizedStaff } from "../_shared/staff-whatsapp-replies.ts";
@@ -63,26 +65,16 @@ Deno.serve(async (req) => {
   const body = (params.Body ?? "").trim();
   const fromPhone = phoneFromWhatsAppAddress(params.From ?? "");
   const toLine = params.To ?? "";
+  const flowSubmission = isWhatsAppFlowSubmission(params);
 
   console.info("[twilio-whatsapp-inbound]", {
     messageSid: params.MessageSid,
     from: fromPhone,
     to: toLine,
     body: body.slice(0, 200),
+    flowSubmission,
+    messageType: params.MessageType,
   });
-
-  if (!body) {
-    if (isStaffLine(toLine, twilio.env.whatsappFromStaff)) {
-      await sendWhatsAppText({
-        env: twilio.env,
-        from: twilio.env.whatsappFromStaff,
-        to: fromPhone,
-        body:
-          "Mesita Ops here — send a guest code (0000-0000), pick your unit, or type HELP.",
-      }).catch(() => {});
-    }
-    return emptyMessagingTwiml();
-  }
 
   const envRes = readEFEnv();
   if (!envRes.ok) {
@@ -93,6 +85,27 @@ Deno.serve(async (req) => {
 
   try {
     if (isStaffLine(toLine, twilio.env.whatsappFromStaff)) {
+      if (flowSubmission) {
+        const fromFlow = await tryAcceptStaffInviteFromFlow({
+          admin,
+          twilio: twilio.env,
+          fromPhone,
+          params,
+        });
+        if (fromFlow.handled) return emptyMessagingTwiml();
+      }
+
+      if (!body && !flowSubmission) {
+        await sendWhatsAppText({
+          env: twilio.env,
+          from: twilio.env.whatsappFromStaff,
+          to: fromPhone,
+          body:
+            "Mesita Ops here — send a guest code (0000-0000), pick your unit, or type HELP.",
+        }).catch(() => {});
+        return emptyMessagingTwiml();
+      }
+
       const accepted = await tryAcceptStaffInviteOnWhatsApp({
         admin,
         twilio: twilio.env,

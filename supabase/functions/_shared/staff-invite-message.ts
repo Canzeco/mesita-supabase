@@ -1,13 +1,11 @@
-/** One-shot WhatsApp body for waiter / staff invite (session message, no links). */
+/** Session fallback when Content template (whatsapp/flows) is not configured. */
 
 export function buildStaffInviteWhatsAppBody(opts: { venueName: string }): string {
   const { venueName } = opts;
   return (
     `Mesita · equipo\n\n` +
-    `${venueName} te invita como mesero/a (staff).\n\n` +
-    `Para unirte, responde aquí mismo:\n` +
-    `SI\n\n` +
-    `(mismo número de WhatsApp — sin links ni app)\n\n` +
-    `Después podrás validar tickets desde este chat.`
+    `${venueName} te invita como mesero/a.\n\n` +
+    `Si recibes el botón «Unirme», úsalo. Si no, responde SI aquí.\n\n` +
+    `Todo en este chat — sin links.`
   );
 }
