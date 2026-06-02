@@ -1,4 +1,4 @@
-// Staff invite accept — WhatsApp Flow submission (template) or SI reply (fallback).
+// Staff invite accept — natural-language sí/yes, or Flow submit when we add flows later.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import {
@@ -10,7 +10,8 @@ import {
   phonesMatch,
   redeemStaffInvite,
 } from "./staff-invite-redeem.ts";
-import { sendWhatsAppText, type TwilioEnv } from "./twilio.ts";
+import { sendStaffWhatsAppReply } from "./staff-whatsapp-messages.ts";
+import type { TwilioEnv } from "./twilio.ts";
 
 /** Parse flow_token from Twilio InteractiveData / FlowData. */
 export function extractStaffInviteFlowToken(
@@ -51,24 +52,23 @@ async function completeStaffInviteAccept(opts: {
   if (!invite) return { handled: false };
 
   if (invite.phone && !phonesMatch(invite.phone, fromPhone)) {
-    await sendWhatsAppText({
-      env: twilio,
-      from: twilio.whatsappFromStaff,
-      to: fromPhone,
-      body:
-        "Ese invite está ligado a otro número. Pídele a tu manager que reenvíe el invite a este WhatsApp.",
-    });
+    await sendStaffWhatsAppReply(
+      admin,
+      twilio,
+      fromPhone,
+      "Esa invitación es para otro número. Pídele a tu manager que te la reenvíe a este WhatsApp.",
+    );
     return { handled: true };
   }
 
   const userRes = await ensureAuthUserForStaffPhone(admin, fromPhone);
   if (!userRes.ok) {
-    await sendWhatsAppText({
-      env: twilio,
-      from: twilio.whatsappFromStaff,
-      to: fromPhone,
-      body: "No pude activar tu cuenta. Intenta de nuevo en un momento o avisa a tu manager.",
-    });
+    await sendStaffWhatsAppReply(
+      admin,
+      twilio,
+      fromPhone,
+      "No pude activar tu cuenta. Intenta de nuevo en un momento o avisa a tu manager.",
+    );
     return { handled: true };
   }
 
@@ -79,25 +79,20 @@ async function completeStaffInviteAccept(opts: {
   if (!redeemed.ok) {
     const msg =
       redeemed.code === "claimed"
-        ? "Ese invite ya fue aceptado."
+        ? "Esa invitación ya se usó."
         : redeemed.code === "expired"
-        ? "Ese invite ya expiró. Pide uno nuevo a tu manager."
+        ? "Esa invitación ya venció. Pide una nueva a tu manager."
         : "No pude completar el alta. Intenta de nuevo.";
-    await sendWhatsAppText({
-      env: twilio,
-      from: twilio.whatsappFromStaff,
-      to: fromPhone,
-      body: msg,
-    });
+    await sendStaffWhatsAppReply(admin, twilio, fromPhone, msg);
     return { handled: true };
   }
 
-  await sendWhatsAppText({
-    env: twilio,
-    from: twilio.whatsappFromStaff,
-    to: fromPhone,
-    body: buildStaffInviteAcceptedReply(redeemed.venueName),
-  });
+  await sendStaffWhatsAppReply(
+    admin,
+    twilio,
+    fromPhone,
+    buildStaffInviteAcceptedReply(redeemed.venueName),
+  );
   return { handled: true };
 }
 
@@ -115,12 +110,12 @@ export async function tryAcceptStaffInviteFromFlow(opts: {
 
   if (!invite) {
     if (token) {
-      await sendWhatsAppText({
-        env: opts.twilio,
-        from: opts.twilio.whatsappFromStaff,
-        to: opts.fromPhone,
-        body: "No hay invitación activa. Pide a tu manager que te reenvíe el invite.",
-      });
+      await sendStaffWhatsAppReply(
+        opts.admin,
+        opts.twilio,
+        opts.fromPhone,
+        "No veo una invitación activa para este número. Pide a tu manager que te vuelva a invitar.",
+      );
       return { handled: true };
     }
     return { handled: false };
@@ -145,12 +140,12 @@ export async function promptPendingStaffInviteOnWhatsApp(opts: {
   const invite = await findPendingStaffInviteForPhone(admin, fromPhone);
   if (!invite) return { handled: false };
 
-  await sendWhatsAppText({
-    env: twilio,
-    from: twilio.whatsappFromStaff,
-    to: fromPhone,
-    body: `${invite.venue_name} te invitó. Toca «Unirme» en el mensaje de arriba.`,
-  });
+  await sendStaffWhatsAppReply(
+    admin,
+    twilio,
+    fromPhone,
+    `${invite.venue_name} te invitó al equipo. Si quieres unirte, responde sí (o escribe sí quiero).`,
+  );
   return { handled: true };
 }
 

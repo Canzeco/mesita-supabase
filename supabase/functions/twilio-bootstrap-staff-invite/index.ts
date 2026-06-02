@@ -1,4 +1,4 @@
-// One-shot (admin): create staff-invite twilio/flows Content template (prod Twilio secrets).
+// One-shot (admin): create staff-invite twilio/text Content template (prod Twilio secrets).
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json } from "../_shared/http.ts";
@@ -6,31 +6,13 @@ import { readTwilioEnv } from "../_shared/twilio.ts";
 
 const CONTENT_API = "https://content.twilio.com/v1/Content";
 
-const FLOW_TEMPLATE = {
+const TEXT_TEMPLATE = {
   friendly_name: "staff-invite",
   language: "es",
   types: {
-    "twilio/flows": {
-      body: "{{1}} te invita a Mesita Ops.",
-      button_text: "Unirme",
-      type: "SIGN_UP",
-      pages: [
-        {
-          id: "join_team",
-          next_page_id: null,
-          title: "Unirte al equipo",
-          layout: [
-            {
-              type: "TEXT_BODY",
-              text: "Confirma para unirte como mesero/a. Todo pasa en este chat.",
-            },
-            {
-              type: "FOOTER",
-              label: "Confirmar",
-            },
-          ],
-        },
-      ],
+    "twilio/text": {
+      body:
+        "Hola — {{1}} te invita a usar Mesita Ops por WhatsApp para tickets con descuento.\n\nSi quieres unirte al equipo, responde sí a este mensaje.",
     },
   },
 };
@@ -52,7 +34,7 @@ Deno.serve(async (req) => {
       Authorization: `Basic ${auth}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(FLOW_TEMPLATE),
+    body: JSON.stringify(TEXT_TEMPLATE),
   });
   const created = await createRes.json().catch(() => ({}));
   if (!createRes.ok) {
@@ -83,8 +65,8 @@ Deno.serve(async (req) => {
   return json({
     ok: true,
     contentSid: sid,
-    templateType: "twilio/flows",
+    templateType: "twilio/text",
     whatsappApproval: (approval as { status?: string }).status ?? "submitted",
-    note: "Meta publishes the Flow when WhatsApp approves this template.",
+    note: "Natural-language invite; waiter replies sí. Add twilio/flows later if needed.",
   });
 });

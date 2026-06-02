@@ -1,4 +1,4 @@
-// Human-friendly Staff Ops WhatsApp copy + optional LLM polish.
+// Natural-language Staff Ops WhatsApp copy + optional LLM polish.
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const MODEL = "gpt-4o-mini";
@@ -10,38 +10,38 @@ export type StaffCoachContext = {
   venueName: string | null;
   multiVenue: boolean;
   userMessage: string;
-  /** Short hint for the model, e.g. invalid_venue_pick */
   situation?: string;
+  conversationHistory?: string;
 };
 
 const UNAUTH_STATIC: Record<StaffAccessDeniedReason, string> = {
   unknown_phone:
-    "Mesita Ops es solo para staff del restaurante.\n\n" +
-    "Pide a tu manager que te invite con este número y responde SI al mensaje.",
+    "Mesita Ops es solo para el equipo del restaurante.\n\n" +
+    "Pide a tu manager que te invite con este número y, cuando llegue el mensaje, responde sí.",
   not_on_team:
-    "Este número no está en ningún equipo.\n\n" +
-    "Pide la invitación a tu manager y responde SI aquí.",
+    "Este número no está en ningún equipo todavía.\n\n" +
+    "Pide la invitación a tu manager y responde sí cuando te escribamos.",
 };
 
 const COACH_STATIC: Record<string, (ctx: StaffCoachContext) => string> = {
   selecting_venue: (ctx) =>
     ctx.multiVenue
-      ? "Pick your unit first — reply with the number from the list (1, 2, …) or the venue name. Type HELP to see the list again."
-      : "Pick your unit first, then send the guest's 8-digit code.",
+      ? "Primero dime en qué unidad trabajas hoy: responde con el número de la lista (1, 2, …) o el nombre del lugar. Escribe ayuda para ver la lista otra vez."
+      : "Primero elige tu unidad y luego manda el código del comensal (0000-0000).",
   idle: (ctx) =>
-    (ctx.venueName ? `Unit: ${ctx.venueName}\n` : "") +
-    "I'm not sure what you mean. Send the guest's Mesita code (0000-0000), or type HELP for steps.",
+    (ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "") +
+    "No entendí. Manda el código Mesita del comensal (0000-0000) o escribe ayuda.",
   consumer_identified: (ctx) =>
-    (ctx.venueName ? `Unit: ${ctx.venueName}\n` : "") +
-    "Guest is loaded — send the bill like:\nSUBTOTAL 850 TIP 100\n(or two numbers: 850 100, in pesos).",
+    (ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "") +
+    "Listo con el comensal — manda la cuenta, por ejemplo:\nSUBTOTAL 850 PROPINA 100\n(o dos números: 850 100, en pesos).",
   awaiting_staff_payment_confirm: (ctx) =>
-    (ctx.venueName ? `Unit: ${ctx.venueName}\n` : "") +
-    "Waiting on payment. When the guest confirms in the app and you've collected money, reply CONFIRM or YES.",
+    (ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "") +
+    "Esperando el pago. Cuando el comensal confirme en la app y cobres, responde listo o sí.",
   awaiting_payment_confirm: (ctx) =>
-    (ctx.venueName ? `Unit: ${ctx.venueName}\n` : "") +
-    "Waiting on payment. When the guest confirms in the app and you've collected money, reply CONFIRM or YES.",
+    (ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "") +
+    "Esperando el pago. Cuando el comensal confirme en la app y cobres, responde listo o sí.",
   invalid_venue_pick: () =>
-    "That number isn't on your list. Reply with a valid option (1, 2, …) or type the venue name. HELP shows the list.",
+    "Ese número no está en tu lista. Responde con una opción válida (1, 2, …) o el nombre del lugar. Escribe ayuda para ver la lista.",
   default: (ctx) => staticCoachReply(ctx),
 };
 
@@ -59,39 +59,44 @@ export function staticCoachReply(ctx: StaffCoachContext): string {
   return fn(ctx);
 }
 
-/** Witty but professional reply when the sender isn't authorized staff. */
 export async function replyUnauthorizedStaff(
   reason: StaffAccessDeniedReason,
   userMessage: string,
+  conversationHistory = "",
 ): Promise<string> {
   const base = staticUnauthReply(reason);
+  const historyBlock = conversationHistory.trim()
+    ? `Conversación reciente:\n${conversationHistory.trim()}\n\n`
+    : "";
   return polishWithLlm({
     system:
-      "You are Mesita Ops on WhatsApp. The sender is NOT authorized staff. " +
-      "Rewrite the BASE message: keep it under 400 chars, friendly and direct, light humor OK, " +
-      "never insulting or calling them names. Match Spanish if they wrote in Spanish. " +
-      "Do not invent steps they already have in BASE.",
-    user: `BASE:\n${base}\n\nThey wrote:\n${userMessage.slice(0, 500)}`,
+      "Eres Mesita Ops por WhatsApp. La persona NO es staff autorizado. " +
+      "Reescribe el mensaje BASE: menos de 400 caracteres, cercano y claro, humor ligero ok, " +
+      "sin insultos. Español de México si escribieron en español. No inventes pasos que no estén en BASE.",
+    user:
+      `${historyBlock}BASE:\n${base}\n\nÚltimo mensaje:\n${userMessage.slice(0, 500)}`,
     fallback: base,
   });
 }
 
-/** Guide authenticated staff when we didn't understand the message. */
 export async function replyStaffCoach(ctx: StaffCoachContext): Promise<string> {
   const base = staticCoachReply(ctx);
+  const historyBlock = ctx.conversationHistory?.trim()
+    ? `Conversación reciente:\n${ctx.conversationHistory.trim()}\n\n`
+    : "";
   return polishWithLlm({
     system:
-      "You are Mesita Ops, WhatsApp assistant for waitstaff running discount tickets (Type A). " +
-      "The message was unclear or off-topic. Write ONE short reply (under 400 chars): friendly, direct, " +
-      "no insults. Tell them exactly what to send next based on SESSION. Match their language (ES/EN). " +
-      "Never make up guest codes or amounts.",
+      "Eres Mesita Ops, asistente por WhatsApp para meseros con tickets con descuento (tipo A). " +
+      "El mensaje no quedó claro. Una respuesta corta (menos de 400 caracteres): amable, directa. " +
+      "Di qué deben mandar según SESSION y la conversación. Español de México si aplica. " +
+      "No inventes códigos ni montos.",
     user:
-      `SESSION: ${ctx.sessionState}\n` +
-      `UNIT: ${ctx.venueName ?? "(not selected yet)"}\n` +
-      `MULTI_UNIT: ${ctx.multiVenue}\n` +
-      `SITUATION: ${ctx.situation ?? "unclear"}\n` +
-      `HINT (follow this):\n${base}\n\n` +
-      `Staff wrote:\n${ctx.userMessage.slice(0, 800)}`,
+      `${historyBlock}SESSION: ${ctx.sessionState}\n` +
+      `UNIDAD: ${ctx.venueName ?? "(aún no eligió)"}\n` +
+      `VARIAS_UNIDADES: ${ctx.multiVenue}\n` +
+      `SITUACIÓN: ${ctx.situation ?? "poco claro"}\n` +
+      `PISTA (síguela):\n${base}\n\n` +
+      `Último mensaje del mesero:\n${ctx.userMessage.slice(0, 800)}`,
     fallback: base,
   });
 }

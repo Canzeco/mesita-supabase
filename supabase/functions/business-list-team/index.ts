@@ -22,6 +22,7 @@ import {
   readEFEnv,
   requireMembership,
 } from "../_shared/auth.ts";
+import { phoneDigits } from "../_shared/phone.ts";
 
 type Body = { venueId?: string };
 
@@ -108,14 +109,16 @@ Deno.serve(async (req) => {
     expiresAt: r.expires_at,
   }));
 
-  const pendingWaiterInvites = (pendingWaiterRows.data ?? []).map((r) => ({
-    id: r.id,
-    phone: r.phone,
-    channel: r.channel ?? "whatsapp",
-    token: r.token,
-    createdAt: r.created_at,
-    expiresAt: r.expires_at,
-  }));
+  const pendingWaiterInvites = dedupePendingWaiterInvites(
+    (pendingWaiterRows.data ?? []).map((r) => ({
+      id: r.id,
+      phone: r.phone,
+      channel: r.channel ?? "whatsapp",
+      token: r.token,
+      createdAt: r.created_at,
+      expiresAt: r.expires_at,
+    })),
+  );
 
   // `myRole` lets the client gate UI without re-deriving from the
   // businesses list (super-admins aren't always in venue_members).
@@ -140,6 +143,30 @@ Deno.serve(async (req) => {
 // auth user — running them in parallel keeps the latency flat.
 
 type RoleRow = { user_id: string; role: string; created_at: string };
+
+type PendingWaiterRow = {
+  id: string;
+  phone: string | null;
+  channel: string;
+  token: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+/** Safety net if legacy duplicate rows exist before migration is applied. */
+function dedupePendingWaiterInvites(rows: PendingWaiterRow[]): PendingWaiterRow[] {
+  const byKey = new Map<string, PendingWaiterRow>();
+  for (const row of rows) {
+    const key = row.phone ? phoneDigits(row.phone) : row.id;
+    const prev = byKey.get(key);
+    if (!prev || row.createdAt > prev.createdAt) {
+      byKey.set(key, row);
+    }
+  }
+  return Array.from(byKey.values()).sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt)
+  );
+}
 
 async function loadWaitersWithPhones(
   admin: SupabaseClient,

@@ -1,10 +1,12 @@
-// Outbound waiter invite — Twilio Content template (whatsapp/flows) with session fallback.
+// Outbound waiter invite — approved twilio/text template, else session (same copy).
 
+import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import {
   readStaffInviteContentSid,
   sendWhatsAppContent,
 } from "./twilio-content.ts";
 import { buildStaffInviteWhatsAppBody } from "./staff-invite-message.ts";
+import { appendStaffWhatsAppMessage } from "./staff-whatsapp-messages.ts";
 import {
   normaliseWhatsAppFrom,
   normaliseWhatsAppTo,
@@ -13,6 +15,7 @@ import {
 } from "./twilio.ts";
 
 export async function sendStaffInviteWhatsApp(opts: {
+  admin?: SupabaseClient;
   env: TwilioEnv;
   toPhoneE164: string;
   venueName: string;
@@ -21,9 +24,10 @@ export async function sendStaffInviteWhatsApp(opts: {
   | { ok: true; sid: string; mode: "template" | "session" }
   | { ok: false; error: string; mode: "none" }
 > {
-  const { env, toPhoneE164, venueName, inviteToken } = opts;
+  const { admin, env, toPhoneE164, venueName } = opts;
   const from = env.whatsappFromStaff;
   const to = normaliseWhatsAppTo(toPhoneE164);
+  const body = buildStaffInviteWhatsAppBody({ venueName });
 
   const contentSid = readStaffInviteContentSid();
   if (contentSid) {
@@ -34,11 +38,19 @@ export async function sendStaffInviteWhatsApp(opts: {
       contentSid,
       contentVariables: {
         "1": venueName.slice(0, 200),
-        // whatsapp/flows templates use {{2}} as flow_token; twilio/flows ignores it
-        "2": inviteToken.slice(0, 128),
       },
     });
-    if (tpl.ok) return { ok: true, sid: tpl.sid, mode: "template" };
+    if (tpl.ok) {
+      if (admin) {
+        await appendStaffWhatsAppMessage(admin, {
+          phoneE164: toPhoneE164,
+          direction: "outbound",
+          body,
+          twilioMessageSid: tpl.sid,
+        });
+      }
+      return { ok: true, sid: tpl.sid, mode: "template" };
+    }
     console.warn("[staff-invite-send] template failed, fallback session", tpl.error);
   }
 
@@ -46,8 +58,18 @@ export async function sendStaffInviteWhatsApp(opts: {
     env,
     from,
     to: toPhoneE164,
-    body: buildStaffInviteWhatsAppBody({ venueName }),
+    body,
   });
-  if (session.ok) return { ok: true, sid: session.sid, mode: "session" };
+  if (session.ok) {
+    if (admin) {
+      await appendStaffWhatsAppMessage(admin, {
+        phoneE164: toPhoneE164,
+        direction: "outbound",
+        body,
+        twilioMessageSid: session.sid,
+      });
+    }
+    return { ok: true, sid: session.sid, mode: "session" };
+  }
   return { ok: false, error: session.error, mode: "none" };
 }

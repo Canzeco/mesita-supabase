@@ -35,6 +35,7 @@ const EMPTY_INTENT: StaffMessageIntent = {
 export async function parseStaffWhatsAppMessage(
   body: string,
   sessionState: string,
+  conversationHistory = "",
 ): Promise<StaffMessageIntent> {
   const heuristic = heuristicParse(body, sessionState);
   const openaiKey = Deno.env.get("OPENAI_KEY")?.trim();
@@ -47,11 +48,16 @@ export async function parseStaffWhatsAppMessage(
     "select_venue: staff picking unit 1/2/3 from a list (venue_index 0-based). " +
     "Consumer codes are 8 digits formatted 0000-0000. " +
     "submit_bill: extract bill subtotal and tip in cents (e.g. $850.50 → 85050). " +
-    "confirm_payment: staff confirming guest paid (yes/sí/confirm/pagado). " +
-    "lookup_code: staff sending or asking about a guest code.";
+    "confirm_payment: staff confirming guest paid (yes/sí/confirm/pagado/listo). " +
+    "lookup_code: staff sending or asking about a guest code. " +
+    "Use RECENT CONVERSATION for context when the latest message is short or continues a prior turn.";
+
+  const historyBlock = conversationHistory.trim()
+    ? `Recent conversation (oldest first):\n${conversationHistory.trim()}\n\n`
+    : "";
 
   const user =
-    `Session state: ${sessionState}\nMessage:\n${body.slice(0, 2000)}`;
+    `${historyBlock}Session state: ${sessionState}\nLatest message:\n${body.slice(0, 2000)}`;
 
   try {
     const r = await fetch(OPENAI_URL, {
@@ -170,7 +176,9 @@ function heuristicParse(body: string, sessionState: string): StaffMessageIntent 
     sessionState === "awaiting_staff_payment_confirm" ||
     sessionState === "awaiting_payment_confirm"
   ) {
-    if (/^(yes|y|si|sí|confirm|confirmed|pagado|paid|listo|ok)\b/i.test(lower)) {
+    if (/^(yes|y|si|sí|confirm|confirmed|pagado|paid|listo|ok|cobrado|cobra)\b/i.test(
+      lower,
+    )) {
       return { ...EMPTY_INTENT, intent: "confirm_payment", confirm: true };
     }
   }

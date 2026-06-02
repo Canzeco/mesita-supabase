@@ -1,6 +1,7 @@
 // Redeem staff_invites — shared by staff-accept-invite (web) and Ops WhatsApp.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { phoneDigits, phonesMatch } from "./phone.ts";
 
 export type PendingStaffInvite = {
   id: string;
@@ -11,18 +12,6 @@ export type PendingStaffInvite = {
   created_by: string;
   venue_name: string;
 };
-
-export function phoneDigits(e164: string): string {
-  return e164.replace(/\D/g, "");
-}
-
-export function phonesMatch(a: string, b: string): boolean {
-  const da = phoneDigits(a);
-  const db = phoneDigits(b);
-  if (!da || !db) return false;
-  if (da === db) return true;
-  return da.slice(-10) === db.slice(-10);
-}
 
 /** Guest/staff accept keywords (no links). */
 export function isStaffInviteAcceptMessage(body: string): boolean {
@@ -41,10 +30,13 @@ export function isStaffInviteAcceptMessage(body: string): boolean {
     "ok",
     "vale",
     "listo",
-    "join",
-    "unirme",
+    "dale",
+    "va",
+    "claro",
     "entro",
+    "quiero",
   ]);
+  if (/^(si|sí)\s*(quiero|acepto|gracias)?\b/.test(t)) return true;
   if (words.size <= 3) {
     for (const w of words) {
       if (accept.has(w)) return true;
@@ -202,8 +194,9 @@ export async function redeemStaffInvite(
 
 export function buildStaffInviteAcceptedReply(venueName: string): string {
   return (
-    `Listo — ya estás en ${venueName}.\n\n` +
-    `Envía el código del comensal (0000-0000), luego SUBTOTAL y PROPINA.\n` +
-    `Cuando paguen: CONFIRM. HELP si necesitas ayuda.`
+    `Perfecto — ya quedaste en ${venueName}.\n\n` +
+    `Cuando tengas un comensal, manda su código Mesita (0000-0000) y después la cuenta ` +
+    `(por ejemplo SUBTOTAL 850 PROPINA 100). Cuando cobres, responde listo.\n\n` +
+    `Escribe ayuda cuando quieras un recordatorio.`
   );
 }

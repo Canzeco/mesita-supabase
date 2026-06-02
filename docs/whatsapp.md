@@ -30,47 +30,49 @@ supabase secrets set \
   TWILIO_ACCOUNT_SID=AC... \
   TWILIO_AUTH_TOKEN=... \
   TWILIO_WHATSAPP_FROM_STAFF='whatsapp:+16282968794' \
-  TWILIO_WHATSAPP_FROM_CONSUMERS='whatsapp:+16282964968'
+  TWILIO_WHATSAPP_FROM_CONSUMERS='whatsapp:+16282964968' \
+  TWILIO_CONTENT_SID_STAFF_INVITE=HX...
 ```
 
 Local scripts: `.env.twilio.local` (see `.env.twilio.local.example`).
 
-## Templates & Flows (waiter invite)
+## Waiter invite — natural language (default)
 
-| Asset | Path | Apply |
-|---|---|---|
-| In-chat Flow (`twilio/flows` — no Meta token) | `integrations/twilio/templates/staff-invite.json` | `./scripts/twilio-apply-templates.sh` |
-| Optional Meta-native flow | `integrations/twilio/flows/staff-invite-accept.flow.json` | `./scripts/twilio-apply-flows.sh` (needs `META_WHATSAPP_ACCESS_TOKEN`) |
-| Content SIDs (generated) | `integrations/twilio/content-sids.json` | written by apply script |
-| Flow IDs (generated) | `integrations/twilio/flows/registry.json` | written by apply script |
+| Asset | Path |
+|---|---|
+| Content template (`twilio/text`) | `integrations/twilio/templates/staff-invite.json` |
+| Session + template body | `supabase/functions/_shared/staff-invite-message.ts` |
 
-**Order:** `./scripts/twilio-setup-staff-invite.sh` (templates + secret + deploy).
+**Setup:**
 
-Uses **`twilio/flows`**: Twilio creates the Flow and Meta publishes it when the template is approved — only `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` required.
+```bash
+./scripts/twilio-setup-staff-invite.sh
+```
 
-Optional `twilio-apply-flows.sh` only if you prefer Meta-built `whatsapp/flows` + `META_WHATSAPP_ACCESS_TOKEN`.
+Flow:
 
-Waiter taps **Unirme** → in-chat form → **Confirmar**. Fallback: reply **SI** (session text).
+1. Manager **Add waiter** → WhatsApp con texto natural (“responde sí…”).
+2. Waiter responde **sí** (o sí quiero, listo, vale, etc.).
+3. `twilio-whatsapp-inbound` los da de alta en el equipo.
 
-Other templates: `integrations/twilio/templates/`. **Do not** create only in Console — definitions live in repo.
+No mencionar botones ni flows en copy hasta que exista un Flow aprobado. Más adelante se puede añadir [WhatsApp Flows](https://developers.facebook.com/documentation/business-messaging/whatsapp/flows) solo para el paso final de confirmación.
+
+Approve `staff-invite` in [Twilio Console → Content](https://console.twilio.com/us1/develop/sms/content-template-builder) if outbound template is pending.
+
+## Billing
+
+WhatsApp message fees go through **Twilio** (Twilio fee + Meta pass-through on the same invoice). No separate Meta invoice for traffic via Twilio.
 
 ## Meta (manual)
 
 - [Business Verification](https://business.facebook.com/latest/settings/security_center?business_id=1180640363250622)
 - OBA (green ✓): optional, WhatsApp Manager per number
 
-## Voice OTP tip
-
-For Twilio-owned numbers, use **phone call** verification in Meta signup; SMS OTP lands in Twilio Messaging Logs.
-
 ## Staff WhatsApp — one active unit per phone
 
-Business rules:
-
 - Only **team staff** (`venue_roles.role = staff`) can use Mesita Ops for Type A tickets.
-- One auth account may belong to **many units**; one unit may have **many staff**.
-- **One WhatsApp number → one active venue at a time.** Tickets and discounts always apply to that unit.
+- **One WhatsApp number → one active venue at a time.** Escribe **cambiar unidad** para cambiar.
 
-If a waiter works at two partner venues, their first message (or `SWITCH`) shows a numbered list; they reply `1`, `2`, or the venue name. Guest codes and bills are blocked until a unit is selected. `SWITCH` only works when no guest session is open (`idle`); use `CANCEL` first if needed.
+Session state: `staff_whatsapp_sessions`.
 
-Session state is stored in `staff_whatsapp_sessions` (`venue_id` + `state`, including `selecting_venue`).
+Transcript (last 20 messages per phone) for LLM context: `staff_whatsapp_messages` (service-role only, no Realtime).

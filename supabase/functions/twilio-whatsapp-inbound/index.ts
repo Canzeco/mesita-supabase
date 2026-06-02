@@ -26,6 +26,11 @@ import {
   tryAcceptStaffInviteOnWhatsApp,
 } from "../_shared/staff-invite-whatsapp.ts";
 import { replyUnauthorizedStaff } from "../_shared/staff-whatsapp-replies.ts";
+import {
+  appendStaffWhatsAppMessage,
+  loadStaffWhatsAppHistoryText,
+  sendStaffWhatsAppReply,
+} from "../_shared/staff-whatsapp-messages.ts";
 
 function phoneFromWhatsAppAddress(addr: string): string {
   const raw = addr.replace(/^whatsapp:/i, "").trim();
@@ -66,6 +71,7 @@ Deno.serve(async (req) => {
   const fromPhone = phoneFromWhatsAppAddress(params.From ?? "");
   const toLine = params.To ?? "";
   const flowSubmission = isWhatsAppFlowSubmission(params);
+  const staffLine = isStaffLine(toLine, twilio.env.whatsappFromStaff);
 
   console.info("[twilio-whatsapp-inbound]", {
     messageSid: params.MessageSid,
@@ -83,8 +89,34 @@ Deno.serve(async (req) => {
   }
   const admin = adminClient(envRes.env);
 
+  let conversationHistory = "";
+
   try {
-    if (isStaffLine(toLine, twilio.env.whatsappFromStaff)) {
+    if (staffLine) {
+      if (body) {
+        conversationHistory = await loadStaffWhatsAppHistoryText(
+          admin,
+          fromPhone,
+        );
+        await appendStaffWhatsAppMessage(admin, {
+          phoneE164: fromPhone,
+          direction: "inbound",
+          body,
+          twilioMessageSid: params.MessageSid,
+        });
+      } else if (flowSubmission) {
+        conversationHistory = await loadStaffWhatsAppHistoryText(
+          admin,
+          fromPhone,
+        );
+        await appendStaffWhatsAppMessage(admin, {
+          phoneE164: fromPhone,
+          direction: "inbound",
+          body: "[formulario WhatsApp]",
+          twilioMessageSid: params.MessageSid,
+        });
+      }
+
       if (flowSubmission) {
         const fromFlow = await tryAcceptStaffInviteFromFlow({
           admin,
@@ -96,13 +128,12 @@ Deno.serve(async (req) => {
       }
 
       if (!body && !flowSubmission) {
-        await sendWhatsAppText({
-          env: twilio.env,
-          from: twilio.env.whatsappFromStaff,
-          to: fromPhone,
-          body:
-            "Mesita Ops here — send a guest code (0000-0000), pick your unit, or type HELP.",
-        }).catch(() => {});
+        await sendStaffWhatsAppReply(
+          admin,
+          twilio.env,
+          fromPhone,
+          "Hola, soy Mesita Ops. Manda el código del comensal (0000-0000), elige tu unidad o escribe ayuda.",
+        ).catch(() => {});
         return emptyMessagingTwiml();
       }
 
@@ -125,13 +156,17 @@ Deno.serve(async (req) => {
           body,
         });
         if (!prompted.handled) {
-          const msg = await replyUnauthorizedStaff(access.status, body);
-          await sendWhatsAppText({
-            env: twilio.env,
-            from: twilio.env.whatsappFromStaff,
-            to: fromPhone,
-            body: msg,
-          });
+          const msg = await replyUnauthorizedStaff(
+            access.status,
+            body,
+            conversationHistory,
+          );
+          await sendStaffWhatsAppReply(
+            admin,
+            twilio.env,
+            fromPhone,
+            msg,
+          );
         }
       } else {
         await handleStaffInboundMessage({
@@ -139,6 +174,7 @@ Deno.serve(async (req) => {
           twilio: twilio.env,
           identity: access.identity,
           body,
+          conversationHistory,
         });
       }
     } else {
@@ -152,13 +188,13 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     console.error("[twilio-whatsapp-inbound] handler error", err);
-    if (isStaffLine(toLine, twilio.env.whatsappFromStaff)) {
-      await sendWhatsAppText({
-        env: twilio.env,
-        from: twilio.env.whatsappFromStaff,
-        to: fromPhone,
-        body: "Something went wrong on our side. Please try again in a moment.",
-      }).catch(() => {});
+    if (staffLine) {
+      await sendStaffWhatsAppReply(
+        admin,
+        twilio.env,
+        fromPhone,
+        "Algo falló de nuestro lado. Intenta de nuevo en un momento.",
+      ).catch(() => {});
     }
   }
 

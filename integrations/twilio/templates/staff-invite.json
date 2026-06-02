@@ -6,27 +6,8 @@
     "1": "Venue name"
   },
   "types": {
-    "twilio/flows": {
-      "body": "{{1}} te invita a Mesita Ops.",
-      "button_text": "Unirme",
-      "type": "SIGN_UP",
-      "pages": [
-        {
-          "id": "join_team",
-          "next_page_id": null,
-          "title": "Unirte al equipo",
-          "layout": [
-            {
-              "type": "TEXT_BODY",
-              "text": "Confirma para unirte como mesero/a. Todo pasa en este chat."
-            },
-            {
-              "type": "FOOTER",
-              "label": "Confirmar"
-            }
-          ]
-        }
-      ]
+    "twilio/text": {
+      "body": "Hola — {{1}} te invita a usar Mesita Ops por WhatsApp para tickets con descuento.\n\nSi quieres unirte al equipo, responde sí a este mensaje."
     }
   }
 }

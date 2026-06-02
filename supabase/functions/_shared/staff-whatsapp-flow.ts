@@ -14,6 +14,7 @@ import {
   type ConsumerRow,
   type VenueRateRow,
 } from "./ticket-informal.ts";
+import { sendStaffWhatsAppReply } from "./staff-whatsapp-messages.ts";
 import { sendWhatsAppText, type TwilioEnv } from "./twilio.ts";
 
 export type StaffVenue = {
@@ -51,8 +52,9 @@ export async function handleStaffInboundMessage(opts: {
   twilio: TwilioEnv;
   identity: StaffIdentity;
   body: string;
+  conversationHistory?: string;
 }): Promise<void> {
-  const { admin, twilio, identity, body } = opts;
+  const { admin, twilio, identity, body, conversationHistory = "" } = opts;
   const venues = identity.venues;
 
   let session = await loadSession(admin, identity.phoneE164);
@@ -60,36 +62,42 @@ export async function handleStaffInboundMessage(opts: {
   if (isSwitchVenueCommand(body)) {
     if (session && session.state !== "idle" && session.state !== "selecting_venue") {
       await reply(
+        admin,
         twilio,
         identity.phoneE164,
-        "Finish or CANCEL the current guest session before switching unit.",
+        "Termina o escribe cancelar la sesión del comensal antes de cambiar de unidad.",
       );
       return;
     }
     if (venues.length < 2) {
       await reply(
+        admin,
         twilio,
         identity.phoneE164,
         venues.length === 1
-          ? `You're only on the team at ${venues[0].venueName}. No switch needed.`
-          : "No venue on your staff profile.",
+          ? `Solo estás en el equipo de ${venues[0].venueName}. No hace falta cambiar.`
+          : "No tienes un restaurante asignado en tu perfil.",
       );
       return;
     }
     session = await enterVenueSelection(admin, identity, session, venues);
-    await reply(twilio, identity.phoneE164, venuePickerText(venues));
+    await reply(admin, twilio, identity.phoneE164, venuePickerText(venues));
     return;
   }
 
   const sessionState = session?.state ?? "selecting_venue";
-  const intent = await parseStaffWhatsAppMessage(body, sessionState);
+  const intent = await parseStaffWhatsAppMessage(
+    body,
+    sessionState,
+    conversationHistory,
+  );
 
   if (
     intent.intent === "help" &&
     (session?.state === "selecting_venue" || !session?.venue_id) &&
     venues.length > 1
   ) {
-    await reply(twilio, identity.phoneE164, venuePickerText(venues));
+    await reply(admin, twilio, identity.phoneE164, venuePickerText(venues));
     return;
   }
 
@@ -98,13 +106,15 @@ export async function handleStaffInboundMessage(opts: {
     if (picked) {
       session = await applyActiveVenue(admin, identity, session, picked);
       await reply(
+        admin,
         twilio,
         identity.phoneE164,
-        `Active unit: ${picked.venueName} ✓\nSend the guest's Mesita code (0000-0000).`,
+        `Unidad activa: ${picked.venueName} ✓\nManda el código Mesita del comensal (0000-0000).`,
       );
       return;
     }
     await reply(
+      admin,
       twilio,
       identity.phoneE164,
       await replyStaffCoach({
@@ -113,6 +123,7 @@ export async function handleStaffInboundMessage(opts: {
         multiVenue: venues.length > 1,
         userMessage: body,
         situation: "invalid_venue_pick",
+        conversationHistory,
       }),
     );
     return;
@@ -126,9 +137,10 @@ export async function handleStaffInboundMessage(opts: {
     const picked = venues.find((v) => v.venueId === venuePick)!;
     session = await applyActiveVenue(admin, identity, session, picked);
     await reply(
+      admin,
       twilio,
       identity.phoneE164,
-      `Active unit: ${picked.venueName} ✓\nSend the guest's Mesita code (0000-0000).`,
+      `Unidad activa: ${picked.venueName} ✓\nManda el código Mesita del comensal (0000-0000).`,
     );
     return;
   }
@@ -142,6 +154,7 @@ export async function handleStaffInboundMessage(opts: {
       intent.venue_index == null;
     if (unclear && body.trim().length > 0) {
       await reply(
+        admin,
         twilio,
         identity.phoneE164,
         await replyStaffCoach({
@@ -149,10 +162,11 @@ export async function handleStaffInboundMessage(opts: {
           venueName: null,
           multiVenue: venues.length > 1,
           userMessage: body,
+          conversationHistory,
         }),
       );
     } else {
-      await reply(twilio, identity.phoneE164, venuePickerText(venues));
+      await reply(admin, twilio, identity.phoneE164, venuePickerText(venues));
     }
     return;
   }
@@ -163,16 +177,18 @@ export async function handleStaffInboundMessage(opts: {
   if (intent.intent === "cancel") {
     await resetSession(admin, session.id, staff.venueId);
     await reply(
+      admin,
       twilio,
       staff.phoneE164,
-      `Session cleared at ${staff.venueName}.\nSend a guest code (0000-0000) when ready.\n` +
-        (venues.length > 1 ? "SWITCH to change unit." : ""),
+      `Sesión reiniciada en ${staff.venueName}.\nCuando tengas un comensal, manda su código (0000-0000).\n` +
+        (venues.length > 1 ? "Escribe cambiar unidad para moverte a otro local." : ""),
     );
     return;
   }
 
   if (intent.intent === "help") {
     await reply(
+      admin,
       twilio,
       staff.phoneE164,
       helpText(session.state, staff, venues, venues.length > 1),
@@ -218,6 +234,7 @@ export async function handleStaffInboundMessage(opts: {
     intent.check_subtotal_cents == null
   ) {
     await reply(
+      admin,
       twilio,
       staff.phoneE164,
       await replyStaffCoach({
@@ -226,6 +243,7 @@ export async function handleStaffInboundMessage(opts: {
         multiVenue: venues.length > 1,
         userMessage: body,
         situation: "consumer_identified",
+        conversationHistory,
       }),
     );
     return;
@@ -237,6 +255,7 @@ export async function handleStaffInboundMessage(opts: {
     session.state === "idle"
   ) {
     await reply(
+      admin,
       twilio,
       staff.phoneE164,
       await replyStaffCoach({
@@ -244,12 +263,14 @@ export async function handleStaffInboundMessage(opts: {
         venueName: staff.venueName,
         multiVenue: venues.length > 1,
         userMessage: body,
+        conversationHistory,
       }),
     );
     return;
   }
 
   await reply(
+    admin,
     twilio,
     staff.phoneE164,
     await replyStaffCoach({
@@ -257,12 +278,13 @@ export async function handleStaffInboundMessage(opts: {
       venueName: staff.venueName,
       multiVenue: venues.length > 1,
       userMessage: body,
+      conversationHistory,
     }),
   );
 }
 
 function prefixActiveVenue(staff: StaffContext): string {
-  return `Unit: ${staff.venueName}\n`;
+  return `Unidad: ${staff.venueName}\n`;
 }
 
 function helpText(
@@ -272,7 +294,7 @@ function helpText(
   canSwitch: boolean,
 ): string {
   const switchLine = canSwitch
-    ? "SWITCH — change active unit (only when idle).\n"
+    ? "cambiar unidad — otro local (solo sin comensal activo)\n"
     : "";
   switch (state) {
     case "selecting_venue":
@@ -280,24 +302,24 @@ function helpText(
     case "consumer_identified":
       return (
         prefixActiveVenue(staff) +
-        "Enter the bill:\n" +
-        "• SUBTOTAL 850 TIP 100\n" +
-        "• or two numbers: 850 100 (subtotal tip)\n" +
-        "Amounts in pesos. CANCEL to start over."
+        "Manda la cuenta, por ejemplo:\n" +
+        "• SUBTOTAL 850 PROPINA 100\n" +
+        "• o dos números: 850 100 (subtotal y propina)\n" +
+        "Montos en pesos. Escribe cancelar para empezar de nuevo."
       );
     case "awaiting_staff_payment_confirm":
       return prefixActiveVenue(staff) +
-        "Reply CONFIRM or YES when the guest has paid their share.";
+        "Cuando el comensal haya pagado su parte, responde listo o sí.";
     default:
       return (
         prefixActiveVenue(staff) +
-        "Mesita Staff — Type A (discount)\n" +
-        "1) Send guest code (0000-0000)\n" +
-        "2) Enter SUBTOTAL and TIP\n" +
-        "3) Guest confirms in the Mesita app\n" +
-        "4) You reply CONFIRM when paid\n" +
+        "Mesita Ops — tickets con descuento\n" +
+        "1) Código del comensal (0000-0000)\n" +
+        "2) SUBTOTAL y PROPINA\n" +
+        "3) El comensal confirma en la app Mesita\n" +
+        "4) Tú respondes listo cuando cobres\n" +
         switchLine +
-        "CANCEL resets the guest session (keeps this unit)."
+        "cancelar — reinicia la sesión del comensal (mantienes esta unidad)."
       );
   }
 }
@@ -305,16 +327,18 @@ function helpText(
 function venuePickerText(venues: StaffVenue[]): string {
   const lines = venues.map((v, i) => `${i + 1}) ${v.venueName}`);
   return (
-    "You work at multiple Mesita units.\n" +
-    "Pick where you're working now (one unit per WhatsApp number):\n\n" +
+    "Trabajas en varios locales de Mesita.\n" +
+    "¿En cuál estás hoy? (un WhatsApp = una unidad activa):\n\n" +
     lines.join("\n") +
-    "\n\nReply with the number (e.g. 1) or the venue name.\n" +
-    "Type SWITCH later to change unit (when no guest session is open)."
+    "\n\nResponde con el número (ej. 1) o el nombre del lugar.\n" +
+    "Después puedes escribir cambiar unidad cuando no tengas un comensal activo."
   );
 }
 
 function isSwitchVenueCommand(body: string): boolean {
-  return /^(switch|unidad|sucursal|cambiar|venue|unit)\b/i.test(body.trim());
+  return /^(switch|cambiar(\s+unidad)?|unidad|sucursal|venue|unit)\b/i.test(
+    body.trim(),
+  );
 }
 
 function parseVenueSelection(body: string, venues: StaffVenue[]): string | null {
@@ -523,9 +547,10 @@ async function handleLookupCode(
     .maybeSingle();
   if (consumerRes.error || !consumerRes.data) {
     await reply(
+      admin,
       twilio,
       staff.phoneE164,
-      `No guest found for code ${displayConsumerCode(code)}. Double-check and try again.`,
+      `No encontré comensal con el código ${displayConsumerCode(code)}. Revísalo e inténtalo de nuevo.`,
     );
     return;
   }
@@ -559,19 +584,18 @@ async function handleLookupCode(
     .eq("id", session.id);
 
   await reply(
+    admin,
     twilio,
     staff.phoneE164,
-    `Guest verified ✓\n` +
-      `Code: ${displayConsumerCode(code)}\n` +
-      `Name: ${name}\n` +
-      `ID: ${c.id.slice(0, 8)}…\n` +
-      `Tier: ${tier}${igLine}${subLine}\n` +
-      `Balance: ${formatMoneyMx(c.cashback_balance_cents ?? 0)}\n\n` +
-      `Unit: ${staff.venueName}\n` +
-      `(Discount applies for this venue only.)\n\n` +
-      `Reply with bill amounts:\n` +
-      `SUBTOTAL <pesos> TIP <pesos>\n` +
-      `Example: SUBTOTAL 850 TIP 100`,
+    `Comensal verificado ✓\n` +
+      `Código: ${displayConsumerCode(code)}\n` +
+      `Nombre: ${name}\n` +
+      `Nivel: ${tier}${igLine}${subLine}\n` +
+      `Saldo Mesita: ${formatMoneyMx(c.cashback_balance_cents ?? 0)}\n\n` +
+      `Unidad: ${staff.venueName}\n` +
+      `(El descuento aplica solo en este local.)\n\n` +
+      `Manda la cuenta, por ejemplo:\n` +
+      `SUBTOTAL 850 PROPINA 100`,
   );
 }
 
@@ -592,20 +616,21 @@ async function handleSubmitBill(
     .eq("id", staff.venueId)
     .maybeSingle();
   if (venueRes.error || !venueRes.data) {
-    await reply(twilio, staff.phoneE164, "Venue not found.");
+    await reply(admin, twilio, staff.phoneE164, "No encontré el restaurante.");
     return;
   }
   const venue = venueRes.data as VenueRateRow;
   if (venue.fiscal_type !== "informal") {
     await reply(
+      admin,
       twilio,
       staff.phoneE164,
-      "This venue uses cashback (formal) — discount Type A isn't available here.",
+      "Este local usa cashback (formal) — los tickets con descuento no aplican aquí.",
     );
     return;
   }
   if (venue.listing_type !== "partner") {
-    await reply(twilio, staff.phoneE164, "Venue must be a verified partner.");
+    await reply(admin, twilio, staff.phoneE164, "El local debe ser partner verificado en Mesita.");
     return;
   }
 
@@ -617,7 +642,7 @@ async function handleSubmitBill(
     .eq("id", session.consumer_id)
     .single();
   if (consumerRes.error) {
-    await reply(twilio, staff.phoneE164, "Guest record error.");
+    await reply(admin, twilio, staff.phoneE164, "Error con el registro del comensal.");
     return;
   }
 
@@ -631,7 +656,7 @@ async function handleSubmitBill(
   );
 
   if (calc.subtotal === 0) {
-    await reply(twilio, staff.phoneE164, "Check total can't be zero.");
+    await reply(admin, twilio, staff.phoneE164, "El total de la cuenta no puede ser cero.");
     return;
   }
 
@@ -660,9 +685,10 @@ async function handleSubmitBill(
     .single();
   if (insert.error) {
     await reply(
+      admin,
       twilio,
       staff.phoneE164,
-      `Couldn't open ticket: ${insert.error.message}`,
+      `No pude abrir el ticket: ${insert.error.message}`,
     );
     return;
   }
@@ -716,18 +742,19 @@ async function handleSubmitBill(
   }
 
   await reply(
+    admin,
     twilio,
     staff.phoneE164,
-    `Bill calculated ✓ (${staff.venueName})\n` +
+    `Cuenta lista ✓ (${staff.venueName})\n` +
       `Subtotal: ${formatMoneyMx(calc.subtotal)}\n` +
-      `Tip: ${formatMoneyMx(calc.tip)}\n` +
-      `Discount (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
+      `Propina: ${formatMoneyMx(calc.tip)}\n` +
+      `Descuento (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
       (calc.redeemCents > 0
-        ? `Mesita balance: -${formatMoneyMx(calc.redeemCents)}\n`
+        ? `Saldo Mesita: -${formatMoneyMx(calc.redeemCents)}\n`
         : "") +
-      `Guest pays: ${formatMoneyMx(calc.amountDueCents)}\n\n` +
-      `Passive payment: collect ${formatMoneyMx(calc.amountDueCents)} in cash/card off-rail.\n` +
-      `Guest confirms in the Mesita app. Reply CONFIRM when they've paid.`,
+      `Paga el comensal: ${formatMoneyMx(calc.amountDueCents)}\n\n` +
+      `Cobra ${formatMoneyMx(calc.amountDueCents)} (efectivo o terminal).\n` +
+      `El comensal confirma en la app. Cuando cobres, responde listo.`,
   );
 }
 
@@ -759,14 +786,15 @@ async function handleStaffPaymentConfirm(
       staff.venueId,
     );
     if (!done.ok) {
-      await reply(twilio, staff.phoneE164, `Error finalizing: ${done.error}`);
+      await reply(admin, twilio, staff.phoneE164, `Error al cerrar: ${done.error}`);
       return;
     }
     await resetSession(admin, session.id, staff.venueId);
     await reply(
+      admin,
       twilio,
       staff.phoneE164,
-      "Payment recorded ✓ Ticket closed. Guest will get a review prompt in the app.",
+      "Pago registrado ✓ Ticket cerrado. El comensal verá la reseña en la app.",
     );
     return;
   }
@@ -777,9 +805,10 @@ async function handleStaffPaymentConfirm(
     .eq("id", session.id);
 
   await reply(
+    admin,
     twilio,
     staff.phoneE164,
-    "Your confirmation is saved. Waiting for the guest to confirm in the Mesita app.",
+    "Quedó tu confirmación. Esperamos que el comensal confirme en la app Mesita.",
   );
 }
 
@@ -819,14 +848,13 @@ export async function onConsumerPaymentConfirmed(
         ticket.data.opened_by_staff_user_id,
       );
       if (staffPhone) {
-        await sendWhatsAppText({
-          env: twilio,
-          from: twilio.whatsappFromStaff,
-          to: staffPhone,
-          body:
-            `Guest confirmed payment at ${venueRes.data?.name ?? "your venue"} ✓\n` +
-            `Reply CONFIRM when you've collected payment.`,
-        });
+        await sendStaffWhatsAppReply(
+          admin,
+          twilio,
+          staffPhone,
+          `El comensal confirmó el pago en ${venueRes.data?.name ?? "tu local"} ✓\n` +
+            `Responde listo cuando hayas cobrado.`,
+        );
       }
     }
     return;
@@ -838,14 +866,13 @@ export async function onConsumerPaymentConfirmed(
       ticket.data.opened_by_staff_user_id,
     );
     if (staffPhone) {
-      await sendWhatsAppText({
-        env: twilio,
-        from: twilio.whatsappFromStaff,
-        to: staffPhone,
-        body:
-          `Guest confirmed payment in the app (${venueRes.data?.name ?? "venue"}).\n` +
-          `Reply CONFIRM when payment is collected.`,
-      });
+      await sendStaffWhatsAppReply(
+        admin,
+        twilio,
+        staffPhone,
+        `El comensal confirmó en la app (${venueRes.data?.name ?? "local"}).\n` +
+          `Responde listo cuando cobres.`,
+      );
     }
   }
 }
@@ -914,13 +941,13 @@ async function staffPhoneForUser(
   return phone.startsWith("+") ? phone : `+${phone}`;
 }
 
-async function reply(twilio: TwilioEnv, to: string, body: string) {
-  await sendWhatsAppText({
-    env: twilio,
-    from: twilio.whatsappFromStaff,
-    to,
-    body,
-  });
+async function reply(
+  admin: SupabaseClient,
+  twilio: TwilioEnv,
+  to: string,
+  body: string,
+) {
+  await sendStaffWhatsAppReply(admin, twilio, to, body);
 }
 
 async function listStaffVenues(

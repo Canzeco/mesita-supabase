@@ -3,7 +3,7 @@
 # Submit WhatsApp approval and write Content SIDs to integrations/twilio/content-sids.json
 #
 # Requires TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN (.env.twilio.local)
-# For staff-invite (whatsapp/flows): run ./scripts/twilio-apply-flows.sh first
+# staff-invite uses twilio/text (natural language; flows later)
 
 set -euo pipefail
 
@@ -67,7 +67,7 @@ PY
     "${CONTENT_API}/${sid}/ApprovalRequests/whatsapp" \
     -H "Content-Type: application/json" \
     -d "{\"name\":\"${name}\",\"category\":\"${category}\"}")"
-  approval_status="$(echo "${approval_resp}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null || echo "submitted")"
+  approval_status="$(echo "${approval_resp}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status', d.get('message','')))" 2>/dev/null || echo "${approval_resp}")"
   echo "    whatsapp approval: ${approval_status}"
 
   python3 - "${OUT}" "${name}" "${sid}" "${approval_status}" <<'PY'
