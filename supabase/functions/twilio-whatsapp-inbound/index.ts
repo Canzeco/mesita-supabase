@@ -17,8 +17,9 @@ import {
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import {
   handleStaffInboundMessage,
-  resolveStaffFromPhone,
+  resolveStaffAccess,
 } from "../_shared/staff-whatsapp-flow.ts";
+import { replyUnauthorizedStaff } from "../_shared/staff-whatsapp-replies.ts";
 
 function phoneFromWhatsAppAddress(addr: string): string {
   const raw = addr.replace(/^whatsapp:/i, "").trim();
@@ -67,6 +68,15 @@ Deno.serve(async (req) => {
   });
 
   if (!body) {
+    if (isStaffLine(toLine, twilio.env.whatsappFromStaff)) {
+      await sendWhatsAppText({
+        env: twilio.env,
+        from: twilio.env.whatsappFromStaff,
+        to: fromPhone,
+        body:
+          "Mesita Ops here — send a guest code (0000-0000), pick your unit, or type HELP.",
+      }).catch(() => {});
+    }
     return emptyMessagingTwiml();
   }
 
@@ -79,20 +89,20 @@ Deno.serve(async (req) => {
 
   try {
     if (isStaffLine(toLine, twilio.env.whatsappFromStaff)) {
-      const staff = await resolveStaffFromPhone(admin, fromPhone);
-      if (!staff) {
+      const access = await resolveStaffAccess(admin, fromPhone);
+      if (access.status !== "ok") {
+        const msg = await replyUnauthorizedStaff(access.status, body);
         await sendWhatsAppText({
           env: twilio.env,
           from: twilio.env.whatsappFromStaff,
           to: fromPhone,
-          body:
-            "This number isn't linked to a Mesita staff account. Accept your venue invite in the app first, then try again.",
+          body: msg,
         });
       } else {
         await handleStaffInboundMessage({
           admin,
           twilio: twilio.env,
-          staff,
+          identity: access.identity,
           body,
         });
       }

@@ -1,8 +1,12 @@
 // Staff WhatsApp orchestration — Ticket Type A (dp, informal, no story).
+//
+// Business rule: one WhatsApp number → exactly one active venue at a time.
+// Staff may belong to many units; they must pick (or SWITCH) before guest codes.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { displayConsumerCode } from "./consumer-code.ts";
 import { parseStaffWhatsAppMessage } from "./staff-llm.ts";
+import { replyStaffCoach } from "./staff-whatsapp-replies.ts";
 import {
   computeInformalBill,
   finalizeInformalTicket,
@@ -12,18 +16,27 @@ import {
 } from "./ticket-informal.ts";
 import { sendWhatsAppText, type TwilioEnv } from "./twilio.ts";
 
-type StaffContext = {
-  staffUserId: string;
+export type StaffVenue = {
   venueId: string;
   venueName: string;
+};
+
+export type StaffIdentity = {
+  staffUserId: string;
   phoneE164: string;
+  venues: StaffVenue[];
+};
+
+type StaffContext = StaffIdentity & {
+  venueId: string;
+  venueName: string;
 };
 
 type SessionRow = {
   id: string;
   phone_e164: string;
   staff_user_id: string;
-  venue_id: string;
+  venue_id: string | null;
   state: string;
   consumer_id: string | null;
   ticket_id: string | null;
@@ -31,25 +44,139 @@ type SessionRow = {
   context: Record<string, unknown>;
 };
 
+type VenueOption = { venue_id: string; name: string };
+
 export async function handleStaffInboundMessage(opts: {
   admin: SupabaseClient;
   twilio: TwilioEnv;
-  staff: StaffContext;
+  identity: StaffIdentity;
   body: string;
 }): Promise<void> {
-  const { admin, twilio, staff, body } = opts;
-  const session = await getOrCreateSession(admin, staff);
-  const intent = await parseStaffWhatsAppMessage(body, session.state);
+  const { admin, twilio, identity, body } = opts;
+  const venues = identity.venues;
+
+  let session = await loadSession(admin, identity.phoneE164);
+
+  if (isSwitchVenueCommand(body)) {
+    if (session && session.state !== "idle" && session.state !== "selecting_venue") {
+      await reply(
+        twilio,
+        identity.phoneE164,
+        "Finish or CANCEL the current guest session before switching unit.",
+      );
+      return;
+    }
+    if (venues.length < 2) {
+      await reply(
+        twilio,
+        identity.phoneE164,
+        venues.length === 1
+          ? `You're only on the team at ${venues[0].venueName}. No switch needed.`
+          : "No venue on your staff profile.",
+      );
+      return;
+    }
+    session = await enterVenueSelection(admin, identity, session, venues);
+    await reply(twilio, identity.phoneE164, venuePickerText(venues));
+    return;
+  }
+
+  const sessionState = session?.state ?? "selecting_venue";
+  const intent = await parseStaffWhatsAppMessage(body, sessionState);
+
+  if (
+    intent.intent === "help" &&
+    (session?.state === "selecting_venue" || !session?.venue_id) &&
+    venues.length > 1
+  ) {
+    await reply(twilio, identity.phoneE164, venuePickerText(venues));
+    return;
+  }
+
+  if (intent.intent === "select_venue" && intent.venue_index != null) {
+    const picked = venues[intent.venue_index];
+    if (picked) {
+      session = await applyActiveVenue(admin, identity, session, picked);
+      await reply(
+        twilio,
+        identity.phoneE164,
+        `Active unit: ${picked.venueName} ✓\nSend the guest's Mesita code (0000-0000).`,
+      );
+      return;
+    }
+    await reply(
+      twilio,
+      identity.phoneE164,
+      await replyStaffCoach({
+        sessionState: "selecting_venue",
+        venueName: null,
+        multiVenue: venues.length > 1,
+        userMessage: body,
+        situation: "invalid_venue_pick",
+      }),
+    );
+    return;
+  }
+
+  const venuePick = parseVenueSelection(body, venues);
+  if (
+    venuePick &&
+    (session?.state === "selecting_venue" || !session?.venue_id)
+  ) {
+    const picked = venues.find((v) => v.venueId === venuePick)!;
+    session = await applyActiveVenue(admin, identity, session, picked);
+    await reply(
+      twilio,
+      identity.phoneE164,
+      `Active unit: ${picked.venueName} ✓\nSend the guest's Mesita code (0000-0000).`,
+    );
+    return;
+  }
+
+  const resolved = await resolveActiveVenue(admin, identity, session);
+  if (resolved.kind === "need_selection") {
+    session = resolved.session;
+    const unclear =
+      intent.intent === "unknown" &&
+      !parseVenueSelection(body, venues) &&
+      intent.venue_index == null;
+    if (unclear && body.trim().length > 0) {
+      await reply(
+        twilio,
+        identity.phoneE164,
+        await replyStaffCoach({
+          sessionState: "selecting_venue",
+          venueName: null,
+          multiVenue: venues.length > 1,
+          userMessage: body,
+        }),
+      );
+    } else {
+      await reply(twilio, identity.phoneE164, venuePickerText(venues));
+    }
+    return;
+  }
+
+  const staff = resolved.staff;
+  session = resolved.session;
 
   if (intent.intent === "cancel") {
-    await resetSession(admin, session.id);
-    await reply(twilio, staff.phoneE164,
-      "Session cleared. Send a guest code (0000-0000) when you're ready.");
+    await resetSession(admin, session.id, staff.venueId);
+    await reply(
+      twilio,
+      staff.phoneE164,
+      `Session cleared at ${staff.venueName}.\nSend a guest code (0000-0000) when ready.\n` +
+        (venues.length > 1 ? "SWITCH to change unit." : ""),
+    );
     return;
   }
 
   if (intent.intent === "help") {
-    await reply(twilio, staff.phoneE164, helpText(session.state));
+    await reply(
+      twilio,
+      staff.phoneE164,
+      helpText(session.state, staff, venues, venues.length > 1),
+    );
     return;
   }
 
@@ -80,61 +207,230 @@ export async function handleStaffInboundMessage(opts: {
     return;
   }
 
-  // Fallback: try code extraction in any state
   if (intent.consumer_code && session.state === "idle") {
     await handleLookupCode(admin, twilio, staff, session, intent.consumer_code);
+    return;
+  }
+
+  if (
+    intent.intent === "submit_bill" &&
+    session.state === "consumer_identified" &&
+    intent.check_subtotal_cents == null
+  ) {
+    await reply(
+      twilio,
+      staff.phoneE164,
+      await replyStaffCoach({
+        sessionState: session.state,
+        venueName: staff.venueName,
+        multiVenue: venues.length > 1,
+        userMessage: body,
+        situation: "consumer_identified",
+      }),
+    );
+    return;
+  }
+
+  if (
+    intent.intent === "lookup_code" &&
+    !intent.consumer_code &&
+    session.state === "idle"
+  ) {
+    await reply(
+      twilio,
+      staff.phoneE164,
+      await replyStaffCoach({
+        sessionState: "idle",
+        venueName: staff.venueName,
+        multiVenue: venues.length > 1,
+        userMessage: body,
+      }),
+    );
     return;
   }
 
   await reply(
     twilio,
     staff.phoneE164,
-    session.state === "idle"
-      ? "Send the guest's 8-digit Mesita code (0000-0000), or type HELP."
-      : helpText(session.state),
+    await replyStaffCoach({
+      sessionState: session.state,
+      venueName: staff.venueName,
+      multiVenue: venues.length > 1,
+      userMessage: body,
+    }),
   );
 }
 
-function helpText(state: string): string {
+function prefixActiveVenue(staff: StaffContext): string {
+  return `Unit: ${staff.venueName}\n`;
+}
+
+function helpText(
+  state: string,
+  staff: StaffContext,
+  venues: StaffVenue[],
+  canSwitch: boolean,
+): string {
+  const switchLine = canSwitch
+    ? "SWITCH — change active unit (only when idle).\n"
+    : "";
   switch (state) {
+    case "selecting_venue":
+      return venuePickerText(venues);
     case "consumer_identified":
       return (
+        prefixActiveVenue(staff) +
         "Enter the bill:\n" +
         "• SUBTOTAL 850 TIP 100\n" +
         "• or two numbers: 850 100 (subtotal tip)\n" +
         "Amounts in pesos. CANCEL to start over."
       );
     case "awaiting_staff_payment_confirm":
-      return "Reply CONFIRM or YES when the guest has paid their share.";
+      return prefixActiveVenue(staff) +
+        "Reply CONFIRM or YES when the guest has paid their share.";
     default:
       return (
+        prefixActiveVenue(staff) +
         "Mesita Staff — Type A (discount)\n" +
         "1) Send guest code (0000-0000)\n" +
         "2) Enter SUBTOTAL and TIP\n" +
         "3) Guest confirms in the Mesita app\n" +
         "4) You reply CONFIRM when paid\n" +
-        "CANCEL resets the session."
+        switchLine +
+        "CANCEL resets the guest session (keeps this unit)."
       );
   }
 }
 
-async function getOrCreateSession(
+function venuePickerText(venues: StaffVenue[]): string {
+  const lines = venues.map((v, i) => `${i + 1}) ${v.venueName}`);
+  return (
+    "You work at multiple Mesita units.\n" +
+    "Pick where you're working now (one unit per WhatsApp number):\n\n" +
+    lines.join("\n") +
+    "\n\nReply with the number (e.g. 1) or the venue name.\n" +
+    "Type SWITCH later to change unit (when no guest session is open)."
+  );
+}
+
+function isSwitchVenueCommand(body: string): boolean {
+  return /^(switch|unidad|sucursal|cambiar|venue|unit)\b/i.test(body.trim());
+}
+
+function parseVenueSelection(body: string, venues: StaffVenue[]): string | null {
+  const t = body.trim();
+  if (!t) return null;
+
+  const numOnly = t.match(/^(\d+)$/);
+  if (numOnly) {
+    const idx = Number(numOnly[1]) - 1;
+    if (idx >= 0 && idx < venues.length) return venues[idx].venueId;
+  }
+
+  const numPrefix = t.match(/^(?:venue|unidad|sucursal|unit)\s*#?\s*(\d+)/i);
+  if (numPrefix) {
+    const idx = Number(numPrefix[1]) - 1;
+    if (idx >= 0 && idx < venues.length) return venues[idx].venueId;
+  }
+
+  const lower = t.toLowerCase();
+  for (const v of venues) {
+    const name = v.venueName.toLowerCase();
+    if (lower === name || lower.includes(name) || name.includes(lower)) {
+      return v.venueId;
+    }
+  }
+  return null;
+}
+
+async function loadSession(
   admin: SupabaseClient,
-  staff: StaffContext,
-): Promise<SessionRow> {
+  phoneE164: string,
+): Promise<SessionRow | null> {
   const existing = await admin
     .from("staff_whatsapp_sessions")
     .select("*")
-    .eq("phone_e164", staff.phoneE164)
+    .eq("phone_e164", phoneE164)
     .maybeSingle();
-  if (existing.data) return existing.data as SessionRow;
+  if (existing.error) throw new Error(existing.error.message);
+  return existing.data ? (existing.data as SessionRow) : null;
+}
+
+async function enterVenueSelection(
+  admin: SupabaseClient,
+  identity: StaffIdentity,
+  session: SessionRow | null,
+  venues: StaffVenue[],
+): Promise<SessionRow> {
+  const options: VenueOption[] = venues.map((v) => ({
+    venue_id: v.venueId,
+    name: v.venueName,
+  }));
+
+  if (session) {
+    const updated = await admin
+      .from("staff_whatsapp_sessions")
+      .update({
+        state: "selecting_venue",
+        venue_id: null,
+        consumer_id: null,
+        ticket_id: null,
+        pending_consumer_code: null,
+        context: { venue_options: options },
+      })
+      .eq("id", session.id)
+      .select("*")
+      .single();
+    if (updated.error) throw new Error(updated.error.message);
+    return updated.data as SessionRow;
+  }
 
   const inserted = await admin
     .from("staff_whatsapp_sessions")
     .insert({
-      phone_e164: staff.phoneE164,
-      staff_user_id: staff.staffUserId,
-      venue_id: staff.venueId,
+      phone_e164: identity.phoneE164,
+      staff_user_id: identity.staffUserId,
+      venue_id: null,
+      state: "selecting_venue",
+      context: { venue_options: options },
+    })
+    .select("*")
+    .single();
+  if (inserted.error) throw new Error(inserted.error.message);
+  return inserted.data as SessionRow;
+}
+
+async function applyActiveVenue(
+  admin: SupabaseClient,
+  identity: StaffIdentity,
+  session: SessionRow | null,
+  venue: StaffVenue,
+): Promise<SessionRow> {
+  if (session) {
+    const updated = await admin
+      .from("staff_whatsapp_sessions")
+      .update({
+        venue_id: venue.venueId,
+        state: "idle",
+        staff_user_id: identity.staffUserId,
+        consumer_id: null,
+        ticket_id: null,
+        pending_consumer_code: null,
+        context: {},
+      })
+      .eq("id", session.id)
+      .select("*")
+      .single();
+    if (updated.error) throw new Error(updated.error.message);
+    return updated.data as SessionRow;
+  }
+
+  const inserted = await admin
+    .from("staff_whatsapp_sessions")
+    .insert({
+      phone_e164: identity.phoneE164,
+      staff_user_id: identity.staffUserId,
+      venue_id: venue.venueId,
       state: "idle",
     })
     .select("*")
@@ -143,11 +439,66 @@ async function getOrCreateSession(
   return inserted.data as SessionRow;
 }
 
-async function resetSession(admin: SupabaseClient, sessionId: string) {
+async function resolveActiveVenue(
+  admin: SupabaseClient,
+  identity: StaffIdentity,
+  session: SessionRow | null,
+): Promise<
+  | { kind: "ok"; staff: StaffContext; session: SessionRow }
+  | { kind: "need_selection"; session: SessionRow }
+> {
+  const venues = identity.venues;
+  if (venues.length === 0) {
+    throw new Error("staff has no venue_roles");
+  }
+
+  if (venues.length === 1) {
+    const sessionOut = await applyActiveVenue(admin, identity, session, venues[0]);
+    return {
+      kind: "ok",
+      staff: { ...identity, ...venues[0] },
+      session: sessionOut,
+    };
+  }
+
+  if (!session) {
+    const created = await enterVenueSelection(admin, identity, null, venues);
+    return { kind: "need_selection", session: created };
+  }
+
+  if (session.state === "selecting_venue" || !session.venue_id) {
+    return { kind: "need_selection", session };
+  }
+
+  const active = venues.find((v) => v.venueId === session.venue_id);
+  if (!active) {
+    const created = await enterVenueSelection(admin, identity, session, venues);
+    return { kind: "need_selection", session: created };
+  }
+
+  if (session.staff_user_id !== identity.staffUserId) {
+    await admin
+      .from("staff_whatsapp_sessions")
+      .update({ staff_user_id: identity.staffUserId })
+      .eq("id", session.id);
+  }
+
+  return {
+    kind: "ok",
+    staff: { ...identity, ...active },
+    session,
+  };
+}
+
+async function resetSession(
+  admin: SupabaseClient,
+  sessionId: string,
+  venueId: string | null,
+) {
   await admin
     .from("staff_whatsapp_sessions")
     .update({
-      state: "idle",
+      state: venueId ? "idle" : "selecting_venue",
       consumer_id: null,
       ticket_id: null,
       pending_consumer_code: null,
@@ -171,8 +522,11 @@ async function handleLookupCode(
     .eq("code", code)
     .maybeSingle();
   if (consumerRes.error || !consumerRes.data) {
-    await reply(twilio, staff.phoneE164,
-      `No guest found for code ${displayConsumerCode(code)}. Double-check and try again.`);
+    await reply(
+      twilio,
+      staff.phoneE164,
+      `No guest found for code ${displayConsumerCode(code)}. Double-check and try again.`,
+    );
     return;
   }
   const c = consumerRes.data as ConsumerRow;
@@ -213,7 +567,8 @@ async function handleLookupCode(
       `ID: ${c.id.slice(0, 8)}…\n` +
       `Tier: ${tier}${igLine}${subLine}\n` +
       `Balance: ${formatMoneyMx(c.cashback_balance_cents ?? 0)}\n\n` +
-      `Venue: ${staff.venueName}\n\n` +
+      `Unit: ${staff.venueName}\n` +
+      `(Discount applies for this venue only.)\n\n` +
       `Reply with bill amounts:\n` +
       `SUBTOTAL <pesos> TIP <pesos>\n` +
       `Example: SUBTOTAL 850 TIP 100`,
@@ -242,8 +597,11 @@ async function handleSubmitBill(
   }
   const venue = venueRes.data as VenueRateRow;
   if (venue.fiscal_type !== "informal") {
-    await reply(twilio, staff.phoneE164,
-      "This venue uses cashback (formal) — discount Type A isn't available here.");
+    await reply(
+      twilio,
+      staff.phoneE164,
+      "This venue uses cashback (formal) — discount Type A isn't available here.",
+    );
     return;
   }
   if (venue.listing_type !== "partner") {
@@ -301,7 +659,11 @@ async function handleSubmitBill(
     .select("id")
     .single();
   if (insert.error) {
-    await reply(twilio, staff.phoneE164, `Couldn't open ticket: ${insert.error.message}`);
+    await reply(
+      twilio,
+      staff.phoneE164,
+      `Couldn't open ticket: ${insert.error.message}`,
+    );
     return;
   }
 
@@ -356,7 +718,7 @@ async function handleSubmitBill(
   await reply(
     twilio,
     staff.phoneE164,
-    `Bill calculated ✓\n` +
+    `Bill calculated ✓ (${staff.venueName})\n` +
       `Subtotal: ${formatMoneyMx(calc.subtotal)}\n` +
       `Tip: ${formatMoneyMx(calc.tip)}\n` +
       `Discount (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
@@ -400,7 +762,7 @@ async function handleStaffPaymentConfirm(
       await reply(twilio, staff.phoneE164, `Error finalizing: ${done.error}`);
       return;
     }
-    await resetSession(admin, session.id);
+    await resetSession(admin, session.id, staff.venueId);
     await reply(
       twilio,
       staff.phoneE164,
@@ -452,7 +814,10 @@ export async function onConsumerPaymentConfirmed(
     );
 
     if (twilio && ticket.data.opened_by_staff_user_id) {
-      const staffPhone = await staffPhoneForUser(admin, ticket.data.opened_by_staff_user_id);
+      const staffPhone = await staffPhoneForUser(
+        admin,
+        ticket.data.opened_by_staff_user_id,
+      );
       if (staffPhone) {
         await sendWhatsAppText({
           env: twilio,
@@ -468,7 +833,10 @@ export async function onConsumerPaymentConfirmed(
   }
 
   if (twilio && ticket.data.opened_by_staff_user_id) {
-    const staffPhone = await staffPhoneForUser(admin, ticket.data.opened_by_staff_user_id);
+    const staffPhone = await staffPhoneForUser(
+      admin,
+      ticket.data.opened_by_staff_user_id,
+    );
     if (staffPhone) {
       await sendWhatsAppText({
         env: twilio,
@@ -500,7 +868,8 @@ async function enqueueReview(
   ticketId: string,
   venueId: string,
 ) {
-  const venue = await admin.from("venues").select("name").eq("id", venueId).single();
+  const venue = await admin.from("venues").select("name").eq("id", venueId)
+    .single();
   await admin.from("consumer_pay_notifications").insert({
     consumer_id: consumerId,
     ticket_id: ticketId,
@@ -554,33 +923,64 @@ async function reply(twilio: TwilioEnv, to: string, body: string) {
   });
 }
 
-/** Resolve staff from WhatsApp sender phone. */
-export async function resolveStaffFromPhone(
+async function listStaffVenues(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<StaffVenue[]> {
+  const roleRows = await admin
+    .from("venue_roles")
+    .select("venue_id, venues(name)")
+    .eq("user_id", userId)
+    .eq("role", "staff");
+  if (roleRows.error || !roleRows.data?.length) return [];
+
+  const venues: StaffVenue[] = [];
+  for (const row of roleRows.data) {
+    const join = row.venues as { name: string } | null;
+    venues.push({
+      venueId: row.venue_id,
+      venueName: join?.name ?? "Venue",
+    });
+  }
+  venues.sort((a, b) => a.venueName.localeCompare(b.venueName));
+  return venues;
+}
+
+export type StaffAccess =
+  | { status: "ok"; identity: StaffIdentity }
+  | { status: "unknown_phone" }
+  | { status: "not_on_team" };
+
+/** Staff auth + venue team membership for this WhatsApp number. */
+export async function resolveStaffAccess(
   admin: SupabaseClient,
   phoneE164: string,
-): Promise<StaffContext | null> {
+): Promise<StaffAccess> {
   const digits = phoneE164.replace(/\D/g, "");
   const userIdRes = await admin.rpc("find_user_id_by_phone", {
     phone_digits: digits,
   });
   const userId = userIdRes.data as string | null;
-  if (!userId) return null;
+  if (!userId) return { status: "unknown_phone" };
 
-  const roleRow = await admin
-    .from("venue_roles")
-    .select("venue_id, venues(name)")
-    .eq("user_id", userId)
-    .eq("role", "staff")
-    .limit(1)
-    .maybeSingle();
-  if (roleRow.error || !roleRow.data) return null;
-
-  const venueJoin = roleRow.data.venues as { name: string } | null;
+  const venues = await listStaffVenues(admin, userId);
+  if (venues.length === 0) return { status: "not_on_team" };
 
   return {
-    staffUserId: userId,
-    venueId: roleRow.data.venue_id,
-    venueName: venueJoin?.name ?? "Venue",
-    phoneE164,
+    status: "ok",
+    identity: {
+      staffUserId: userId,
+      phoneE164,
+      venues,
+    },
   };
+}
+
+/** @deprecated Use resolveStaffAccess */
+export async function resolveStaffIdentity(
+  admin: SupabaseClient,
+  phoneE164: string,
+): Promise<StaffIdentity | null> {
+  const access = await resolveStaffAccess(admin, phoneE164);
+  return access.status === "ok" ? access.identity : null;
 }

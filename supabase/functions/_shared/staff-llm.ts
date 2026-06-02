@@ -11,6 +11,7 @@ export type StaffMessageIntent = {
     | "lookup_code"
     | "submit_bill"
     | "confirm_payment"
+    | "select_venue"
     | "cancel"
     | "help"
     | "unknown";
@@ -18,6 +19,8 @@ export type StaffMessageIntent = {
   check_subtotal_cents: number | null;
   tip_cents: number | null;
   confirm: boolean | null;
+  /** 0-based index when staff picks unit 1, 2, … */
+  venue_index: number | null;
 };
 
 const EMPTY_INTENT: StaffMessageIntent = {
@@ -26,6 +29,7 @@ const EMPTY_INTENT: StaffMessageIntent = {
   check_subtotal_cents: null,
   tip_cents: null,
   confirm: null,
+  venue_index: null,
 };
 
 export async function parseStaffWhatsAppMessage(
@@ -38,8 +42,9 @@ export async function parseStaffWhatsAppMessage(
 
   const system =
     "You parse WhatsApp messages from restaurant waitstaff using Mesita. " +
-    'Return JSON only: {"intent":"lookup_code"|"submit_bill"|"confirm_payment"|"cancel"|"help"|"unknown",' +
-    '"consumer_code":"0000-0000"|null,"check_subtotal_cents":number|null,"tip_cents":number|null,"confirm":boolean|null}. ' +
+    'Return JSON only: {"intent":"lookup_code"|"submit_bill"|"confirm_payment"|"select_venue"|"cancel"|"help"|"unknown",' +
+    '"consumer_code":"0000-0000"|null,"check_subtotal_cents":number|null,"tip_cents":number|null,"confirm":boolean|null,"venue_index":number|null}. ' +
+    "select_venue: staff picking unit 1/2/3 from a list (venue_index 0-based). " +
     "Consumer codes are 8 digits formatted 0000-0000. " +
     "submit_bill: extract bill subtotal and tip in cents (e.g. $850.50 → 85050). " +
     "confirm_payment: staff confirming guest paid (yes/sí/confirm/pagado). " +
@@ -85,6 +90,7 @@ function mergeIntent(
     "lookup_code",
     "submit_bill",
     "confirm_payment",
+    "select_venue",
     "cancel",
     "help",
     "unknown",
@@ -99,6 +105,13 @@ function mergeIntent(
   }
   if (!consumer_code) consumer_code = fallback.consumer_code;
 
+  let venue_index: number | null = null;
+  if (raw.venue_index != null) {
+    const idx = Number(raw.venue_index);
+    if (Number.isInteger(idx) && idx >= 0) venue_index = idx;
+  }
+  if (venue_index == null) venue_index = fallback.venue_index;
+
   return {
     intent,
     consumer_code,
@@ -108,6 +121,7 @@ function mergeIntent(
     confirm: typeof raw.confirm === "boolean"
       ? raw.confirm
       : fallback.confirm,
+    venue_index,
   };
 }
 
@@ -118,6 +132,17 @@ function heuristicParse(body: string, sessionState: string): StaffMessageIntent 
   }
   if (/^(cancel|cancelar|reset|stop)\b/.test(lower)) {
     return { ...EMPTY_INTENT, intent: "cancel" };
+  }
+
+  if (sessionState === "selecting_venue") {
+    const numOnly = body.trim().match(/^(\d+)$/);
+    if (numOnly) {
+      return {
+        ...EMPTY_INTENT,
+        intent: "select_venue",
+        venue_index: Number(numOnly[1]) - 1,
+      };
+    }
   }
 
   const code = extractConsumerCodeFromText(body);
@@ -152,6 +177,20 @@ function heuristicParse(body: string, sessionState: string): StaffMessageIntent 
 
   if (code) {
     return { ...EMPTY_INTENT, intent: "lookup_code", consumer_code: code };
+  }
+
+  if (
+    /^(hi|hello|hey|hola|buenas|buenos|qué tal|que tal|good morning|good afternoon)\b/i
+      .test(lower)
+  ) {
+    return { ...EMPTY_INTENT, intent: "unknown" };
+  }
+
+  if (sessionState === "consumer_identified") {
+    const bill = parseBillAmounts(body);
+    if (bill.subtotal == null && /\d/.test(body)) {
+      return { ...EMPTY_INTENT, intent: "submit_bill" };
+    }
   }
 
   return EMPTY_INTENT;

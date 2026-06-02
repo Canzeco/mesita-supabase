@@ -1,10 +1,7 @@
 // Supabase Edge Function — business-invite-waiter
 //
-// Create a staff_invites row for a waiter / validator. The channel
-// (whatsapp | sms) and an optional pre-bound phone are persisted so
-// the Twilio integration coming in a few days can pick them up
-// without a migration. For now this is the *mock* path: no SMS goes
-// out, the caller receives the share URL and forwards it manually.
+// Creates a staff_invites row and, for WhatsApp + phone, sends one session
+// message from Mesita Ops with the accept link (same path as Team "Ping").
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
@@ -14,7 +11,9 @@ import {
   readEFEnv,
   requireMembership,
 } from "../_shared/auth.ts";
+import { buildStaffInviteWhatsAppBody } from "../_shared/staff-invite-message.ts";
 import { newInviteToken } from "../_shared/tokens.ts";
+import { readTwilioEnv, sendWhatsAppText } from "../_shared/twilio.ts";
 
 type Body = {
   venueId?: string;
@@ -25,7 +24,9 @@ type Body = {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
-  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
+  if (req.method !== "POST") {
+    return json({ ok: false, error: "Method not allowed" }, 405);
+  }
 
   const envRes = readEFEnv();
   if (!envRes.ok) return envRes.response;
@@ -45,6 +46,13 @@ Deno.serve(async (req) => {
   const admin = adminClient(envRes.env);
   const membership = await requireMembership(admin, authRes.user, venueId);
   if (!membership.ok) return membership.response;
+
+  const venueRes = await admin
+    .from("venues")
+    .select("name")
+    .eq("id", venueId)
+    .maybeSingle();
+  const venueName = venueRes.data?.name ?? "your venue";
 
   const token = newInviteToken();
 
@@ -67,6 +75,34 @@ Deno.serve(async (req) => {
     ? `${redirectBase}/accept-invite?token=${encodeURIComponent(token)}&kind=waiter`
     : null;
 
+  let sent = false;
+  let sendError: string | null = null;
+  let messageSid: string | null = null;
+
+  if (channel === "whatsapp" && phone && shareUrl) {
+    const twilio = readTwilioEnv();
+    if (!twilio.ok) {
+      sendError = twilio.error;
+    } else {
+      const wa = await sendWhatsAppText({
+        env: twilio.env,
+        from: twilio.env.whatsappFromStaff,
+        to: phone,
+        body: buildStaffInviteWhatsAppBody({ venueName, shareUrl }),
+      });
+      if (wa.ok) {
+        sent = true;
+        messageSid = wa.sid;
+      } else {
+        sendError = wa.error;
+      }
+    }
+  } else if (channel === "whatsapp" && !phone) {
+    sendError = "Add a phone number to send the WhatsApp invite automatically.";
+  } else if (channel === "sms") {
+    sendError = "SMS invite send not wired yet — copy the link below.";
+  }
+
   return json({
     ok: true,
     inviteId: insert.data.id,
@@ -75,7 +111,9 @@ Deno.serve(async (req) => {
     channel: insert.data.channel,
     expiresAt: insert.data.expires_at,
     shareUrl,
-    sent: false,
+    sent,
+    sendError,
+    messageSid,
   });
 });
 
