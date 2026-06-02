@@ -37,6 +37,7 @@ import {
   STORY_KINDS,
 } from "../_shared/ticket-kinds.ts";
 import { isConsumerFirstVisit, selectVenueRate } from "../_shared/membership.ts";
+import { venueHasVerifiedOwner } from "../_shared/venue-ownership.ts";
 
 type Body = {
   venueId?: string;
@@ -143,12 +144,14 @@ Deno.serve(async (req) => {
   if (venue.status === "archived") {
     return json({ ok: false, error: "Venue is archived" }, 409);
   }
-  if (venue.listing_type !== "partner") {
+  const hasOwner = await venueHasVerifiedOwner(admin, venueId);
+  if (!hasOwner) {
     return json(
       {
         ok: false,
+        code: "venue_not_claimed",
         error:
-          "Only Verified Partners can open tickets. Promote this venue to partner first.",
+          "This venue has no verified owner yet. Claim ownership in Mesita before opening tickets.",
       },
       409,
     );

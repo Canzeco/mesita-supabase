@@ -1,7 +1,6 @@
-// Natural-language Staff Ops WhatsApp copy + optional LLM polish.
+// Staff Ops WhatsApp copy — deterministic (no LLM rewrite; avoids invented amounts/codes).
 
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const MODEL = "gpt-4o-mini";
+import { type BillDraft } from "./staff-bill-draft.ts";
 
 export type StaffAccessDeniedReason = "unknown_phone" | "not_on_team";
 
@@ -12,6 +11,7 @@ export type StaffCoachContext = {
   userMessage: string;
   situation?: string;
   conversationHistory?: string;
+  pendingBill?: BillDraft;
 };
 
 const UNAUTH_STATIC: Record<StaffAccessDeniedReason, string> = {
@@ -30,16 +30,34 @@ const COACH_STATIC: Record<string, (ctx: StaffCoachContext) => string> = {
       : "Primero elige tu unidad y luego manda el código del comensal (0000-0000).",
   idle: (ctx) =>
     (ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "") +
-    "No entendí. Manda el código Mesita del comensal (0000-0000) o escribe ayuda.",
-  consumer_identified: (ctx) =>
-    (ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "") +
-    "Listo con el comensal — manda la cuenta, por ejemplo:\nSUBTOTAL 850 PROPINA 100\n(o dos números: 850 100, en pesos).",
+    "Manda el código Mesita del comensal (0000-0000) o escribe ayuda.\n\n" +
+    "Flujo: código → subtotal y propina por aquí → el comensal confirma en la app (Pay).",
+  consumer_identified: (ctx) => {
+    const base = ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "";
+    if (ctx.pendingBill?.subtotal_cents != null && ctx.pendingBill.tip_cents == null) {
+      return base +
+        "Solo falta la propina (ej. PROPINA 100 o 100, o 0).\n" +
+        "Cuando esté completo, al comensal le llega la cuenta en la app Mesita → Pay.";
+    }
+    return base +
+      "Manda la cuenta (ej. SUBTOTAL 850, luego PROPINA 100, o 850 y después 100).\n" +
+      "Al cerrar la cuenta, el comensal recibe notificación en la app → Pay para confirmar su pago.";
+  },
+  partial_bill: (ctx) => {
+    const base = ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "";
+    if (ctx.pendingBill?.subtotal_cents != null && ctx.pendingBill.tip_cents == null) {
+      return base +
+        "Falta la propina. Después el comensal verá el ticket en la app (Pay).";
+    }
+    return base +
+      "Manda subtotal y propina. El comensal no usa WhatsApp para pagar — confirma en la app (Pay).";
+  },
   awaiting_staff_payment_confirm: (ctx) =>
     (ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "") +
-    "Esperando el pago. Cuando el comensal confirme en la app y cobres, responde listo o sí.",
+    "Esperando al comensal en la app (Pay). Cuando confirme y cobres en caja, responde listo o sí.",
   awaiting_payment_confirm: (ctx) =>
     (ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "") +
-    "Esperando el pago. Cuando el comensal confirme en la app y cobres, responde listo o sí.",
+    "Esperando al comensal en la app (Pay). Cuando confirme y cobres, responde listo o sí.",
   invalid_venue_pick: () =>
     "Ese número no está en tu lista. Responde con una opción válida (1, 2, …) o el nombre del lugar. Escribe ayuda para ver la lista.",
   default: (ctx) => staticCoachReply(ctx),
@@ -61,79 +79,13 @@ export function staticCoachReply(ctx: StaffCoachContext): string {
 
 export async function replyUnauthorizedStaff(
   reason: StaffAccessDeniedReason,
-  userMessage: string,
-  conversationHistory = "",
+  _userMessage: string,
+  _conversationHistory = "",
 ): Promise<string> {
-  const base = staticUnauthReply(reason);
-  const historyBlock = conversationHistory.trim()
-    ? `Conversación reciente:\n${conversationHistory.trim()}\n\n`
-    : "";
-  return polishWithLlm({
-    system:
-      "Eres Mesita Ops por WhatsApp. La persona NO es staff autorizado. " +
-      "Reescribe el mensaje BASE: menos de 400 caracteres, cercano y claro, humor ligero ok, " +
-      "sin insultos. Español de México si escribieron en español. No inventes pasos que no estén en BASE.",
-    user:
-      `${historyBlock}BASE:\n${base}\n\nÚltimo mensaje:\n${userMessage.slice(0, 500)}`,
-    fallback: base,
-  });
+  return staticUnauthReply(reason);
 }
 
+/** Deterministic coach copy — never invent codes or amounts via LLM. */
 export async function replyStaffCoach(ctx: StaffCoachContext): Promise<string> {
-  const base = staticCoachReply(ctx);
-  const historyBlock = ctx.conversationHistory?.trim()
-    ? `Conversación reciente:\n${ctx.conversationHistory.trim()}\n\n`
-    : "";
-  return polishWithLlm({
-    system:
-      "Eres Mesita Ops, asistente por WhatsApp para meseros con tickets con descuento (tipo A). " +
-      "El mensaje no quedó claro. Una respuesta corta (menos de 400 caracteres): amable, directa. " +
-      "Di qué deben mandar según SESSION y la conversación. Español de México si aplica. " +
-      "No inventes códigos ni montos.",
-    user:
-      `${historyBlock}SESSION: ${ctx.sessionState}\n` +
-      `UNIDAD: ${ctx.venueName ?? "(aún no eligió)"}\n` +
-      `VARIAS_UNIDADES: ${ctx.multiVenue}\n` +
-      `SITUACIÓN: ${ctx.situation ?? "poco claro"}\n` +
-      `PISTA (síguela):\n${base}\n\n` +
-      `Último mensaje del mesero:\n${ctx.userMessage.slice(0, 800)}`,
-    fallback: base,
-  });
-}
-
-async function polishWithLlm(opts: {
-  system: string;
-  user: string;
-  fallback: string;
-}): Promise<string> {
-  const openaiKey = Deno.env.get("OPENAI_KEY")?.trim();
-  if (!openaiKey) return opts.fallback;
-
-  try {
-    const r = await fetch(OPENAI_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${openaiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.4,
-        max_tokens: 220,
-        messages: [
-          { role: "system", content: opts.system },
-          { role: "user", content: opts.user },
-        ],
-      }),
-    });
-    if (!r.ok) return opts.fallback;
-    const data = (await r.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const text = data.choices?.[0]?.message?.content?.trim();
-    if (!text || text.length > 500) return opts.fallback;
-    return text;
-  } catch {
-    return opts.fallback;
-  }
+  return staticCoachReply(ctx);
 }

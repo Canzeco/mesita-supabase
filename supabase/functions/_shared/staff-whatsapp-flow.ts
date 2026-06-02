@@ -4,15 +4,35 @@
 // Staff may belong to many units; they must pick (or SWITCH) before guest codes.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { displayConsumerCode } from "./consumer-code.ts";
-import { parseStaffWhatsAppMessage } from "./staff-llm.ts";
+import {
+  displayConsumerCode,
+  extractConsumerCodeFromText,
+} from "./consumer-code.ts";
+import {
+  billDraftFromContext,
+  billDraftHasAnyAmount,
+  billDraftNeedMessage,
+  billDraftToContext,
+  buildIncomingBill,
+  isBillDraftReady,
+  messageLooksLikeBill,
+  parseBillParts,
+} from "./staff-bill-draft.ts";
+import { isCasualStaffMessage, parseStaffWhatsAppMessage } from "./staff-llm.ts";
+import {
+  assessDiscountTicketOps,
+  guestRewardContext,
+  loadVenueOpsRow,
+  venueOpsShortWarning,
+} from "./staff-venue-ops.ts";
+import { venueHasVerifiedOwner } from "./venue-ownership.ts";
 import { replyStaffCoach } from "./staff-whatsapp-replies.ts";
 import {
+  buildConsumerBillPayload,
   computeInformalBill,
   finalizeInformalTicket,
   formatMoneyMx,
   type ConsumerRow,
-  type VenueRateRow,
 } from "./ticket-informal.ts";
 import { sendStaffWhatsAppReply } from "./staff-whatsapp-messages.ts";
 import { sendWhatsAppText, type TwilioEnv } from "./twilio.ts";
@@ -86,10 +106,13 @@ export async function handleStaffInboundMessage(opts: {
   }
 
   const sessionState = session?.state ?? "selecting_venue";
+  const pendingBill = billDraftFromContext(session?.context ?? {});
+  const codeInBody = extractConsumerCodeFromText(body);
   const intent = await parseStaffWhatsAppMessage(
     body,
     sessionState,
     conversationHistory,
+    pendingBill,
   );
 
   if (
@@ -105,11 +128,13 @@ export async function handleStaffInboundMessage(opts: {
     const picked = venues[intent.venue_index];
     if (picked) {
       session = await applyActiveVenue(admin, identity, session, picked);
+      const warn = await venueOpsShortWarning(admin, picked.venueId);
       await reply(
         admin,
         twilio,
         identity.phoneE164,
-        `Unidad activa: ${picked.venueName} ✓\nManda el código Mesita del comensal (0000-0000).`,
+        `Unidad activa: ${picked.venueName} ✓\nManda el código Mesita del comensal (0000-0000).` +
+          warn,
       );
       return;
     }
@@ -136,11 +161,13 @@ export async function handleStaffInboundMessage(opts: {
   ) {
     const picked = venues.find((v) => v.venueId === venuePick)!;
     session = await applyActiveVenue(admin, identity, session, picked);
+    const warn = await venueOpsShortWarning(admin, picked.venueId);
     await reply(
       admin,
       twilio,
       identity.phoneE164,
-      `Unidad activa: ${picked.venueName} ✓\nManda el código Mesita del comensal (0000-0000).`,
+      `Unidad activa: ${picked.venueName} ✓\nManda el código Mesita del comensal (0000-0000).` +
+        warn,
     );
     return;
   }
@@ -196,22 +223,106 @@ export async function handleStaffInboundMessage(opts: {
     return;
   }
 
-  if (intent.intent === "lookup_code" && intent.consumer_code) {
-    await handleLookupCode(admin, twilio, staff, session, intent.consumer_code);
+  if (
+    session.state === "idle" &&
+    isCasualStaffMessage(body) &&
+    !codeInBody
+  ) {
+    const opsBlock = session.context?.ops_block as
+      | { staffMessage?: string }
+      | undefined;
+    if (opsBlock?.staffMessage && session.pending_consumer_code) {
+      await reply(
+        admin,
+        twilio,
+        staff.phoneE164,
+        idleOpsBlockedReminder(staff, session, opsBlock.staffMessage),
+      );
+      return;
+    }
+    await reply(
+      admin,
+      twilio,
+      staff.phoneE164,
+      await replyStaffCoach({
+        sessionState: "idle",
+        venueName: staff.venueName,
+        multiVenue: venues.length > 1,
+        userMessage: body,
+        conversationHistory,
+      }),
+    );
+    return;
+  }
+
+  if (intent.intent === "lookup_code" && intent.consumer_code && codeInBody) {
+    const sameGuest = intent.consumer_code === session.pending_consumer_code;
+    if (
+      session.state === "consumer_identified" &&
+      sameGuest &&
+      !messageLooksLikeBill(body) &&
+      intent.check_subtotal_cents == null &&
+      intent.tip_cents == null
+    ) {
+      await reply(
+        admin,
+        twilio,
+        staff.phoneE164,
+        `Ya tienes activo el código ${displayConsumerCode(intent.consumer_code)}.\n` +
+          billDraftNeedMessage(pendingBill),
+      );
+      return;
+    }
+    const updated = await handleLookupCode(
+      admin,
+      twilio,
+      staff,
+      session,
+      intent.consumer_code,
+      { skipBillHint: messageLooksLikeBill(body) },
+    );
+    if (updated) {
+      session = updated;
+      if (
+        await tryHandleBillDraft({
+          admin,
+          twilio,
+          staff,
+          session,
+          body,
+          intent,
+        })
+      ) {
+        return;
+      }
+    }
     return;
   }
 
   if (
-    intent.intent === "submit_bill" &&
-    session.state === "consumer_identified" &&
-    session.consumer_id &&
-    intent.check_subtotal_cents != null
+    await tryHandleBillDraft({
+      admin,
+      twilio,
+      staff,
+      session,
+      body,
+      intent,
+    })
   ) {
-    await handleSubmitBill(admin, twilio, staff, session, {
-      subtotal: intent.check_subtotal_cents,
-      tip: intent.tip_cents ?? 0,
-    });
     return;
+  }
+
+  if (
+    session.state === "consumer_identified" &&
+    (messageLooksLikeBill(body) || billDraftHasAnyAmount(pendingBill))
+  ) {
+    const blocked = await replyIfDiscountOpsBlocked(
+      admin,
+      twilio,
+      staff,
+      session,
+    );
+    if (blocked) return;
   }
 
   if (
@@ -223,29 +334,30 @@ export async function handleStaffInboundMessage(opts: {
     return;
   }
 
-  if (intent.consumer_code && session.state === "idle") {
-    await handleLookupCode(admin, twilio, staff, session, intent.consumer_code);
-    return;
-  }
-
-  if (
-    intent.intent === "submit_bill" &&
-    session.state === "consumer_identified" &&
-    intent.check_subtotal_cents == null
-  ) {
-    await reply(
+  if (intent.consumer_code && session.state === "idle" && codeInBody) {
+    const updated = await handleLookupCode(
       admin,
       twilio,
-      staff.phoneE164,
-      await replyStaffCoach({
-        sessionState: session.state,
-        venueName: staff.venueName,
-        multiVenue: venues.length > 1,
-        userMessage: body,
-        situation: "consumer_identified",
-        conversationHistory,
-      }),
+      staff,
+      session,
+      intent.consumer_code,
+      { skipBillHint: messageLooksLikeBill(body) },
     );
+    if (updated) {
+      session = updated;
+      if (
+        await tryHandleBillDraft({
+          admin,
+          twilio,
+          staff,
+          session,
+          body,
+          intent,
+        })
+      ) {
+        return;
+      }
+    }
     return;
   }
 
@@ -264,10 +376,15 @@ export async function handleStaffInboundMessage(opts: {
         multiVenue: venues.length > 1,
         userMessage: body,
         conversationHistory,
+        pendingBill,
       }),
     );
     return;
   }
+
+  const coachSituation = billDraftHasAnyAmount(pendingBill)
+    ? "partial_bill"
+    : undefined;
 
   await reply(
     admin,
@@ -279,12 +396,34 @@ export async function handleStaffInboundMessage(opts: {
       multiVenue: venues.length > 1,
       userMessage: body,
       conversationHistory,
+      pendingBill,
+      situation: coachSituation,
     }),
   );
 }
 
 function prefixActiveVenue(staff: StaffContext): string {
   return `Unidad: ${staff.venueName}\n`;
+}
+
+function idleOpsBlockedReminder(
+  staff: StaffContext,
+  session: SessionRow,
+  opsMessage: string,
+): string {
+  const code = session.pending_consumer_code
+    ? displayConsumerCode(session.pending_consumer_code)
+    : null;
+  const preview = session.context?.consumer_preview as
+    | { name?: string }
+    | undefined;
+  const name = preview?.name;
+  let msg = `Unidad: ${staff.venueName}\n`;
+  if (code && name) msg += `Último comensal: ${name} (${code})\n`;
+  msg +=
+    `\nNo puedes abrir ticket con descuento todavía:\n${opsMessage}\n\n` +
+    `Manda otro código cuando esté listo, o escribe ayuda.`;
+  return msg;
 }
 
 function helpText(
@@ -302,9 +441,9 @@ function helpText(
     case "consumer_identified":
       return (
         prefixActiveVenue(staff) +
-        "Manda la cuenta, por ejemplo:\n" +
-        "• SUBTOTAL 850 PROPINA 100\n" +
-        "• o dos números: 850 100 (subtotal y propina)\n" +
+        "Manda la cuenta en un mensaje o en varios:\n" +
+        "• SUBTOTAL 850 y después PROPINA 100\n" +
+        "• o 850 y luego 100\n" +
         "Montos en pesos. Escribe cancelar para empezar de nuevo."
       );
     case "awaiting_staff_payment_confirm":
@@ -313,10 +452,10 @@ function helpText(
     default:
       return (
         prefixActiveVenue(staff) +
-        "Mesita Ops — tickets con descuento\n" +
+        "Mesita Ops — ticket con descuento (tipo A)\n" +
         "1) Código del comensal (0000-0000)\n" +
-        "2) SUBTOTAL y PROPINA\n" +
-        "3) El comensal confirma en la app Mesita\n" +
+        "2) SUBTOTAL y PROPINA por WhatsApp\n" +
+        "3) El comensal recibe la cuenta en la app → Pay y confirma ahí\n" +
         "4) Tú respondes listo cuando cobres\n" +
         switchLine +
         "cancelar — reinicia la sesión del comensal (mantienes esta unidad)."
@@ -537,7 +676,8 @@ async function handleLookupCode(
   staff: StaffContext,
   session: SessionRow,
   code: string,
-) {
+  opts?: { skipBillHint?: boolean },
+): Promise<SessionRow | null> {
   const consumerRes = await admin
     .from("consumers")
     .select(
@@ -552,9 +692,21 @@ async function handleLookupCode(
       staff.phoneE164,
       `No encontré comensal con el código ${displayConsumerCode(code)}. Revísalo e inténtalo de nuevo.`,
     );
-    return;
+    return null;
   }
   const c = consumerRes.data as ConsumerRow;
+  const venueRow = await loadVenueOpsRow(admin, staff.venueId);
+  if (!venueRow) {
+    await reply(admin, twilio, staff.phoneE164, "No encontré el restaurante.");
+    return null;
+  }
+  const venueOps = await guestRewardContext(
+    admin,
+    venueRow,
+    c.id,
+    c.tier_key,
+  );
+
   const subRes = await admin
     .from("consumer_subscriptions")
     .select("status, current_period_end")
@@ -572,14 +724,98 @@ async function handleLookupCode(
     ? `\nSubscription: active`
     : `\nSubscription: none (${c.tier_origin ?? "default"})`;
 
-  await admin
+  const guestBlock =
+    `Comensal verificado ✓\n` +
+    `Código: ${displayConsumerCode(code)}\n` +
+    `Nombre: ${name}\n` +
+    `Nivel: ${tier}${igLine}${subLine}\n` +
+    `Saldo Mesita: ${formatMoneyMx(c.cashback_balance_cents ?? 0)}\n\n` +
+    `Unidad: ${staff.venueName}\n` +
+    `${venueOps.rewardLine}\n`;
+
+  if (!venueOps.ops.ok) {
+    await admin
+      .from("staff_whatsapp_sessions")
+      .update({
+        state: "idle",
+        consumer_id: null,
+        pending_consumer_code: code,
+        ticket_id: null,
+        context: {
+          consumer_preview: { name, tier },
+          ops_block: venueOps.ops,
+        },
+      })
+      .eq("id", session.id);
+
+    await reply(
+      admin,
+      twilio,
+      staff.phoneE164,
+      guestBlock +
+        `\n⚠️ No puedes abrir ticket con descuento aquí:\n${venueOps.ops.staffMessage}`,
+    );
+    return null;
+  }
+
+  const updated = await admin
     .from("staff_whatsapp_sessions")
     .update({
       state: "consumer_identified",
       consumer_id: c.id,
       pending_consumer_code: code,
       ticket_id: null,
-      context: { consumer_preview: { name, tier } },
+      context: {
+        consumer_preview: { name, tier },
+        pending_bill: {},
+        ops_ok: true,
+      },
+    })
+    .eq("id", session.id)
+    .select("*")
+    .single();
+  if (updated.error) {
+    await reply(admin, twilio, staff.phoneE164, "Error al guardar la sesión.");
+    return null;
+  }
+
+  const billHint = opts?.skipBillHint
+    ? ""
+    : `\n\nManda la cuenta aquí (ej. SUBTOTAL 850, luego PROPINA 100).\n` +
+      `Al terminar, el comensal recibe la notificación en la app Mesita → Pay.`;
+
+  await reply(
+    admin,
+    twilio,
+    staff.phoneE164,
+    guestBlock +
+      `(El descuento aplica solo en este local.)` +
+      billHint,
+  );
+
+  return updated.data as SessionRow;
+}
+
+async function replyIfDiscountOpsBlocked(
+  admin: SupabaseClient,
+  twilio: TwilioEnv,
+  staff: StaffContext,
+  session: SessionRow,
+): Promise<boolean> {
+  const venue = await loadVenueOpsRow(admin, staff.venueId);
+  if (!venue) return false;
+  const hasOwner = await venueHasVerifiedOwner(admin, staff.venueId);
+  const ops = assessDiscountTicketOps(venue, hasOwner);
+  if (ops.ok) return false;
+
+  await admin
+    .from("staff_whatsapp_sessions")
+    .update({
+      state: "idle",
+      consumer_id: null,
+      ticket_id: null,
+      pending_consumer_code: session.pending_consumer_code,
+      context: { ...session.context, ops_block: ops, pending_bill: {} },
     })
     .eq("id", session.id);
 
@@ -587,16 +823,70 @@ async function handleLookupCode(
     admin,
     twilio,
     staff.phoneE164,
-    `Comensal verificado ✓\n` +
-      `Código: ${displayConsumerCode(code)}\n` +
-      `Nombre: ${name}\n` +
-      `Nivel: ${tier}${igLine}${subLine}\n` +
-      `Saldo Mesita: ${formatMoneyMx(c.cashback_balance_cents ?? 0)}\n\n` +
-      `Unidad: ${staff.venueName}\n` +
-      `(El descuento aplica solo en este local.)\n\n` +
-      `Manda la cuenta, por ejemplo:\n` +
-      `SUBTOTAL 850 PROPINA 100`,
+    `Unidad: ${staff.venueName}\n\n⚠️ ${ops.staffMessage}`,
   );
+  return true;
+}
+
+async function tryHandleBillDraft(opts: {
+  admin: SupabaseClient;
+  twilio: TwilioEnv;
+  staff: StaffContext;
+  session: SessionRow;
+  body: string;
+  intent: Awaited<ReturnType<typeof parseStaffWhatsAppMessage>>;
+}): Promise<boolean> {
+  const { admin, twilio, staff, session, body, intent } = opts;
+  if (session.state !== "consumer_identified" || !session.consumer_id) {
+    return false;
+  }
+
+  if (await replyIfDiscountOpsBlocked(admin, twilio, staff, session)) {
+    return true;
+  }
+
+  const parts = parseBillParts(body);
+  const draft = billDraftFromContext(session.context);
+  const merged = buildIncomingBill(body, parts, intent, draft);
+
+  const gotNewAmounts = billDraftHasAnyAmount(parts) ||
+    intent.check_subtotal_cents != null ||
+    intent.tip_cents != null;
+
+  if (!gotNewAmounts && !billDraftHasAnyAmount(draft)) {
+    if (intent.intent === "submit_bill") {
+      await reply(
+        admin,
+        twilio,
+        staff.phoneE164,
+        billDraftNeedMessage(merged),
+      );
+      return true;
+    }
+    return false;
+  }
+
+  const nextContext = {
+    ...session.context,
+    pending_bill: billDraftToContext(merged),
+  };
+  await admin
+    .from("staff_whatsapp_sessions")
+    .update({ context: nextContext })
+    .eq("id", session.id);
+
+  const sessionWithDraft = { ...session, context: nextContext };
+
+  if (isBillDraftReady(merged)) {
+    await handleSubmitBill(admin, twilio, staff, sessionWithDraft, {
+      subtotal: merged.subtotal_cents!,
+      tip: merged.tip_cents!,
+    });
+    return true;
+  }
+
+  await reply(admin, twilio, staff.phoneE164, billDraftNeedMessage(merged));
+  return true;
 }
 
 async function handleSubmitBill(
@@ -608,29 +898,25 @@ async function handleSubmitBill(
 ) {
   if (!session.consumer_id) return;
 
-  const venueRes = await admin
-    .from("venues")
-    .select(
-      "id, name, cashback_percent, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type",
-    )
-    .eq("id", staff.venueId)
-    .maybeSingle();
-  if (venueRes.error || !venueRes.data) {
+  const venue = await loadVenueOpsRow(admin, staff.venueId);
+  if (!venue) {
     await reply(admin, twilio, staff.phoneE164, "No encontré el restaurante.");
     return;
   }
-  const venue = venueRes.data as VenueRateRow;
-  if (venue.fiscal_type !== "informal") {
+  const hasOwner = await venueHasVerifiedOwner(admin, staff.venueId);
+  const ops = assessDiscountTicketOps(venue, hasOwner);
+  if (!ops.ok) {
     await reply(
       admin,
       twilio,
       staff.phoneE164,
-      "Este local usa cashback (formal) — los tickets con descuento no aplican aquí.",
+      `Unidad: ${staff.venueName}\n\n⚠️ ${ops.staffMessage}`,
     );
+    await resetSession(admin, session.id, staff.venueId);
     return;
   }
-  if (venue.listing_type !== "partner") {
-    await reply(admin, twilio, staff.phoneE164, "El local debe ser partner verificado en Mesita.");
+  if (venue.status === "archived") {
+    await reply(admin, twilio, staff.phoneE164, "Este local está archivado.");
     return;
   }
 
@@ -694,17 +980,7 @@ async function handleSubmitBill(
   }
 
   const ticketId = insert.data.id;
-  const payload = {
-    venue_name: venue.name,
-    check_subtotal_cents: calc.subtotal,
-    tip_cents: calc.tip,
-    total_cents: calc.total,
-    discount_cents: calc.discountCents,
-    discount_percent: calc.discountPercent,
-    redeem_cents: calc.redeemCents,
-    amount_due_cents: calc.amountDueCents,
-    currency: "MXN",
-  };
+  const payload = buildConsumerBillPayload(venue, calc, staff.venueId);
 
   await admin.from("consumer_pay_notifications").insert({
     consumer_id: session.consumer_id,
@@ -753,8 +1029,9 @@ async function handleSubmitBill(
         ? `Saldo Mesita: -${formatMoneyMx(calc.redeemCents)}\n`
         : "") +
       `Paga el comensal: ${formatMoneyMx(calc.amountDueCents)}\n\n` +
+      `Le enviamos notificación en la app Mesita → Pay para que confirme.\n` +
       `Cobra ${formatMoneyMx(calc.amountDueCents)} (efectivo o terminal).\n` +
-      `El comensal confirma en la app. Cuando cobres, responde listo.`,
+      `Cuando cobres, responde listo.`,
   );
 }
 
@@ -895,14 +1172,37 @@ async function enqueueReview(
   ticketId: string,
   venueId: string,
 ) {
-  const venue = await admin.from("venues").select("name").eq("id", venueId)
-    .single();
+  const [venueRes, ticketRes] = await Promise.all([
+    admin.from("venues").select("name, slug, photos").eq("id", venueId).single(),
+    admin
+      .from("tickets")
+      .select(
+        "discount_cents, redeem_cents, discount_percent, total_cents, check_subtotal_cents, tip_cents",
+      )
+      .eq("id", ticketId)
+      .single(),
+  ]);
+  const v = venueRes.data;
+  const t = ticketRes.data;
+  const discount = t?.discount_cents ?? 0;
+  const redeem = t?.redeem_cents ?? 0;
   await admin.from("consumer_pay_notifications").insert({
     consumer_id: consumerId,
     ticket_id: ticketId,
     kind: "review",
     status: "pending",
-    payload: { venue_name: venue.data?.name ?? "Partner venue" },
+    payload: {
+      venue_id: venueId,
+      venue_slug: v?.slug ?? null,
+      venue_name: v?.name ?? "Partner venue",
+      venue_photo_url: v?.photos?.[0] ?? null,
+      discount_cents: discount,
+      discount_percent: t?.discount_percent ?? null,
+      redeem_cents: redeem,
+      total_reward_cents: discount + redeem,
+      total_cents: t?.total_cents ?? null,
+      currency: "MXN",
+    },
   });
 }
 

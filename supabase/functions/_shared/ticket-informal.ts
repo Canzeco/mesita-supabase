@@ -87,6 +87,31 @@ export function formatMoneyMx(cents: number, currency = "MXN"): string {
   return `$${major} ${currency}`;
 }
 
+/** Payload for consumer Pay → Tickets (Realtime notification). */
+export function buildConsumerBillPayload(
+  venue: { name: string; photos?: string[] | null; slug?: string | null },
+  calc: InformalBillCalc,
+  venueId: string,
+): Record<string, unknown> {
+  const discount = calc.discountCents ?? 0;
+  const redeem = calc.redeemCents ?? 0;
+  return {
+    venue_id: venueId,
+    venue_slug: venue.slug ?? null,
+    venue_name: venue.name,
+    venue_photo_url: venue.photos?.[0] ?? null,
+    check_subtotal_cents: calc.subtotal,
+    tip_cents: calc.tip,
+    total_cents: calc.total,
+    discount_cents: discount,
+    discount_percent: calc.discountPercent,
+    redeem_cents: redeem,
+    total_reward_cents: discount + redeem,
+    amount_due_cents: calc.amountDueCents,
+    currency: "MXN",
+  };
+}
+
 export async function finalizeInformalTicket(
   admin: SupabaseClient,
   ticketId: string,

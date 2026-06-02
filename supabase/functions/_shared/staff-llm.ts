@@ -2,6 +2,12 @@
 // "hey check this code 1234-5678" and structured bill replies.
 
 import { extractConsumerCodeFromText, normalizeConsumerCodeInput } from "./consumer-code.ts";
+import {
+  type BillDraft,
+  messageLooksLikeBill,
+  normalizeLlmBillCents,
+  parseBillParts,
+} from "./staff-bill-draft.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const MODEL = "gpt-4o-mini";
@@ -32,32 +38,59 @@ const EMPTY_INTENT: StaffMessageIntent = {
   venue_index: null,
 };
 
+const STATE_HINTS: Record<string, string> = {
+  selecting_venue:
+    "Staff must pick which restaurant unit they are working at (number or name).",
+  idle: "Waiting for guest Mesita code (0000-0000). Bill amounts are not expected yet.",
+  consumer_identified:
+    "Guest verified. Staff may send bill in one or several messages (subtotal then tip). A new code switches guest.",
+  awaiting_staff_payment_confirm:
+    "Ticket open; waiting for staff to confirm they collected payment (listo/sí/ya cobré). Numbers are NOT a new bill.",
+  awaiting_payment_confirm:
+    "Same as awaiting_staff_payment_confirm.",
+};
+
 export async function parseStaffWhatsAppMessage(
   body: string,
   sessionState: string,
   conversationHistory = "",
+  pendingBill?: BillDraft,
 ): Promise<StaffMessageIntent> {
-  const heuristic = heuristicParse(body, sessionState);
+  const heuristic = heuristicParse(body, sessionState, pendingBill);
   const openaiKey = Deno.env.get("OPENAI_KEY")?.trim();
   if (!openaiKey) return heuristic;
 
+  const stateHint = STATE_HINTS[sessionState] ?? "Follow session state.";
+
   const system =
-    "You parse WhatsApp messages from restaurant waitstaff using Mesita. " +
+    "You parse WhatsApp messages from restaurant waitstaff using Mesita Ops (informal discount tickets, Mexico, Spanish/English mix). " +
     'Return JSON only: {"intent":"lookup_code"|"submit_bill"|"confirm_payment"|"select_venue"|"cancel"|"help"|"unknown",' +
     '"consumer_code":"0000-0000"|null,"check_subtotal_cents":number|null,"tip_cents":number|null,"confirm":boolean|null,"venue_index":number|null}. ' +
-    "select_venue: staff picking unit 1/2/3 from a list (venue_index 0-based). " +
-    "Consumer codes are 8 digits formatted 0000-0000. " +
-    "submit_bill: extract bill subtotal and tip in cents (e.g. $850.50 → 85050). " +
-    "confirm_payment: staff confirming guest paid (yes/sí/confirm/pagado/listo). " +
-    "lookup_code: staff sending or asking about a guest code. " +
-    "Use RECENT CONVERSATION for context when the latest message is short or continues a prior turn.";
+    "Rules:\n" +
+    "- consumer_code: 8 digits as 0000-0000; extract from messy text.\n" +
+    "- submit_bill: subtotal and/or tip in PESOS as integer CENTS (850 pesos → 85000). Either field may be null if only one amount this turn.\n" +
+    "- confirm_payment: staff collected money (sí, listo, ya cobré, pagado, ok, confirmado).\n" +
+    "- select_venue: picking unit from list (venue_index 0-based).\n" +
+    "- cancel: cancelar, reset, stop.\n" +
+    "- help: ayuda, ?, menú.\n" +
+    "- Use RECENT CONVERSATION + pending bill draft: e.g. subtotal in an earlier message, tip only now.\n" +
+    "- One message may include BOTH a guest code AND bill amounts.\n" +
+    `- Current session: ${sessionState}. ${stateHint}`;
 
   const historyBlock = conversationHistory.trim()
     ? `Recent conversation (oldest first):\n${conversationHistory.trim()}\n\n`
     : "";
 
+  const draftBlock =
+    pendingBill &&
+      (pendingBill.subtotal_cents != null || pendingBill.tip_cents != null)
+      ? `Pending bill draft (already saved): subtotal_cents=${
+        pendingBill.subtotal_cents ?? "null"
+      } tip_cents=${pendingBill.tip_cents ?? "null"}\n\n`
+      : "";
+
   const user =
-    `${historyBlock}Session state: ${sessionState}\nLatest message:\n${body.slice(0, 2000)}`;
+    `${historyBlock}${draftBlock}Session state: ${sessionState}\nLatest message:\n${body.slice(0, 2000)}`;
 
   try {
     const r = await fetch(OPENAI_URL, {
@@ -82,7 +115,7 @@ export async function parseStaffWhatsAppMessage(
     };
     const content = data.choices?.[0]?.message?.content ?? "";
     const parsed = JSON.parse(content) as Record<string, unknown>;
-    return mergeIntent(heuristic, parsed);
+    return mergeIntent(heuristic, parsed, sessionState, body);
   } catch {
     return heuristic;
   }
@@ -91,6 +124,8 @@ export async function parseStaffWhatsAppMessage(
 function mergeIntent(
   fallback: StaffMessageIntent,
   raw: Record<string, unknown>,
+  sessionState: string,
+  body: string,
 ): StaffMessageIntent {
   const intents = new Set([
     "lookup_code",
@@ -101,15 +136,54 @@ function mergeIntent(
     "help",
     "unknown",
   ]);
-  const intent = intents.has(String(raw.intent))
+  let intent = intents.has(String(raw.intent))
     ? (raw.intent as StaffMessageIntent["intent"])
     : fallback.intent;
 
-  let consumer_code: string | null = null;
-  if (typeof raw.consumer_code === "string" && raw.consumer_code.trim()) {
-    consumer_code = normalizeConsumerCodeInput(raw.consumer_code);
+  // Only trust a code present in THIS message (not conversation history).
+  let consumer_code = extractConsumerCodeFromText(body);
+  if (!consumer_code && typeof raw.consumer_code === "string") {
+    const llmCode = normalizeConsumerCodeInput(raw.consumer_code);
+    if (llmCode && body.includes(llmCode.replace("-", ""))) {
+      consumer_code = llmCode;
+    }
   }
-  if (!consumer_code) consumer_code = fallback.consumer_code;
+
+  const llmSub = normalizeLlmBillCents(toCents(raw.check_subtotal_cents));
+  const llmTip = normalizeLlmBillCents(toCents(raw.tip_cents));
+
+  let check_subtotal_cents = llmSub ?? fallback.check_subtotal_cents;
+  let tip_cents = llmTip ?? fallback.tip_cents;
+
+  const parts = parseBillParts(body);
+  if (parts.subtotal_cents != null) check_subtotal_cents = parts.subtotal_cents;
+  if (parts.tip_cents != null) tip_cents = parts.tip_cents;
+
+  if (isPaymentConfirmState(sessionState) && fallback.intent === "confirm_payment") {
+    intent = "confirm_payment";
+  } else if (
+    isPaymentConfirmState(sessionState) &&
+    intent === "submit_bill" &&
+    !messageLooksLikeBill(body) &&
+    fallback.intent === "confirm_payment"
+  ) {
+    intent = "confirm_payment";
+  }
+
+  if (
+    consumer_code &&
+    (check_subtotal_cents != null || tip_cents != null || messageLooksLikeBill(body))
+  ) {
+    if (intent === "unknown") intent = "lookup_code";
+  }
+
+  if (
+    (check_subtotal_cents != null || tip_cents != null) &&
+    sessionState === "consumer_identified" &&
+    intent === "unknown"
+  ) {
+    intent = "submit_bill";
+  }
 
   let venue_index: number | null = null;
   if (raw.venue_index != null) {
@@ -118,25 +192,44 @@ function mergeIntent(
   }
   if (venue_index == null) venue_index = fallback.venue_index;
 
+  let confirm: boolean | null = typeof raw.confirm === "boolean"
+    ? raw.confirm
+    : fallback.confirm;
+
+  if (
+    isPaymentConfirmState(sessionState) &&
+    intent === "confirm_payment" &&
+    confirm !== true &&
+    fallback.confirm === true
+  ) {
+    confirm = true;
+  }
+
   return {
     intent,
     consumer_code,
-    check_subtotal_cents: toCents(raw.check_subtotal_cents) ??
-      fallback.check_subtotal_cents,
-    tip_cents: toCents(raw.tip_cents) ?? fallback.tip_cents,
-    confirm: typeof raw.confirm === "boolean"
-      ? raw.confirm
-      : fallback.confirm,
+    check_subtotal_cents,
+    tip_cents,
+    confirm,
     venue_index,
   };
 }
 
-function heuristicParse(body: string, sessionState: string): StaffMessageIntent {
+function isPaymentConfirmState(sessionState: string): boolean {
+  return sessionState === "awaiting_staff_payment_confirm" ||
+    sessionState === "awaiting_payment_confirm";
+}
+
+function heuristicParse(
+  body: string,
+  sessionState: string,
+  pendingBill?: BillDraft,
+): StaffMessageIntent {
   const lower = body.trim().toLowerCase();
-  if (/^(help|\?|menu|ayuda)\b/.test(lower)) {
+  if (/^(help|\?|menu|ayuda|comandos)\b/.test(lower)) {
     return { ...EMPTY_INTENT, intent: "help" };
   }
-  if (/^(cancel|cancelar|reset|stop)\b/.test(lower)) {
+  if (/^(cancel|cancelar|reset|stop|reiniciar)\b/.test(lower)) {
     return { ...EMPTY_INTENT, intent: "cancel" };
   }
 
@@ -152,35 +245,47 @@ function heuristicParse(body: string, sessionState: string): StaffMessageIntent 
   }
 
   const code = extractConsumerCodeFromText(body);
-  if (code && sessionState === "idle") {
-    return { ...EMPTY_INTENT, intent: "lookup_code", consumer_code: code };
+
+  if (isPaymentConfirmState(sessionState)) {
+    if (
+      /^(yes|y|si|sí|confirm|confirmed|pagado|paid|listo|ok|cobrado|cobra|ya\s+cobr|hecho|done)\b/i
+        .test(lower) ||
+      /\b(ya\s+)?cobr[eé]\b/i.test(lower)
+    ) {
+      return { ...EMPTY_INTENT, intent: "confirm_payment", confirm: true };
+    }
+    if (!messageLooksLikeBill(body)) {
+      return EMPTY_INTENT;
+    }
   }
 
-  if (
-    sessionState === "consumer_identified" ||
-    sessionState === "idle"
-  ) {
-    const bill = parseBillAmounts(body);
-    if (bill.subtotal != null) {
+  if (code && (sessionState === "idle" || sessionState === "consumer_identified")) {
+    const parts = parseBillParts(body);
+    const hasBill = parts.subtotal_cents != null || parts.tip_cents != null;
+    return {
+      ...EMPTY_INTENT,
+      intent: "lookup_code",
+      consumer_code: code,
+      check_subtotal_cents: parts.subtotal_cents,
+      tip_cents: parts.tip_cents,
+      confirm: null,
+    };
+  }
+
+  if (sessionState === "consumer_identified" || sessionState === "idle") {
+    const parts = parseBillParts(body);
+    if (parts.subtotal_cents != null || parts.tip_cents != null) {
       return {
         ...EMPTY_INTENT,
         intent: "submit_bill",
         consumer_code: code,
-        check_subtotal_cents: bill.subtotal,
-        tip_cents: bill.tip ?? 0,
+        check_subtotal_cents: parts.subtotal_cents,
+        tip_cents: parts.tip_cents,
         confirm: null,
       };
     }
-  }
-
-  if (
-    sessionState === "awaiting_staff_payment_confirm" ||
-    sessionState === "awaiting_payment_confirm"
-  ) {
-    if (/^(yes|y|si|sí|confirm|confirmed|pagado|paid|listo|ok|cobrado|cobra)\b/i.test(
-      lower,
-    )) {
-      return { ...EMPTY_INTENT, intent: "confirm_payment", confirm: true };
+    if (pendingBill?.subtotal_cents != null && /\d/.test(body)) {
+      return { ...EMPTY_INTENT, intent: "submit_bill" };
     }
   }
 
@@ -188,54 +293,22 @@ function heuristicParse(body: string, sessionState: string): StaffMessageIntent 
     return { ...EMPTY_INTENT, intent: "lookup_code", consumer_code: code };
   }
 
-  if (
-    /^(hi|hello|hey|hola|buenas|buenos|qué tal|que tal|good morning|good afternoon)\b/i
-      .test(lower)
-  ) {
+  if (isCasualStaffMessage(body)) {
     return { ...EMPTY_INTENT, intent: "unknown" };
   }
 
-  if (sessionState === "consumer_identified") {
-    const bill = parseBillAmounts(body);
-    if (bill.subtotal == null && /\d/.test(body)) {
-      return { ...EMPTY_INTENT, intent: "submit_bill" };
-    }
+  if (sessionState === "consumer_identified" && /\d/.test(body)) {
+    return { ...EMPTY_INTENT, intent: "submit_bill" };
   }
 
   return EMPTY_INTENT;
 }
 
-/** Accept "850.50 100", "SUBTOTAL 850 TIP 100", or peso amounts. */
-function parseBillAmounts(text: string): { subtotal: number | null; tip: number | null } {
-  const lines = text.replace(/,/g, "").trim();
-  const subtotalMatch = lines.match(
-    /(?:subtotal|bill|cuenta|total)[:\s]*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)/i,
-  );
-  const tipMatch = lines.match(
-    /(?:tip|propina)[:\s]*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)/i,
-  );
-  if (subtotalMatch) {
-    return {
-      subtotal: moneyToCents(subtotalMatch[1]),
-      tip: tipMatch ? moneyToCents(tipMatch[1]) : 0,
-    };
-  }
-  const nums = [...lines.matchAll(/([0-9]+(?:\.[0-9]{1,2})?)/g)].map((m) =>
-    moneyToCents(m[1])
-  ).filter((n): n is number => n != null);
-  if (nums.length >= 2) {
-    return { subtotal: nums[0], tip: nums[1] };
-  }
-  if (nums.length === 1) {
-    return { subtotal: nums[0], tip: 0 };
-  }
-  return { subtotal: null, tip: null };
-}
-
-function moneyToCents(v: string): number | null {
-  const n = Number(v);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n * 100);
+export function isCasualStaffMessage(body: string): boolean {
+  const t = body.trim();
+  if (!t) return true;
+  return /^(hi|hello|hey|hola|buenas|buenos|qué tal|que tal|good morning|good afternoon|ok|vale|gracias|thanks)\b/i
+    .test(t);
 }
 
 function toCents(v: unknown): number | null {
