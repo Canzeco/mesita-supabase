@@ -145,9 +145,7 @@ export async function promptPendingStaffInviteOnWhatsApp(opts: {
     env: twilio,
     from: twilio.whatsappFromStaff,
     to: fromPhone,
-    body:
-      `Tienes una invitación pendiente de ${invite.venue_name}.\n\n` +
-      `Abre el mensaje de invitación y toca «Unirme», o responde SI aquí.`,
+    body: `${invite.venue_name} te invitó. Responde SI para unirte.`,
   });
   return { handled: true };
 }

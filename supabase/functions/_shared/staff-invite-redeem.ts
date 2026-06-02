@@ -202,11 +202,8 @@ export async function redeemStaffInvite(
 
 export function buildStaffInviteAcceptedReply(venueName: string): string {
   return (
-    `¡Listo! Ya eres parte del equipo en ${venueName}.\n\n` +
-    `Mesita Ops — ticket informal:\n` +
-    `1) Código del comensal (0000-0000)\n` +
-    `2) SUBTOTAL y PROPINA en pesos (ej. SUBTOTAL 850 TIP 100)\n` +
-    `3) Cuando paguen en la app, responde CONFIRM\n\n` +
-    `¿Varias unidades? Escribe SWITCH. HELP para ayuda.`
+    `Listo — ya estás en ${venueName}.\n\n` +
+    `Envía el código del comensal (0000-0000), luego SUBTOTAL y PROPINA.\n` +
+    `Cuando paguen: CONFIRM. HELP si necesitas ayuda.`
   );
 }

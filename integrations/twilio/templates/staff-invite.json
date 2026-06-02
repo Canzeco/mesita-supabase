@@ -8,7 +8,7 @@
   },
   "types": {
     "twilio/text": {
-      "body": "Mesita · {{1}} te invita como mesero/a. Toca «Unirme» si ves el botón, o responde SI en este chat. Todo aquí, sin links."
+      "body": "{{1}} te invita a Mesita Ops. Responde SI para unirte."
     }
   }
 }

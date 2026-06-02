@@ -13,7 +13,7 @@ const TEXT_TEMPLATE = {
   types: {
     "twilio/text": {
       body:
-        "Mesita · {{1}} te invita como mesero/a. Toca «Unirme» si ves el botón, o responde SI en este chat. Todo aquí, sin links.",
+        "{{1}} te invita a Mesita Ops. Responde SI para unirte.",
     },
   },
 };
