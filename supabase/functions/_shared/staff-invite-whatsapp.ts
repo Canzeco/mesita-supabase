@@ -101,7 +101,7 @@ async function completeStaffInviteAccept(opts: {
   return { handled: true };
 }
 
-/** WhatsApp Flow «Unirme» completed — flow_token = staff_invites.token */
+/** WhatsApp Flow completed (twilio/flows or whatsapp/flows). */
 export async function tryAcceptStaffInviteFromFlow(opts: {
   admin: SupabaseClient;
   twilio: TwilioEnv;
@@ -109,17 +109,21 @@ export async function tryAcceptStaffInviteFromFlow(opts: {
   params: Record<string, string>;
 }): Promise<{ handled: boolean }> {
   const token = extractStaffInviteFlowToken(opts.params);
-  if (!token) return { handled: false };
+  const invite = token
+    ? await findPendingStaffInviteByToken(opts.admin, token)
+    : await findPendingStaffInviteForPhone(opts.admin, opts.fromPhone);
 
-  const invite = await findPendingStaffInviteByToken(opts.admin, token);
   if (!invite) {
-    await sendWhatsAppText({
-      env: opts.twilio,
-      from: opts.twilio.whatsappFromStaff,
-      to: opts.fromPhone,
-      body: "No encontré una invitación activa con ese enlace. Pide a tu manager que te reenvíe el invite.",
-    });
-    return { handled: true };
+    if (token) {
+      await sendWhatsAppText({
+        env: opts.twilio,
+        from: opts.twilio.whatsappFromStaff,
+        to: opts.fromPhone,
+        body: "No hay invitación activa. Pide a tu manager que te reenvíe el invite.",
+      });
+      return { handled: true };
+    }
+    return { handled: false };
   }
 
   return completeStaffInviteAccept({
@@ -145,7 +149,7 @@ export async function promptPendingStaffInviteOnWhatsApp(opts: {
     env: twilio,
     from: twilio.whatsappFromStaff,
     to: fromPhone,
-    body: `${invite.venue_name} te invitó. Responde SI para unirte.`,
+    body: `${invite.venue_name} te invitó. Toca «Unirme» en el mensaje de arriba.`,
   });
   return { handled: true };
 }

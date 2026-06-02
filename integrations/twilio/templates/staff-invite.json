@@ -3,12 +3,30 @@
   "language": "es",
   "category": "UTILITY",
   "variables": {
-    "1": "Venue name",
-    "2": "Staff invite token (logged for support; accept via SI or Flow)"
+    "1": "Venue name"
   },
   "types": {
-    "twilio/text": {
-      "body": "{{1}} te invita a Mesita Ops. Responde SI para unirte."
+    "twilio/flows": {
+      "body": "{{1}} te invita a Mesita Ops.",
+      "button_text": "Unirme",
+      "type": "SIGN_UP",
+      "pages": [
+        {
+          "id": "join_team",
+          "next_page_id": null,
+          "title": "Unirte al equipo",
+          "layout": [
+            {
+              "type": "TEXT_BODY",
+              "text": "Confirma para unirte como mesero/a. Todo pasa en este chat."
+            },
+            {
+              "type": "FOOTER",
+              "label": "Confirmar"
+            }
+          ]
+        }
+      ]
     }
   }
 }

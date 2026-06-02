@@ -92,15 +92,8 @@ PY
 mkdir -p "$(dirname "${OUT}")"
 echo '{}' > "${OUT}"
 
-FLOW_ID="$(flow_id_for_staff_invite)"
-
 for f in "${TEMPLATES_DIR}"/*.json; do
   [[ -f "${f}" ]] || continue
-  base="$(basename "${f}" .json)"
-  if [[ "${base}" == *-flow ]] && [[ -z "${FLOW_ID}" ]]; then
-    echo "==> Template: ${base} (skipped — no Meta flow_id)"
-    continue
-  fi
   apply_one "${f}"
 done
 
@@ -108,7 +101,7 @@ echo ""
 staff_sid="$(python3 -c "
 import json
 d=json.load(open('${OUT}'))
-print(d.get('staff-invite-flow',{}).get('content_sid') or d.get('staff-invite',{}).get('content_sid',''))
+print(d.get('staff-invite',{}).get('content_sid',''))
 ")"
 if [[ -n "${staff_sid}" ]]; then
   echo "Primary ContentSid for TWILIO_CONTENT_SID_STAFF_INVITE: ${staff_sid}"

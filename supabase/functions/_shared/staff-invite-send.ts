@@ -34,6 +34,7 @@ export async function sendStaffInviteWhatsApp(opts: {
       contentSid,
       contentVariables: {
         "1": venueName.slice(0, 200),
+        // whatsapp/flows templates use {{2}} as flow_token; twilio/flows ignores it
         "2": inviteToken.slice(0, 128),
       },
     });
