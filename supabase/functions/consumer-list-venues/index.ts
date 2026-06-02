@@ -9,6 +9,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { clampIntRange, corsPreflight, json, readJsonOr } from "../_shared/http.ts";
+import { readAnonEnv } from "../_shared/auth.ts";
 import { VENUE_PUBLIC_COLUMNS } from "../_shared/venue-columns.ts";
 
 const DEFAULT_LIMIT = 50;
@@ -22,16 +23,13 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "Method not allowed" }, 405);
   }
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!supabaseUrl || !anonKey) {
-    return json({ ok: false, error: "Server misconfigured" }, 500);
-  }
+  const envRes = readAnonEnv();
+  if (!envRes.ok) return envRes.response;
 
   // Anon client is sufficient: the venues RLS policy already restricts SELECT
   // to status in ('active', 'lead') for anon + authenticated. This is the
   // single source of truth for what consumers are allowed to see.
-  const supabase = createClient(supabaseUrl, anonKey);
+  const supabase = createClient(envRes.env.url, envRes.env.anonKey);
 
   // Limit can come from a JSON body (POST from supabase.functions.invoke) or
   // a query string (?limit=… for raw GETs). Body wins if both are present.

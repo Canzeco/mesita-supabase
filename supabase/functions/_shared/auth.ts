@@ -43,9 +43,28 @@ export function readEFEnv():
   return { ok: true, env: { url, anonKey, serviceKey } };
 }
 
+// Lighter variant for PUBLIC read endpoints that only need the anon key
+// (RLS-restricted reads, no service-role writes, no internal invokes).
+// Avoids 500ing on a missing SERVICE_ROLE_KEY that the handler never uses.
+export type AnonEnv = { url: string; anonKey: string };
+
+export function readAnonEnv():
+  | { ok: true; env: AnonEnv }
+  | { ok: false; response: Response } {
+  const url = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!url || !anonKey) {
+    return {
+      ok: false,
+      response: json({ ok: false, error: "Server misconfigured" }, 500),
+    };
+  }
+  return { ok: true, env: { url, anonKey } };
+}
+
 // ─── User auth ──────────────────────────────────────────────────────
 
-type AuthedUser = {
+export type AuthedUser = {
   id: string;
   email: string | null;
   emailLower: string | null;
@@ -56,6 +75,21 @@ type AuthedUser = {
   // missing.
   raw: User;
 };
+
+// Shared shaping so getAuthedUser and getOptionalAuthedUser stay in lockstep.
+function shapeAuthedUser(raw: User): AuthedUser {
+  return {
+    id: raw.id,
+    email: raw.email ?? null,
+    emailLower: raw.email?.toLowerCase() ?? null,
+    phone: raw.phone ?? null,
+    appRole:
+      ((raw.app_metadata as Record<string, unknown> | null)?.role as
+        | string
+        | undefined) ?? null,
+    raw,
+  };
+}
 
 export async function getAuthedUser(
   req: Request,
@@ -81,21 +115,34 @@ export async function getAuthedUser(
       response: json({ ok: false, error: "Invalid session" }, 401),
     };
   }
-  const raw = data.user;
-  return {
-    ok: true,
-    userClient,
-    user: {
-      id: raw.id,
-      email: raw.email ?? null,
-      emailLower: raw.email?.toLowerCase() ?? null,
-      phone: raw.phone ?? null,
-      appRole:
-        ((raw.app_metadata as Record<string, unknown> | null)?.role as string | undefined) ??
-        null,
-      raw,
-    },
-  };
+  return { ok: true, userClient, user: shapeAuthedUser(data.user) };
+}
+
+// Anonymous-OK variant for public facades (discovery decks, catalog,
+// place suggestions) where a signed-in caller gets personalization but an
+// anonymous caller is still served. Never returns a 401: a missing or
+// invalid bearer simply yields `user: null`. When a valid session IS
+// present, the RLS-scoped `userClient` is returned so the handler can read
+// the caller's own rows.
+//
+//   const { user, userClient } = await getOptionalAuthedUser(req, env);
+//   if (user && userClient) { /* personalize */ }
+export async function getOptionalAuthedUser(
+  req: Request,
+  env: EFEnv | AnonEnv,
+): Promise<{ user: AuthedUser | null; userClient: SupabaseClient | null }> {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  if (!authHeader.startsWith("Bearer ")) {
+    return { user: null, userClient: null };
+  }
+  const userClient = createClient(env.url, env.anonKey, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const { data, error } = await userClient.auth.getUser();
+  if (error || !data.user) {
+    return { user: null, userClient: null };
+  }
+  return { user: shapeAuthedUser(data.user), userClient };
 }
 
 // ─── Admin client ───────────────────────────────────────────────────

@@ -36,6 +36,7 @@ import {
   adminClient,
   getAuthedUser,
   readEFEnv,
+  requireMembership,
 } from "../_shared/auth.ts";
 import {
   FORMAL_STORY_KINDS,
@@ -104,22 +105,10 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Membership: the waiter who verifies must belong to the ticket's venue.
-  const membership = await admin
-    .from("venue_members")
-    .select("role")
-    .eq("venue_id", ticket.venue_id)
-    .eq("business_id", userId)
-    .maybeSingle();
-  if (membership.error) {
-    return json(
-      { ok: false, error: `membership: ${membership.error.message}` },
-      500,
-    );
-  }
-  if (!membership.data) {
-    return json({ ok: false, error: "Not a member of this venue" }, 403);
-  }
+  // Membership: the waiter who verifies must belong to the ticket's venue
+  // (super-admins bypass — same rule as every other Team-surface EF).
+  const memberRes = await requireMembership(admin, authRes.user, ticket.venue_id);
+  if (!memberRes.ok) return memberRes.response;
 
   // Story-status guard: once we've moved to a terminal verified/rejected
   // state we don't re-process. Idempotent re-submission returns the row.

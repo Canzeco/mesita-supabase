@@ -89,7 +89,12 @@ export function formatMoneyMx(cents: number, currency = "MXN"): string {
 
 /** Payload for consumer Pay → Tickets (Realtime notification). */
 export function buildConsumerBillPayload(
-  venue: { name: string; photos?: string[] | null; slug?: string | null },
+  venue: {
+    name: string;
+    photos?: string[] | null;
+    slug?: string | null;
+    monthly_promo_cap?: number | null;
+  },
   calc: InformalBillCalc,
   venueId: string,
 ): Record<string, unknown> {
@@ -107,6 +112,7 @@ export function buildConsumerBillPayload(
     discount_percent: calc.discountPercent,
     redeem_cents: redeem,
     total_reward_cents: discount + redeem,
+    reward_cap_mxn: venue.monthly_promo_cap ?? null,
     amount_due_cents: calc.amountDueCents,
     currency: "MXN",
   };

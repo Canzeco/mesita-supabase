@@ -12,6 +12,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
+import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
 import { isOnDomain } from "../_shared/onboarding.ts";
 import { invokeArtificialCaller } from "../_shared/internal.ts";
 import { classifyLinks } from "../_shared/channels.ts";
@@ -125,9 +126,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
   if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
 
-  const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-  const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
-  const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const envRes = readEFEnv();
+  if (!envRes.ok) return envRes.response;
+  const env = envRes.env;
+
   // Third-party secrets follow the `<VENDOR>_SUPABASE_API_KEY` convention
   // (server-only, stored in Supabase secrets). Browser-bound keys use
   // `NEXT_PUBLIC_<VENDOR>_BROWSER_KEY` and live on Vercel.
@@ -145,24 +147,15 @@ Deno.serve(async (req) => {
   const GOOGLE_CSE_KEY = Deno.env.get("GOOGLE_CSE_SUPABASE_API_KEY");
   const GOOGLE_CSE_ID = Deno.env.get("GOOGLE_CSE_ID");
 
-  if (!SUPABASE_URL || !ANON_KEY || !SERVICE_KEY || !GOOGLE_KEY) {
+  if (!GOOGLE_KEY) {
     return json({ ok: false, error: "Server misconfigured (missing core secrets)" }, 500);
   }
 
   // Authenticate caller.
-  const authHeader = req.headers.get("Authorization") ?? "";
-  if (!authHeader.startsWith("Bearer ")) {
-    return json({ ok: false, error: "Missing bearer token" }, 401);
-  }
-  const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: userData, error: userError } = await userClient.auth.getUser();
-  if (userError || !userData.user) {
-    return json({ ok: false, error: "Invalid session" }, 401);
-  }
-  const userId = userData.user.id;
-  const userEmail = userData.user.email ?? null;
+  const authRes = await getAuthedUser(req, env);
+  if (!authRes.ok) return authRes.response;
+  const userId = authRes.user.id;
+  const userEmail = authRes.user.email;
 
   // Parse input.
   const bodyRes = await readJson<EnrichBody>(req);
@@ -177,9 +170,7 @@ Deno.serve(async (req) => {
   // an optimisation for the common "business clicks twice" case. Service
   // role: RLS would hide pending_review / paused / archived rows from the
   // anon path and we want to detect them all.
-  const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  const admin = adminClient(env);
   const { data: existingByPlaceId } = await admin
     .from("venues")
     .select("id, slug, name, status, listing_type")
@@ -527,24 +518,20 @@ Deno.serve(async (req) => {
   // zone/city, established_year, executive_chef) land before we return.
   // Best-effort — the venue already exists; a failed/timed-out enrich just
   // leaves those nullable fields empty (admin-enrich-venue can re-run).
+  // atlas-enrich-profile reads only `venue_id` from the body and re-loads
+  // everything else from the freshly-inserted row — don't ship fields it
+  // ignores.
   let profileEnrichError: string | null = null;
-  if (SUPABASE_URL && ANON_KEY && SERVICE_KEY) {
-    try {
-      const enrichRes = await invokeArtificialCaller(
-        { url: SUPABASE_URL, anonKey: ANON_KEY, serviceKey: SERVICE_KEY },
-        "business-create-unit",
-        "atlas-enrich-profile",
-        {
-          venue_id: venue.id,
-          name: venue.name,
-          address,
-          category: insertRow.category,
-        },
-      );
-      if (!enrichRes.ok) profileEnrichError = enrichRes.error;
-    } catch (err) {
-      profileEnrichError = err instanceof Error ? err.message : "enrich_failed";
-    }
+  try {
+    const enrichRes = await invokeArtificialCaller(
+      env,
+      "business-create-unit",
+      "atlas-enrich-profile",
+      { venue_id: venue.id },
+    );
+    if (!enrichRes.ok) profileEnrichError = enrichRes.error;
+  } catch (err) {
+    profileEnrichError = err instanceof Error ? err.message : "enrich_failed";
   }
 
   return json(

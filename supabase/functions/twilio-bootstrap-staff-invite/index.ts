@@ -3,6 +3,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json } from "../_shared/http.ts";
 import { readTwilioEnv } from "../_shared/twilio.ts";
+import { STAFF_INVITE_TEMPLATE_BODY } from "../_shared/staff-invite-message.ts";
 
 const CONTENT_API = "https://content.twilio.com/v1/Content";
 
@@ -11,8 +12,7 @@ const TEXT_TEMPLATE = {
   language: "es",
   types: {
     "twilio/text": {
-      body:
-        "Hola — {{1}} te invita a usar Mesita Ops por WhatsApp para tickets con descuento.\n\nSi quieres unirte al equipo, responde sí a este mensaje.",
+      body: STAFF_INVITE_TEMPLATE_BODY,
     },
   },
 };

@@ -29,7 +29,7 @@ type RequestBody = {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
-  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" });
+  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
 
   const envRes = readEFEnv();
   if (!envRes.ok) return envRes.response;

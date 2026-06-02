@@ -381,6 +381,7 @@ Deno.serve(async (req) => {
       cashback_percent: isFormal ? ratePercent : 0,
       redeem_cents: redeemCents,
       total_reward_cents: (isFormal ? cashbackCents : discountCents) + redeemCents,
+      reward_cap_mxn: capPesos ?? null,
       amount_due_cents: amountDueCents,
       currency: insert.data.currency ?? "MXN",
     },

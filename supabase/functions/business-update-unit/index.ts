@@ -12,9 +12,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import {
   adminClient,
-  checkSuperAdmin,
   getAuthedUser,
   readEFEnv,
+  requireMembership,
 } from "../_shared/auth.ts";
 import { isEmailish } from "../_shared/input.ts";
 import { VENUE_BUSINESS_COLUMNS } from "../_shared/venue-columns.ts";
@@ -173,13 +173,8 @@ Deno.serve(async (req) => {
   if (!envRes.ok) return envRes.response;
   const authRes = await getAuthedUser(req, envRes.env);
   if (!authRes.ok) return authRes.response;
-  const userId = authRes.user.id;
 
-  // Auth: any signed-in user. Super-admin elevation (skips the
-  // venue_members check) is granted when the caller's email is in
-  // public.super_admins.
   const admin = adminClient(envRes.env);
-  const isSuperAdmin = await checkSuperAdmin(admin, authRes.user);
 
   // Parse + validate.
   const bodyRes = await readJson<UpdateBody>(req);
@@ -188,20 +183,10 @@ Deno.serve(async (req) => {
   const venueId = (body.id ?? "").toString().trim();
   if (!venueId) return json({ ok: false, error: "id is required" }, 400);
 
-  if (!isSuperAdmin) {
-    const { data: membership, error: membershipError } = await admin
-      .from("venue_members")
-      .select("role")
-      .eq("venue_id", venueId)
-      .eq("business_id", userId)
-      .maybeSingle();
-    if (membershipError) {
-      return json({ ok: false, error: `membership_lookup: ${membershipError.message}` }, 500);
-    }
-    if (!membership) {
-      return json({ ok: false, error: "Not a member of this venue" }, 403);
-    }
-  }
+  // Auth: caller must be a member of this venue. Super-admins bypass via
+  // the super_admins allowlist baked into requireMembership.
+  const memberRes = await requireMembership(admin, authRes.user, venueId);
+  if (!memberRes.ok) return memberRes.response;
 
   // Build the update payload from the whitelist. Missing keys are not
   // touched. Explicit null clears the field.

@@ -14,16 +14,15 @@
 // Deploy: supabase functions deploy business-suggest-places
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
-import { readEFEnv } from "../_shared/auth.ts";
+import { getOptionalAuthedUser, readEFEnv } from "../_shared/auth.ts";
 import { invokeArtificialCaller } from "../_shared/internal.ts";
 
 type Body = { input?: string; sessionToken?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
-  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" });
+  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
 
   const envRes = readEFEnv();
   if (!envRes.ok) return envRes.response;
@@ -35,20 +34,9 @@ Deno.serve(async (req) => {
 
   // Resolve caller user id from the bearer (if present). The atlas caller
   // uses this to mark verified_partner_self vs _other on Mesita-side
-  // matches. We do this with the anon-keyed user client so RLS still applies.
-  let callerUserId: string | null = null;
-  const authHeader = req.headers.get("Authorization") ?? "";
-  if (authHeader.startsWith("Bearer ")) {
-    try {
-      const userClient = createClient(env.url, env.anonKey, {
-        global: { headers: { Authorization: authHeader } },
-      });
-      const { data } = await userClient.auth.getUser();
-      callerUserId = data.user?.id ?? null;
-    } catch (err) {
-      console.error("[business-suggest-places] auth.getUser:", err);
-    }
-  }
+  // matches. RLS-aware user client; anonymous degrades to "_other".
+  const { user } = await getOptionalAuthedUser(req, env);
+  const callerUserId = user?.id ?? null;
 
   const result = await invokeArtificialCaller<{
     ok: boolean;

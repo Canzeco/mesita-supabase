@@ -10,9 +10,8 @@
 // Deploy: supabase functions deploy consumer-recommend-deck
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
-import { readEFEnv } from "../_shared/auth.ts";
+import { getOptionalAuthedUser, readEFEnv } from "../_shared/auth.ts";
 import { invokeArtificialCaller } from "../_shared/internal.ts";
 
 type Body = {
@@ -41,23 +40,17 @@ Deno.serve(async (req) => {
   // Honour the bearer if present so we can read the signed-in consumer's
   // profile for personalisation, but anonymous is the common path. RLS-aware
   // reads through the user-scoped client.
-  const authHeader = req.headers.get("Authorization") ?? "";
+  const { user, userClient } = await getOptionalAuthedUser(req, env);
   let profile: ConsumerProfile | null = null;
-  if (authHeader.startsWith("Bearer ")) {
-    const userClient = createClient(env.url, env.anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: authData } = await userClient.auth.getUser();
-    if (authData.user) {
-      const { data } = await userClient
-        .from("consumers")
-        .select("full_name, country, birthday, sex, tier_key")
-        .eq("id", authData.user.id)
-        .maybeSingle();
-      if (data) {
-        const { tier_key, ...rest } = data as Record<string, unknown>;
-        profile = { ...(rest as ConsumerProfile), tier: (tier_key as string) ?? "free" };
-      }
+  if (user && userClient) {
+    const { data } = await userClient
+      .from("consumers")
+      .select("full_name, country, birthday, sex, tier_key")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (data) {
+      const { tier_key, ...rest } = data as Record<string, unknown>;
+      profile = { ...(rest as ConsumerProfile), tier: (tier_key as string) ?? "free" };
     }
   }
 
