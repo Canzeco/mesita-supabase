@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
 
   const envRes = readEFEnv();
   if (!envRes.ok) {
-    console.error("[twilio-whatsapp-inbound] supabase env", envRes.error);
+    console.error("[twilio-whatsapp-inbound] supabase env missing");
     return emptyMessagingTwiml();
   }
   const admin = adminClient(envRes.env);

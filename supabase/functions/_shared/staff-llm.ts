@@ -163,6 +163,7 @@ function heuristicParse(body: string, sessionState: string): StaffMessageIntent 
     const bill = parseBillAmounts(body);
     if (bill.subtotal != null) {
       return {
+        ...EMPTY_INTENT,
         intent: "submit_bill",
         consumer_code: code,
         check_subtotal_cents: bill.subtotal,

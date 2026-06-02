@@ -1,13 +1,13 @@
 // Staff invite accept — natural-language sí/yes, or Flow submit when we add flows later.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { phonesMatch } from "./phone.ts";
 import {
   buildStaffInviteAcceptedReply,
   ensureAuthUserForStaffPhone,
   findPendingStaffInviteByToken,
   findPendingStaffInviteForPhone,
   isStaffInviteAcceptMessage,
-  phonesMatch,
   redeemStaffInvite,
 } from "./staff-invite-redeem.ts";
 import { sendStaffWhatsAppReply } from "./staff-whatsapp-messages.ts";

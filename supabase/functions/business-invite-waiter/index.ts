@@ -260,8 +260,9 @@ async function isPhoneAlreadyStaffAtVenue(
   venueId: string,
   phoneE164: string,
 ): Promise<boolean> {
+  const digits = phoneE164.replace(/\D/g, "");
   const { data: userId, error } = await admin.rpc("find_user_id_by_phone", {
-    p_phone: phoneE164,
+    phone_digits: digits,
   });
   if (error || !userId) return false;
 
