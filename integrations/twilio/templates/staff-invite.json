@@ -1,0 +1,14 @@
+{
+  "friendly_name": "staff-invite",
+  "language": "es",
+  "category": "UTILITY",
+  "types": {
+    "twilio/text": {
+      "body": "Mesita: {{1}} te invitó al equipo. Acepta aquí: {{2}}"
+    }
+  },
+  "variables": {
+    "1": "Venue name",
+    "2": "Invite URL"
+  }
+}

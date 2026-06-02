@@ -6,10 +6,7 @@
 // channel, codeHash}), and "dispatches" the code to the
 // Google-listed phone via Twilio.
 //
-// Mock mode: TWILIO_AUTH_TOKEN missing → no call is placed, plaintext
-// code is returned to the caller in `mockCode` so the operator can
-// complete the loop in dev. Production wires Twilio Verify (call/SMS)
-// later; this EF keeps the contract identical either way.
+// MOCK ONLY — we never dial venue.phone (see venue-otp-mock.ts). mockCode on screen.
 //
 // The phone NEVER comes from the user. We always dial the venue's
 // google_place_id-sourced phone, copied to payload.phoneCalled at insert
@@ -32,6 +29,10 @@ import {
   randomSixDigits,
   sha256Hex,
 } from "../_shared/otp.ts";
+import {
+  isVenueOtpMockMode,
+  mockVenueOtpPhone,
+} from "../_shared/venue-otp-mock.ts";
 
 type Body = { venueId?: string; requesterEmail?: string };
 
@@ -119,30 +120,33 @@ Deno.serve(async (req) => {
   const channel = channelForCountry(venue.country);
   const code = randomSixDigits();
   const codeHash = await sha256Hex(code);
-  // Mock mode when no Twilio token is set. Real Twilio integration
-  // lands later; the shape of this EF doesn't change at that point —
-  // mockCode just becomes null and the call actually places.
-  const mockCode = Deno.env.get("TWILIO_AUTH_TOKEN") ? null : code;
+  const mockMode = isVenueOtpMockMode();
+  const mockCode = mockMode ? code : null;
+  const phoneDialed = mockMode ? mockVenueOtpPhone() : venue.phone;
 
   const insertRes = await insertPendingOtpVerification(admin, {
     venueId,
     userId,
     requesterEmail,
     method: "ai_call",
-    payload: { phoneCalled: venue.phone, channel },
+    payload: {
+      phoneCalled: venue.phone,
+      channel,
+      mockMode,
+      displayPhone: phoneDialed,
+    },
     codeHash,
   });
   if (!insertRes.ok) return insertRes.response;
 
-  // TODO: when TWILIO_AUTH_TOKEN is wired, place the actual call/SMS
-  // here. For now we return immediately so the UI can flip into the
-  // OTP-entry state with the mock code visible.
+  // Outbound calls intentionally not implemented — venues are never dialed.
 
   return json({
     ok: true,
     verificationId: insertRes.verificationId,
     channel,
-    phoneDialed: venue.phone,
+    phoneDialed,
+    mockMode,
     mockCode,
   });
 });

@@ -1,8 +1,8 @@
 // Supabase Edge Function — consumer-get-profile
 //
 // Authenticated. Returns the caller's consumer profile, creating it on first
-// call (with a stable short `code` used by validators to scan/identify the
-// consumer at checkout) and returning the cached cashback balance.
+// call (with sequential 8-digit `code` 0000-0000 for validators / WhatsApp)
+// and returning the cached cashback balance.
 //
 // Self-contained: verifies the JWT, does its own DB read/upsert through the
 // service role, never calls another Edge Function.
@@ -15,6 +15,7 @@ import {
   readEFEnv,
 } from "../_shared/auth.ts";
 import { getTierConfig } from "../_shared/membership.ts";
+import { isCanonicalConsumerCode } from "../_shared/consumer-code.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -66,8 +67,8 @@ Deno.serve(async (req) => {
     if (!consumer) {
       return json({ ok: false, error: "Could not assign a unique code" }, 500);
     }
-  } else if (!consumer.code) {
-    // Existing row without a code (e.g. created before this migration ran).
+  } else if (!consumer.code || !isCanonicalConsumerCode(consumer.code)) {
+    // Missing or legacy alphanumeric code → allocate next sequential 8-digit code.
     const codeResult = await admin.rpc("generate_consumer_code");
     if (codeResult.error) {
       return json({ ok: false, error: `code_gen: ${codeResult.error.message}` }, 500);

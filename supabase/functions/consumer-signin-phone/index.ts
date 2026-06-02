@@ -6,8 +6,8 @@
 //
 //   1. Stamp app_metadata.role = 'consumer' on first sign-in (don't clobber
 //      if the user is already a staff member of some venue).
-//   2. Lazy-create the consumers row with a unique 6-char code, mirroring
-//      auth.user.phone into consumers.phone.
+//   2. Lazy-create the consumers row with sequential 8-digit code (0000-0000),
+//      mirroring auth.user.phone into consumers.phone.
 //
 // Safe to call on every sign-in (idempotent). Returns the current role +
 // consumer row so the client can refresh its session and route accordingly.

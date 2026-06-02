@@ -1,7 +1,7 @@
 // Supabase Edge Function — business-find-consumer
 //
 // Authenticated. A validator (any venue_member) looks up a consumer by
-// the 6-char code on their QR. Returns the consumer's display name +
+// the 8-digit code on their QR (0000-0000). Returns the consumer's display name +
 // current cashback balance so the validator UI can show "Pato — $55
 // available" before opening a ticket. Membership of *some* venue is
 // enough — we don't enforce which venue here because lookup is global.

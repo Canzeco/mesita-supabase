@@ -47,3 +47,15 @@ Definitions: `integrations/twilio/templates/`. Create in Twilio Content Builder 
 ## Voice OTP tip
 
 For Twilio-owned numbers, use **phone call** verification in Meta signup; SMS OTP lands in Twilio Messaging Logs.
+
+## Staff WhatsApp — one active unit per phone
+
+Business rules:
+
+- Only **team staff** (`venue_roles.role = staff`) can use Mesita Ops for Type A tickets.
+- One auth account may belong to **many units**; one unit may have **many staff**.
+- **One WhatsApp number → one active venue at a time.** Tickets and discounts always apply to that unit.
+
+If a waiter works at two partner venues, their first message (or `SWITCH`) shows a numbered list; they reply `1`, `2`, or the venue name. Guest codes and bills are blocked until a unit is selected. `SWITCH` only works when no guest session is open (`idle`); use `CANCEL` first if needed.
+
+Session state is stored in `staff_whatsapp_sessions` (`venue_id` + `state`, including `selecting_venue`).

@@ -36,6 +36,10 @@ import {
   randomSixDigits,
   sha256Hex,
 } from "../_shared/otp.ts";
+import {
+  isVenueOtpMockMode,
+  mockVenueOtpEmail,
+} from "../_shared/venue-otp-mock.ts";
 
 type Body = { venueId?: string; requesterEmail?: string };
 
@@ -117,29 +121,32 @@ Deno.serve(async (req) => {
 
   const code = randomSixDigits();
   const codeHash = await sha256Hex(code);
-  // Mock mode until a transactional provider is wired. Same contract
-  // as the phone path: plain code in mockCode when not configured.
-  const providerConfigured = !!Deno.env.get("RESEND_SUPABASE_API_KEY");
-  const mockCode = providerConfigured ? null : code;
+  const mockMode = isVenueOtpMockMode();
+  const mockCode = mockMode ? code : null;
+  const sentTo = mockMode ? mockVenueOtpEmail() : venue.email;
 
   const insertRes = await insertPendingOtpVerification(admin, {
     venueId,
     userId,
     requesterEmail,
     method: "ai_email",
-    payload: { emailSent: venue.email, websiteUrl: venue.website_url },
+    payload: {
+      emailSent: venue.email,
+      websiteUrl: venue.website_url,
+      mockMode,
+      displayEmail: sentTo,
+    },
     codeHash,
   });
   if (!insertRes.ok) return insertRes.response;
 
-  // TODO: when RESEND_SUPABASE_API_KEY (or whichever provider) is set,
-  // send the actual email here. For now we return immediately so the
-  // UI can flip into the OTP-entry state with the mock code visible.
+  // Outbound email intentionally not implemented — venue inboxes are not emailed.
 
   return json({
     ok: true,
     verificationId: insertRes.verificationId,
-    sentTo: venue.email,
+    sentTo,
+    mockMode,
     mockCode,
   });
 });
