@@ -1,7 +1,7 @@
 // Supabase Edge Function — business-invite-waiter
 //
 // Creates a staff_invites row and, for WhatsApp + phone, sends one session
-// message from Mesita Ops with the accept link (same path as Team "Ping").
+// message from Mesita Ops. Staff accept by replying SI in WhatsApp (no links).
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
   let sendError: string | null = null;
   let messageSid: string | null = null;
 
-  if (channel === "whatsapp" && phone && shareUrl) {
+  if (channel === "whatsapp" && phone) {
     const twilio = readTwilioEnv();
     if (!twilio.ok) {
       sendError = twilio.error;
@@ -88,7 +88,7 @@ Deno.serve(async (req) => {
         env: twilio.env,
         from: twilio.env.whatsappFromStaff,
         to: phone,
-        body: buildStaffInviteWhatsAppBody({ venueName, shareUrl }),
+        body: buildStaffInviteWhatsAppBody({ venueName }),
       });
       if (wa.ok) {
         sent = true;
@@ -100,7 +100,8 @@ Deno.serve(async (req) => {
   } else if (channel === "whatsapp" && !phone) {
     sendError = "Add a phone number to send the WhatsApp invite automatically.";
   } else if (channel === "sms") {
-    sendError = "SMS invite send not wired yet — copy the link below.";
+    sendError =
+      "SMS waiter invites are not enabled — use WhatsApp; staff accept by replying SI in Ops chat.";
   }
 
   return json({

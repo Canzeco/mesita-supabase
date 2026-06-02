@@ -19,6 +19,10 @@ import {
   handleStaffInboundMessage,
   resolveStaffAccess,
 } from "../_shared/staff-whatsapp-flow.ts";
+import {
+  promptPendingStaffInviteOnWhatsApp,
+  tryAcceptStaffInviteOnWhatsApp,
+} from "../_shared/staff-invite-whatsapp.ts";
 import { replyUnauthorizedStaff } from "../_shared/staff-whatsapp-replies.ts";
 
 function phoneFromWhatsAppAddress(addr: string): string {
@@ -89,15 +93,33 @@ Deno.serve(async (req) => {
 
   try {
     if (isStaffLine(toLine, twilio.env.whatsappFromStaff)) {
+      const accepted = await tryAcceptStaffInviteOnWhatsApp({
+        admin,
+        twilio: twilio.env,
+        fromPhone,
+        body,
+      });
+      if (accepted.handled) {
+        return emptyMessagingTwiml();
+      }
+
       const access = await resolveStaffAccess(admin, fromPhone);
       if (access.status !== "ok") {
-        const msg = await replyUnauthorizedStaff(access.status, body);
-        await sendWhatsAppText({
-          env: twilio.env,
-          from: twilio.env.whatsappFromStaff,
-          to: fromPhone,
-          body: msg,
+        const prompted = await promptPendingStaffInviteOnWhatsApp({
+          admin,
+          twilio: twilio.env,
+          fromPhone,
+          body,
         });
+        if (!prompted.handled) {
+          const msg = await replyUnauthorizedStaff(access.status, body);
+          await sendWhatsAppText({
+            env: twilio.env,
+            from: twilio.env.whatsappFromStaff,
+            to: fromPhone,
+            body: msg,
+          });
+        }
       } else {
         await handleStaffInboundMessage({
           admin,

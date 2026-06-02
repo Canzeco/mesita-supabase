@@ -17,12 +17,11 @@ export type StaffCoachContext = {
 const UNAUTH_STATIC: Record<StaffAccessDeniedReason, string> = {
   unknown_phone:
     "Hey — Mesita Ops is for restaurant staff only, and this WhatsApp number isn't on file.\n\n" +
-    "Ask your manager to invite you in the Mesita business app, using this same phone number. " +
-    "Once you accept the invite, message me again.",
+    "Ask your manager to invite you from the Mesita business app (same phone). " +
+    "When you get the WhatsApp invite, reply SI here — no links needed.",
   not_on_team:
     "Hey — we found a Mesita account for this number, but you're not on any venue team as staff (waiter/validator).\n\n" +
-    "You need a staff invite from your manager before you can open tickets here. " +
-    "Accept it in the business app, then come back.",
+    "Ask your manager for a staff invite on this WhatsApp number, then reply SI to the invite message.",
 };
 
 const COACH_STATIC: Record<string, (ctx: StaffCoachContext) => string> = {

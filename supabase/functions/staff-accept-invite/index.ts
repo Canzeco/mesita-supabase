@@ -1,18 +1,6 @@
 // Supabase Edge Function — staff-accept-invite
 //
-// Called by a logged-in user (already authed via consumer phone OTP) to
-// redeem an invite token a business sent them. Steps:
-//
-//   1. Validate the invite token: exists, unexpired, unclaimed.
-//   2. Optional phone match: if the invite carried a pre-bound phone,
-//      reject unless the caller's auth.user.phone matches.
-//   3. Insert a venue_roles row (user_id, venue_id, role='staff').
-//   4. Mark the invite claimed by this user.
-//   5. Flip app_metadata.role to 'staff' so future JWTs carry the new
-//      claim. Caller must refreshSession() before relying on it.
-//
-// All writes via service role inside a single function — no
-// function-to-function composition.
+// Legacy web redeem (token). Prefer WhatsApp: reply SI on Mesita Ops.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -22,6 +10,7 @@ import {
   readEFEnv,
 } from "../_shared/auth.ts";
 import { clean } from "../_shared/input.ts";
+import { redeemStaffInvite } from "../_shared/staff-invite-redeem.ts";
 
 type Body = { token?: string | null };
 
@@ -35,7 +24,6 @@ Deno.serve(async (req) => {
   if (!authRes.ok) return authRes.response;
   const user = authRes.user.raw;
 
-  // Staff is the phone-pool role. Reject email-authed callers.
   if (!user.phone) {
     return json(
       { ok: false, error: "Staff invites are redeemed by phone-authed users." },
@@ -54,10 +42,11 @@ Deno.serve(async (req) => {
 
   const admin = adminClient(envRes.env);
 
-  // 1. Look up the invite.
   const invite = await admin
     .from("staff_invites")
-    .select("id, venue_id, phone, claimed_at, expires_at, created_by")
+    .select(
+      "id, venue_id, phone, claimed_at, expires_at, created_by, venues(name)",
+    )
     .eq("token", token)
     .maybeSingle();
   if (invite.error) {
@@ -79,51 +68,26 @@ Deno.serve(async (req) => {
     );
   }
 
-  // 2. Insert venue_roles row. Idempotent — on conflict, do nothing.
-  const upsert = await admin
-    .from("venue_roles")
-    .upsert(
-      {
-        user_id: user.id,
-        venue_id: invite.data.venue_id,
-        role: "staff",
-        invited_by: invite.data.created_by,
-      },
-      { onConflict: "user_id,venue_id", ignoreDuplicates: false },
-    )
-    .select("user_id, venue_id, role")
-    .single();
-  if (upsert.error) {
-    return json({ ok: false, error: `venue_roles_upsert: ${upsert.error.message}` }, 500);
-  }
-
-  // 3. Mark the invite claimed.
-  const claim = await admin
-    .from("staff_invites")
-    .update({ claimed_at: new Date().toISOString(), claimed_by: user.id })
-    .eq("id", invite.data.id)
-    .is("claimed_at", null);
-  if (claim.error) {
-    return json({ ok: false, error: `invite_claim: ${claim.error.message}` }, 500);
-  }
-
-  // 4. Promote app_metadata.role from 'consumer' (or unset) to 'staff'.
-  //    Skip if the user is already a business/admin (they shouldn't be in
-  //    this pool, but defence in depth).
-  const currentRole =
-    (user.app_metadata as Record<string, unknown> | null)?.role as string | undefined;
-  if (currentRole !== "business" && currentRole !== "admin") {
-    const stamp = await admin.auth.admin.updateUserById(user.id, {
-      app_metadata: { ...(user.app_metadata ?? {}), role: "staff" },
-    });
-    if (stamp.error) {
-      return json({ ok: false, error: `role_stamp: ${stamp.error.message}` }, 500);
-    }
+  const join = invite.data.venues as { name: string } | null;
+  const redeemed = await redeemStaffInvite(admin, {
+    invite: {
+      id: invite.data.id,
+      venue_id: invite.data.venue_id,
+      phone: invite.data.phone,
+      claimed_at: invite.data.claimed_at,
+      expires_at: invite.data.expires_at,
+      created_by: invite.data.created_by,
+      venue_name: join?.name ?? "your venue",
+    },
+    userId: user.id,
+  });
+  if (!redeemed.ok) {
+    return json({ ok: false, error: redeemed.error }, 500);
   }
 
   return json({
     ok: true,
     role: "staff",
-    venue_id: invite.data.venue_id,
+    venue_id: redeemed.venueId,
   });
 });

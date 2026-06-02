@@ -4,11 +4,10 @@
   "category": "UTILITY",
   "types": {
     "twilio/text": {
-      "body": "Mesita: {{1}} te invitó al equipo. Acepta aquí: {{2}}"
+      "body": "Mesita: {{1}} te invita al equipo. Responde SI en este chat para unirte."
     }
   },
   "variables": {
-    "1": "Venue name",
-    "2": "Invite URL"
+    "1": "Venue name"
   }
 }
