@@ -47,6 +47,7 @@ import {
   validHost,
 } from "../_shared/channels.ts";
 import { fetchVenueCategories, inferVenueCategory } from "../_shared/categories.ts";
+import { dedup, humanizeCategorySlug, numOf, safeParseJson } from "../_shared/parse-utils.ts";
 
 const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
 // sonar-pro searches harder than base sonar (which returns null too often on
@@ -961,7 +962,7 @@ Deno.serve(async (req) => {
     update.category = inferredCategory;
     update.category_label =
       categoryList.find((c) => c.slug === inferredCategory)?.label ??
-      humanizeCategoryFallback(inferredCategory);
+      humanizeCategorySlug(inferredCategory) ?? inferredCategory;
   }
   sources.category = {
     ok: !!inferredCategory,
@@ -2126,49 +2127,6 @@ async function igProfileMatchesVenue(
   }
 }
 
-function dedup(arr: string[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const u of arr) {
-    if (typeof u === "string" && u && !seen.has(u)) {
-      seen.add(u);
-      out.push(u);
-    }
-  }
-  return out;
-}
-
-function numOf(v: unknown): number | null {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string") {
-    const n = Number(v.replace(/[, ]/g, ""));
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
-function humanizeCategoryFallback(category: string): string {
-  return category
-    .trim()
-    .replace(/_/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/\b\w/g, (ch) => ch.toUpperCase());
-}
-
 function safeParseProfile(content: string): ProfileResult | null {
   return safeParseJson(content) as ProfileResult | null;
-}
-
-function safeParseJson(content: string): unknown | null {
-  if (!content) return null;
-  let s = content.trim();
-  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-  const start = s.indexOf("{");
-  const end = s.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-  try {
-    return JSON.parse(s.slice(start, end + 1));
-  } catch {
-    return null;
-  }
 }

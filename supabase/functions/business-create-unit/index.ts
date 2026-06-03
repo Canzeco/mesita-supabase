@@ -13,7 +13,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
+import { humanizeCategorySlug } from "../_shared/parse-utils.ts";
 import { isOnDomain } from "../_shared/onboarding.ts";
+import { ensureUniqueSlug, slugify } from "../_shared/venue-slug.ts";
 import { invokeArtificialCaller } from "../_shared/internal.ts";
 import { classifyLinks } from "../_shared/channels.ts";
 import { firecrawlScrape } from "../_shared/firecrawl.ts";
@@ -103,6 +105,7 @@ type GoogleDetails = {
   rating?: number;
   userRatingCount?: number;
   websiteUri?: string;
+  googleMapsUri?: string;
   regularOpeningHours?: { weekdayDescriptions?: string[]; periods?: GooglePeriod[] };
   currentOpeningHours?: { weekdayDescriptions?: string[]; periods?: GooglePeriod[] };
   priceLevel?: string;
@@ -390,7 +393,7 @@ Deno.serve(async (req) => {
     slug,
     category: resolvedCategorySlug,
     category_label:
-      resolvedCategoryLabel ?? humanizeCategoryFallback(resolvedCategorySlug),
+      resolvedCategoryLabel ?? humanizeCategorySlug(resolvedCategorySlug),
     vibe: synth.vibe ?? null,
     price_level: synth.price_level ?? priceLevelFromGoogle(details.priceLevel),
     // Created venues are publicly discoverable but not yet claimed by
@@ -506,6 +509,9 @@ Deno.serve(async (req) => {
       { ok: false, error: `venue_insert: ${venueError.message}`, code: venueError.code ?? null },
       400,
     );
+  }
+  if (!venue) {
+    return json({ ok: false, error: "venue_insert: no row returned" }, 500);
   }
 
   // Intentionally no venue_members insert. The caller becomes the
@@ -1249,28 +1255,6 @@ function closesAtFromHours(weekdayDescriptions: string[]): string | null {
   return null;
 }
 
-function slugify(input: string): string {
-  return input
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-async function ensureUniqueSlug(
-  admin: ReturnType<typeof createClient>,
-  base: string,
-): Promise<string> {
-  let candidate = base || `venue-${Date.now()}`;
-  for (let i = 0; i < 5; i += 1) {
-    const { data } = await admin.from("venues").select("id").eq("slug", candidate).maybeSingle();
-    if (!data) return candidate;
-    candidate = `${base}-${Math.random().toString(36).slice(2, 6)}`;
-  }
-  return `${base}-${Date.now()}`;
-}
-
 function clampInt(n: unknown, lo: number, hi: number): number | null {
   const v = Number(n);
   if (!Number.isFinite(v)) return null;
@@ -1300,15 +1284,5 @@ function categoryLabelForSlug(
   if (!trimmed) return null;
   const hit = categories.find((c) => c.slug === trimmed);
   return hit?.label ?? null;
-}
-
-function humanizeCategoryFallback(category: string | null): string | null {
-  if (!category) return null;
-  const trimmed = category.trim();
-  if (!trimmed) return null;
-  return trimmed
-    .replace(/_/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 

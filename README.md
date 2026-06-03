@@ -115,9 +115,9 @@ AI voice for **phone reservations** on a **dedicated** Twilio number — not the
 | `stripe-handle-webhook` | Stripe signature | Subscriptions |
 | `atlas-*` / `recommender-*` | internal | Venue intelligence (service role) |
 
-Reward ticket sequences (Scan → Billing → Story / Payment) orchestrate in **business-** / **consumer-** / **staff-** functions; Twilio sends the messages.
+Reward ticket sequences (scan, billing, story, payment, review, cashback) are documented in [docs/TICKET_SEQUENCES.md](docs/TICKET_SEQUENCES.md). They orchestrate in **business-** / **consumer-** / **staff-** functions; Twilio sends the messages.
 
-Business console scan flow: `business-create-ticket` with `scanOnly: true` (guest linked, status `open`), then `business-submit-ticket-bill` for subtotal/tip. Legacy one-shot create (bill at open) still works without `scanOnly`.
+Business console: `business-create-ticket` with `scanOnly: true`, then `business-submit-ticket-bill`. Consumer step order and staff floor steppers live in each web repo’s `ticket-flow-steps.ts` / `ticket-staff-lifecycle.ts`.
 
 ---
 
