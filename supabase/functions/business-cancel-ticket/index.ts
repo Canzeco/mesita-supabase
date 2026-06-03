@@ -50,7 +50,8 @@ Deno.serve(async (req) => {
   if (ticket.data.status === "cancelled") {
     return json({ ok: true, alreadyCancelled: true });
   }
-  if (ticket.data.status !== "pending_pay") {
+  const cancellable = new Set(["open", "pending_pay", "awaiting_payment_confirm"]);
+  if (!cancellable.has(ticket.data.status)) {
     return json(
       { ok: false, error: `Cannot cancel a ${ticket.data.status} ticket` },
       409,
@@ -62,7 +63,7 @@ Deno.serve(async (req) => {
     .from("tickets")
     .update({ status: "cancelled", cancelled_at: cancelledAt, cancel_reason: reason })
     .eq("id", ticketId)
-    .eq("status", "pending_pay") // optimistic guard against double-cancel race
+    .in("status", ["open", "pending_pay", "awaiting_payment_confirm"])
     .select("id, status, cancelled_at, cancel_reason")
     .single();
   if (update.error) {

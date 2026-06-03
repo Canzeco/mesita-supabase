@@ -195,8 +195,7 @@ export function buildIncomingBill(
 }
 
 export function isBillDraftReady(draft: BillDraft): boolean {
-  return draft.subtotal_cents != null && draft.subtotal_cents > 0 &&
-    draft.tip_cents != null && draft.tip_cents >= 0;
+  return draft.subtotal_cents != null && draft.subtotal_cents > 0;
 }
 
 export function billDraftHasAnyAmount(draft: BillDraft): boolean {
@@ -207,13 +206,7 @@ export function billDraftNeedMessage(draft: BillDraft): string {
   if (draft.subtotal_cents == null) {
     return "Manda el subtotal (ej. SUBTOTAL 850, solo 850, o «la cuenta fue 850»).";
   }
-  if (draft.tip_cents == null) {
-    return (
-      `Tengo subtotal ${formatPesos(draft.subtotal_cents)} ✓\n` +
-      `¿Cuánto de propina? (PROPINA 100, solo 100, o 0 / sin propina).`
-    );
-  }
-  return "Manda SUBTOTAL y PROPINA, o dos números: 850 100 (pesos).";
+  return "Manda el subtotal de la cuenta (ej. 850 o SUBTOTAL 850). El descuento Mesita aplica solo al subtotal — sin propina.";
 }
 
 export function messageLooksLikeBill(body: string): boolean {

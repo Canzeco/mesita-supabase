@@ -31,26 +31,18 @@ const COACH_STATIC: Record<string, (ctx: StaffCoachContext) => string> = {
   idle: (ctx) =>
     (ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "") +
     "Manda el código Mesita del comensal (0000-0000) o escribe ayuda.\n\n" +
-    "Flujo: código → subtotal y propina por aquí → el comensal confirma en la app (Pay).",
+    "Flujo: código → subtotal por aquí → el comensal confirma en la app (Pay).",
   consumer_identified: (ctx) => {
     const base = ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "";
-    if (ctx.pendingBill?.subtotal_cents != null && ctx.pendingBill.tip_cents == null) {
-      return base +
-        "Solo falta la propina (ej. PROPINA 100 o 100, o 0).\n" +
-        "Cuando esté completo, al comensal le llega la cuenta en la app Mesita → Pay.";
-    }
     return base +
-      "Manda la cuenta (ej. SUBTOTAL 850, luego PROPINA 100, o 850 y después 100).\n" +
-      "Al cerrar la cuenta, el comensal recibe notificación en la app → Pay para confirmar su pago.";
+      "Manda el subtotal de la cuenta (ej. SUBTOTAL 850 o solo 850).\n" +
+      "El descuento Mesita aplica al subtotal — sin propina.\n" +
+      "Al cerrar, el comensal recibe la cuenta en la app → Pay.";
   },
   partial_bill: (ctx) => {
     const base = ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "";
-    if (ctx.pendingBill?.subtotal_cents != null && ctx.pendingBill.tip_cents == null) {
-      return base +
-        "Falta la propina. Después el comensal verá el ticket en la app (Pay).";
-    }
     return base +
-      "Manda subtotal y propina. El comensal no usa WhatsApp para pagar — confirma en la app (Pay).";
+      "Manda el subtotal. El comensal verá el ticket en la app (Pay).";
   },
   awaiting_staff_payment_confirm: (ctx) =>
     (ctx.venueName ? `Unidad: ${ctx.venueName}\n` : "") +

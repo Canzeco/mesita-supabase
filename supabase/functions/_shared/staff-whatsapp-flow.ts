@@ -880,7 +880,7 @@ async function tryHandleBillDraft(opts: {
   if (isBillDraftReady(merged)) {
     await handleSubmitBill(admin, twilio, staff, sessionWithDraft, {
       subtotal: merged.subtotal_cents!,
-      tip: merged.tip_cents!,
+      tip: 0,
     });
     return true;
   }
@@ -1023,7 +1023,6 @@ async function handleSubmitBill(
     staff.phoneE164,
     `Cuenta lista ✓ (${staff.venueName})\n` +
       `Subtotal: ${formatMoneyMx(calc.subtotal)}\n` +
-      `Propina: ${formatMoneyMx(calc.tip)}\n` +
       `Descuento (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
       (calc.redeemCents > 0
         ? `Saldo Mesita: -${formatMoneyMx(calc.redeemCents)}\n`

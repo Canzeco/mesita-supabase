@@ -43,6 +43,17 @@ export type InformalBillCalc = {
   amountDueCents: number;
 };
 
+/** Promo rate applies to food/drink subtotal only — tip is excluded. */
+export function promoEligibleSubtotalCents(
+  subtotal: number,
+  capPesos: number | null | undefined,
+): number {
+  if (capPesos != null && capPesos > 0) {
+    return Math.min(subtotal, capPesos * 100);
+  }
+  return subtotal;
+}
+
 export async function computeInformalBill(
   admin: SupabaseClient,
   venue: VenueRateRow,
@@ -51,27 +62,26 @@ export async function computeInformalBill(
   tip: number,
   redeemRequested = 0,
 ): Promise<InformalBillCalc> {
-  const total = subtotal + tip;
+  const total = subtotal;
   const firstVisit = await isConsumerFirstVisit(admin, consumer.id, venue.id);
   const ratePercent = selectVenueRate(venue, consumer.tier_key, firstVisit);
 
   const capPesos = venue.monthly_promo_cap;
-  const eligibleCents =
-    capPesos != null && capPesos > 0 ? Math.min(total, capPesos * 100) : total;
+  const eligibleCents = promoEligibleSubtotalCents(subtotal, capPesos);
 
   const discountPercent = ratePercent;
   let discountCents = Math.floor((eligibleCents * ratePercent) / 100);
-  if (discountCents > total) discountCents = total;
+  if (discountCents > subtotal) discountCents = subtotal;
 
   const consumerBalance = consumer.cashback_balance_cents ?? 0;
-  const billAfterDiscount = total - discountCents;
-  const cap = Math.min(consumerBalance, billAfterDiscount);
+  const payableCents = subtotal - discountCents;
+  const cap = Math.min(consumerBalance, payableCents);
   const redeemCents = redeemRequested > 0 ? redeemRequested : cap;
-  const amountDueCents = billAfterDiscount - redeemCents;
+  const amountDueCents = payableCents - redeemCents;
 
   return {
     subtotal,
-    tip,
+    tip: 0,
     total,
     eligibleCents,
     ratePercent,
@@ -181,4 +191,127 @@ export async function finalizeInformalTicket(
   }
 
   return { ok: true };
+}
+
+const REVIEW_READY_STATUSES = new Set(["revealed", "paid", "awaiting_story"]);
+
+/** Reveal ticket + ensure review inbox row exists before consumer submits review. */
+export async function prepareTicketForReview(
+  admin: SupabaseClient,
+  ticketId: string,
+  consumerId: string,
+): Promise<{ ok: true; venueId: string } | { ok: false; error: string }> {
+  const ticket = await admin
+    .from("tickets")
+    .select(
+      "id, venue_id, status, consumer_payment_confirmed_at, staff_payment_confirmed_at",
+    )
+    .eq("id", ticketId)
+    .eq("consumer_id", consumerId)
+    .maybeSingle();
+  if (ticket.error || !ticket.data) {
+    return { ok: false, error: ticket.error?.message ?? "Ticket not found" };
+  }
+
+  const row = ticket.data;
+  if (REVIEW_READY_STATUSES.has(row.status)) {
+    await ensureConsumerReviewNotification(
+      admin,
+      consumerId,
+      ticketId,
+      row.venue_id,
+    );
+    return { ok: true, venueId: row.venue_id };
+  }
+
+  if (
+    row.status === "awaiting_payment_confirm" &&
+    row.consumer_payment_confirmed_at
+  ) {
+    const now = new Date().toISOString();
+    if (!row.staff_payment_confirmed_at) {
+      const staffConfirm = await admin
+        .from("tickets")
+        .update({ staff_payment_confirmed_at: now })
+        .eq("id", ticketId);
+      if (staffConfirm.error) {
+        return { ok: false, error: staffConfirm.error.message };
+      }
+    }
+
+    const fin = await finalizeInformalTicket(
+      admin,
+      ticketId,
+      consumerId,
+      row.venue_id,
+    );
+    if (!fin.ok) return fin;
+
+    await ensureConsumerReviewNotification(
+      admin,
+      consumerId,
+      ticketId,
+      row.venue_id,
+    );
+    return { ok: true, venueId: row.venue_id };
+  }
+
+  return { ok: false, error: "Ticket is not ready for review" };
+}
+
+export async function ensureConsumerReviewNotification(
+  admin: SupabaseClient,
+  consumerId: string,
+  ticketId: string,
+  venueId: string,
+): Promise<void> {
+  const existing = await admin
+    .from("consumer_pay_notifications")
+    .select("id")
+    .eq("ticket_id", ticketId)
+    .eq("consumer_id", consumerId)
+    .eq("kind", "review")
+    .maybeSingle();
+  if (existing.data) return;
+
+  const [venueRes, ticketRes] = await Promise.all([
+    admin.from("venues").select("name, slug, photos").eq("id", venueId).single(),
+    admin
+      .from("tickets")
+      .select(
+        "kind, discount_cents, redeem_cents, discount_percent, cashback_percent, cashback_cents, total_cents, check_subtotal_cents, tip_cents",
+      )
+      .eq("id", ticketId)
+      .single(),
+  ]);
+
+  const v = venueRes.data;
+  const t = ticketRes.data;
+  const discount = t?.discount_cents ?? 0;
+  const redeem = t?.redeem_cents ?? 0;
+  const cashback = t?.cashback_cents ?? 0;
+
+  await admin.from("consumer_pay_notifications").insert({
+    consumer_id: consumerId,
+    ticket_id: ticketId,
+    kind: "review",
+    status: "pending",
+    payload: {
+      venue_id: venueId,
+      venue_slug: v?.slug ?? null,
+      venue_name: v?.name ?? "Partner venue",
+      venue_photo_url: v?.photos?.[0] ?? null,
+      ticket_kind: t?.kind ?? null,
+      check_subtotal_cents: t?.check_subtotal_cents ?? null,
+      tip_cents: t?.tip_cents ?? null,
+      discount_cents: discount,
+      discount_percent: t?.discount_percent ?? null,
+      cashback_percent: t?.cashback_percent ?? null,
+      cashback_cents: cashback,
+      redeem_cents: redeem,
+      total_reward_cents: discount + redeem + cashback,
+      total_cents: t?.total_cents ?? null,
+      currency: "MXN",
+    },
+  });
 }

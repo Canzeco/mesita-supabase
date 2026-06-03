@@ -9,6 +9,7 @@ import {
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
+import { prepareTicketForReview } from "../_shared/ticket-informal.ts";
 
 type Body = {
   ticketId?: string;
@@ -53,6 +54,12 @@ Deno.serve(async (req) => {
   }
 
   const admin = adminClient(envRes.env);
+
+  const prepared = await prepareTicketForReview(admin, ticketId, userId);
+  if (!prepared.ok) {
+    return json({ ok: false, error: prepared.error }, 409);
+  }
+
   const ticket = await admin
     .from("tickets")
     .select("id, consumer_id, venue_id, status")
@@ -61,9 +68,6 @@ Deno.serve(async (req) => {
     .maybeSingle();
   if (ticket.error || !ticket.data) {
     return json({ ok: false, error: "Ticket not found" }, 404);
-  }
-  if (!["revealed", "paid", "awaiting_story"].includes(ticket.data.status)) {
-    return json({ ok: false, error: "Ticket is not ready for review" }, 409);
   }
 
   const comments = body.comments

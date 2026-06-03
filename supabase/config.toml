@@ -280,6 +280,9 @@ verify_jwt = true
 [functions.business-create-ticket]
 verify_jwt = true
 
+[functions.business-submit-ticket-bill]
+verify_jwt = true
+
 [functions.business-list-tickets]
 verify_jwt = true
 

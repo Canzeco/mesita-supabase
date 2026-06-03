@@ -37,11 +37,14 @@ import {
   STORY_KINDS,
 } from "../_shared/ticket-kinds.ts";
 import { isConsumerFirstVisit, selectVenueRate } from "../_shared/membership.ts";
+import { computeTicketBill } from "../_shared/business-ticket-billing.ts";
 
 type Body = {
   venueId?: string;
   consumerCode?: string;
   kind?: string;
+  /** Scan-only: link guest code without billing. Bill is submitted separately. */
+  scanOnly?: boolean;
   checkSubtotalCents?: number;
   tipCents?: number;
   redeemCents?: number; // formal only
@@ -84,43 +87,7 @@ Deno.serve(async (req) => {
   const isFormal = FORMAL_KINDS.has(kind);
   const requiresStory = STORY_KINDS.has(kind);
   const isReservation = RESERVATION_KINDS.has(kind);
-
-  // Bill totals: required for everything. Even reservation kinds open at
-  // checkout time with the full check captured. (Pre-checkout reservation
-  // state is held in reservation_status, not in this insert.)
-  const subtotal = toCents(body.checkSubtotalCents);
-  const tip = toCents(body.tipCents ?? 0);
-  const redeemRequested = toCents(body.redeemCents ?? 0);
-  if (subtotal == null) {
-    return json(
-      { ok: false, error: "checkSubtotalCents must be a non-negative integer" },
-      400,
-    );
-  }
-  if (tip == null) {
-    return json(
-      { ok: false, error: "tipCents must be a non-negative integer" },
-      400,
-    );
-  }
-  if (redeemRequested == null) {
-    return json(
-      { ok: false, error: "redeemCents must be a non-negative integer" },
-      400,
-    );
-  }
-  if (subtotal === 0) {
-    return json({ ok: false, error: "Check total can't be zero" }, 400);
-  }
-  if (!isFormal && redeemRequested > 0) {
-    return json(
-      {
-        ok: false,
-        error: "Redemption isn't allowed on informal/discount tickets.",
-      },
-      400,
-    );
-  }
+  const scanOnly = body.scanOnly === true;
 
   const admin = adminClient(envRes.env);
 
@@ -128,7 +95,7 @@ Deno.serve(async (req) => {
   const memberRes = await requireMembership(admin, authRes.user, venueId);
   if (!memberRes.ok) return memberRes.response;
 
-  // ── Venue snapshot (fiscal_type pins the mechanic) ────────────────────
+  // ── Venue snapshot ──────────────────────────────────────────────────
   const venueRow = await admin
     .from("venues")
     .select(
@@ -143,9 +110,8 @@ Deno.serve(async (req) => {
   if (venue.status === "archived") {
     return json({ ok: false, error: "Venue is archived" }, 409);
   }
-  // Mock mode: allow any ticket kind regardless of venue fiscal type / ownership.
 
-  // ── Consumer lookup ──────────────────────────────────────────────────────
+  // ── Consumer lookup ─────────────────────────────────────────────────
   const consumerRow = await admin
     .from("consumers")
     .select("id, code, full_name, cashback_balance_cents, tier_key")
@@ -161,98 +127,106 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `No consumer with code ${consumerCode}` }, 404);
   }
   const consumerId = consumerRow.data.id;
-  const consumerBalance = consumerRow.data.cashback_balance_cents ?? 0;
 
-  // Tier-aware rate selection. Premium guests earn the premium rate; the
-  // "welcome" variant applies on a guest's first visit at this venue. The
-  // resolver returns only the final percent — the tier never surfaces in the
-  // ticket or any business-facing response (blended-rate privacy).
+  // ── Scan-only (no bill yet) ─────────────────────────────────────────
+  if (scanOnly) {
+    const insert = await admin
+      .from("tickets")
+      .insert({
+        venue_id: venueId,
+        consumer_id: consumerId,
+        opened_by: validatorId,
+        kind,
+        status: "open",
+        story_status: "not_required",
+        check_subtotal_cents: null,
+        tip_cents: null,
+        total_cents: null,
+        cashback_percent: 0,
+        cashback_cents: 0,
+        redeem_cents: 0,
+        discount_percent: null,
+        discount_cents: null,
+        revealed_at: null,
+      })
+      .select(
+        "id, kind, status, story_status, check_subtotal_cents, tip_cents, total_cents, cashback_percent, cashback_cents, redeem_cents, discount_percent, discount_cents, revealed_at, currency, created_at",
+      )
+      .single();
+    if (insert.error) {
+      return json(
+        { ok: false, error: `ticket_insert: ${insert.error.message}` },
+        500,
+      );
+    }
+
+    return json(
+      {
+        ok: true,
+        ticket: insert.data,
+        venue: { id: venue.id, name: venue.name, fiscal_type: venue.fiscal_type },
+        consumer: {
+          id: consumerId,
+          code: consumerRow.data.code,
+          full_name: consumerRow.data.full_name,
+        },
+      },
+      201,
+    );
+  }
+
+  // Bill totals required when not scan-only.
+  const subtotal = toCents(body.checkSubtotalCents);
+  const tipRaw = toCents(body.tipCents ?? 0);
+  const redeemRequested = toCents(body.redeemCents ?? 0);
+  if (subtotal == null) {
+    return json(
+      { ok: false, error: "checkSubtotalCents must be a non-negative integer" },
+      400,
+    );
+  }
+  if (tipRaw == null) {
+    return json(
+      { ok: false, error: "tipCents must be a non-negative integer" },
+      400,
+    );
+  }
+  // Informal (discount) tickets: promo is off the subtotal only — no tip line.
+  const tip = isFormal ? tipRaw : 0;
+  if (redeemRequested == null) {
+    return json(
+      { ok: false, error: "redeemCents must be a non-negative integer" },
+      400,
+    );
+  }
+  if (!isFormal && redeemRequested > 0) {
+    return json(
+      {
+        ok: false,
+        error: "Redemption isn't allowed on informal/discount tickets.",
+      },
+      400,
+    );
+  }
+
+  const consumerBalance = consumerRow.data.cashback_balance_cents ?? 0;
   const firstVisit = await isConsumerFirstVisit(admin, consumerId, venueId);
   const ratePercent = selectVenueRate(venue, consumerRow.data.tier_key, firstVisit);
-
-  const total = subtotal + tip;
-
-  // ── Ticket cap (eligible-spend ceiling) ───────────────────────────────
-  // The promo applies only to the first `monthly_promo_cap` of each bill —
-  // a peso amount in the venue's currency (major units: 200/500/1000/2000),
-  // or null for no cap. Beyond the cap the guest pays full price, so the
-  // reward = rate × min(bill, cap). Applied to both the discount (informal)
-  // and cashback-earn (formal) rails so one big ticket can't blow past the
-  // venue's per-visit exposure.
   const capPesos = venue.monthly_promo_cap;
-  const eligibleCents =
-    capPesos != null && capPesos > 0 ? Math.min(total, capPesos * 100) : total;
 
-  // ── Branch the snapshot by fiscal type ────────────────────────────────
-  // Formal:   cashback EARN on gross; redemption capped at min(balance, total).
-  // Informal: discount snapshot at the configured rate against the bill total,
-  //           applied immediately at reveal.
-  let cashbackCents = 0;
-  let redeemCents = 0;
-  let discountCents = 0;
-  let discountPercent: number | null = null;
-
-  if (isFormal) {
-    if (redeemRequested > consumerBalance) {
-      return json(
-        {
-          ok: false,
-          code: "redeem_exceeds_balance",
-          error: `Consumer balance is ${consumerBalance} cents — can't redeem ${redeemRequested}.`,
-        },
-        400,
-      );
-    }
-    if (redeemRequested > total) {
-      return json(
-        {
-          ok: false,
-          code: "redeem_exceeds_total",
-          error: `Redemption ${redeemRequested} can't exceed the check total ${total}.`,
-        },
-        400,
-      );
-    }
-    redeemCents = redeemRequested;
-    cashbackCents = Math.floor((eligibleCents * ratePercent) / 100);
-  } else {
-    discountPercent = ratePercent;
-    discountCents = Math.floor((eligibleCents * ratePercent) / 100);
-    if (discountCents > total) discountCents = total;
-    // Balance is now portable across fiscal types. At an Informal venue
-    // the consumer's cashback balance is applied on top of the discount:
-    // billAfterDiscount = total - discountCents
-    // redeem = min(consumer balance, billAfterDiscount)
-    // The cash the consumer hands the waiter = billAfterDiscount - redeem.
-    // Mesita is on the hook to pay the venue the `redeem` portion out of
-    // its float (tracked as a redeem ledger row scoped to this venue).
-    const billAfterDiscount = total - discountCents;
-    const cap = Math.min(consumerBalance, billAfterDiscount);
-    if (redeemRequested > consumerBalance) {
-      return json(
-        {
-          ok: false,
-          code: "redeem_exceeds_balance",
-          error: `Consumer balance is ${consumerBalance} cents — can't redeem ${redeemRequested}.`,
-        },
-        400,
-      );
-    }
-    if (redeemRequested > billAfterDiscount) {
-      return json(
-        {
-          ok: false,
-          code: "redeem_exceeds_total",
-          error: `Redemption ${redeemRequested} can't exceed the post-discount bill ${billAfterDiscount}.`,
-        },
-        400,
-      );
-    }
-    // If the caller didn't request a specific redemption, default to the
-    // full available cap — this is the "auto-applies" promise the consumer
-    // app makes on /qr ("Auto-applies to your next bill at any partner").
-    redeemCents = redeemRequested > 0 ? redeemRequested : cap;
+  const billRes = computeTicketBill({
+    subtotal,
+    tip,
+    redeemRequested,
+    isFormal,
+    ratePercent,
+    consumerBalance,
+    capPesos,
+  });
+  if (!billRes.ok) {
+    return json({ ok: false, code: billRes.code, error: billRes.error }, 400);
   }
+  const snap = billRes.snapshot;
 
   // ── Reservation fields ────────────────────────────────────────────────
   let reservationAt: string | null = null;
@@ -330,14 +304,14 @@ Deno.serve(async (req) => {
       kind,
       status,
       story_status: storyStatus,
-      check_subtotal_cents: subtotal,
-      tip_cents: tip,
-      total_cents: total,
-      cashback_percent: isFormal ? ratePercent : 0,
-      cashback_cents: isFormal ? cashbackCents : 0,
-      redeem_cents: redeemCents,
-      discount_percent: discountPercent,
-      discount_cents: isFormal ? null : discountCents,
+      check_subtotal_cents: snap.checkSubtotalCents,
+      tip_cents: snap.tipCents,
+      total_cents: snap.totalCents,
+      cashback_percent: snap.cashbackPercent,
+      cashback_cents: snap.cashbackCents,
+      redeem_cents: snap.redeemCents,
+      discount_percent: snap.discountPercent,
+      discount_cents: snap.discountCents,
       revealed_at: null,
       reservation_status: reservationStatus,
       reservation_at: reservationAt,
@@ -357,10 +331,6 @@ Deno.serve(async (req) => {
   }
 
   // Push every mock ticket to consumer Pay/Tickets inbox.
-  const amountDueCents = Math.max(
-    0,
-    total - (discountCents ?? 0) - (redeemCents ?? 0),
-  );
   await admin.from("consumer_pay_notifications").insert({
     consumer_id: consumerId,
     ticket_id: insert.data.id,
@@ -372,17 +342,18 @@ Deno.serve(async (req) => {
       venue_name: venue.name,
       venue_photo_url: venue.photos?.[0] ?? null,
       ticket_kind: kind,
-      check_subtotal_cents: subtotal,
-      tip_cents: tip,
-      total_cents: total,
-      discount_cents: isFormal ? 0 : discountCents,
-      discount_percent: isFormal ? 0 : (discountPercent ?? 0),
-      cashback_cents: isFormal ? cashbackCents : 0,
+      check_subtotal_cents: snap.checkSubtotalCents,
+      tip_cents: snap.tipCents,
+      total_cents: snap.totalCents,
+      discount_cents: isFormal ? 0 : (snap.discountCents ?? 0),
+      discount_percent: isFormal ? 0 : (snap.discountPercent ?? 0),
+      cashback_cents: isFormal ? snap.cashbackCents : 0,
       cashback_percent: isFormal ? ratePercent : 0,
-      redeem_cents: redeemCents,
-      total_reward_cents: (isFormal ? cashbackCents : discountCents) + redeemCents,
+      redeem_cents: snap.redeemCents,
+      total_reward_cents: (isFormal ? snap.cashbackCents : (snap.discountCents ?? 0)) +
+        snap.redeemCents,
       reward_cap_mxn: capPesos ?? null,
-      amount_due_cents: amountDueCents,
+      amount_due_cents: snap.amountDueCents,
       currency: insert.data.currency ?? "MXN",
     },
   });
