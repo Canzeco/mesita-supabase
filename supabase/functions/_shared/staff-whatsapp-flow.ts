@@ -5,6 +5,25 @@
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import {
+  applyActiveVenue,
+  enterVenueSelection,
+  helpText,
+  idleOpsBlockedReminder,
+  isSwitchVenueCommand,
+  loadSession,
+  parseVenueSelection,
+  resetSession,
+  resolveActiveVenue,
+  venuePickerText,
+} from "./staff-whatsapp-session.ts";
+import { resolveTicketOpener, tryFinalizeAndReview } from "./staff-whatsapp-payment.ts";
+import type {
+  SessionRow,
+  StaffContext,
+  StaffIdentity,
+  StaffVenue,
+} from "./staff-whatsapp-types.ts";
+import {
   displayConsumerCode,
   extractConsumerCodeFromText,
 } from "./consumer-code.ts";
@@ -30,42 +49,15 @@ import { replyStaffCoach } from "./staff-whatsapp-replies.ts";
 import {
   buildConsumerBillPayload,
   computeInformalBill,
-  finalizeInformalTicket,
   formatMoneyMx,
   type ConsumerRow,
 } from "./ticket-informal.ts";
 import { sendStaffWhatsAppReply } from "./staff-whatsapp-messages.ts";
 import { sendWhatsAppText, type TwilioEnv } from "./twilio.ts";
 
-export type StaffVenue = {
-  venueId: string;
-  venueName: string;
-};
-
-export type StaffIdentity = {
-  staffUserId: string;
-  phoneE164: string;
-  venues: StaffVenue[];
-};
-
-type StaffContext = StaffIdentity & {
-  venueId: string;
-  venueName: string;
-};
-
-type SessionRow = {
-  id: string;
-  phone_e164: string;
-  staff_user_id: string;
-  venue_id: string | null;
-  state: string;
-  consumer_id: string | null;
-  ticket_id: string | null;
-  pending_consumer_code: string | null;
-  context: Record<string, unknown>;
-};
-
-type VenueOption = { venue_id: string; name: string };
+export type { StaffAccess, StaffIdentity, StaffVenue } from "./staff-whatsapp-types.ts";
+export { resolveStaffAccess, resolveStaffIdentity } from "./staff-whatsapp-access.ts";
+export { onConsumerPaymentConfirmed } from "./staff-whatsapp-payment.ts";
 
 export async function handleStaffInboundMessage(opts: {
   admin: SupabaseClient;
@@ -400,274 +392,6 @@ export async function handleStaffInboundMessage(opts: {
       situation: coachSituation,
     }),
   );
-}
-
-function prefixActiveVenue(staff: StaffContext): string {
-  return `Unidad: ${staff.venueName}\n`;
-}
-
-function idleOpsBlockedReminder(
-  staff: StaffContext,
-  session: SessionRow,
-  opsMessage: string,
-): string {
-  const code = session.pending_consumer_code
-    ? displayConsumerCode(session.pending_consumer_code)
-    : null;
-  const preview = session.context?.consumer_preview as
-    | { name?: string }
-    | undefined;
-  const name = preview?.name;
-  let msg = `Unidad: ${staff.venueName}\n`;
-  if (code && name) msg += `Último comensal: ${name} (${code})\n`;
-  msg +=
-    `\nNo puedes abrir ticket con descuento todavía:\n${opsMessage}\n\n` +
-    `Manda otro código cuando esté listo, o escribe ayuda.`;
-  return msg;
-}
-
-function helpText(
-  state: string,
-  staff: StaffContext,
-  venues: StaffVenue[],
-  canSwitch: boolean,
-): string {
-  const switchLine = canSwitch
-    ? "cambiar unidad — otro local (solo sin comensal activo)\n"
-    : "";
-  switch (state) {
-    case "selecting_venue":
-      return venuePickerText(venues);
-    case "consumer_identified":
-      return (
-        prefixActiveVenue(staff) +
-        "Manda la cuenta en un mensaje o en varios:\n" +
-        "• SUBTOTAL 850 y después PROPINA 100\n" +
-        "• o 850 y luego 100\n" +
-        "Montos en pesos. Escribe cancelar para empezar de nuevo."
-      );
-    case "awaiting_staff_payment_confirm":
-      return prefixActiveVenue(staff) +
-        "Cuando el comensal haya pagado su parte, responde listo o sí.";
-    default:
-      return (
-        prefixActiveVenue(staff) +
-        "Mesita Ops — ticket con descuento (tipo A)\n" +
-        "1) Código del comensal (0000-0000)\n" +
-        "2) SUBTOTAL y PROPINA por WhatsApp\n" +
-        "3) El comensal recibe la cuenta en la app → Pay y confirma ahí\n" +
-        "4) Tú respondes listo cuando cobres\n" +
-        switchLine +
-        "cancelar — reinicia la sesión del comensal (mantienes esta unidad)."
-      );
-  }
-}
-
-function venuePickerText(venues: StaffVenue[]): string {
-  const lines = venues.map((v, i) => `${i + 1}) ${v.venueName}`);
-  return (
-    "Trabajas en varios locales de Mesita.\n" +
-    "¿En cuál estás hoy? (un WhatsApp = una unidad activa):\n\n" +
-    lines.join("\n") +
-    "\n\nResponde con el número (ej. 1) o el nombre del lugar.\n" +
-    "Después puedes escribir cambiar unidad cuando no tengas un comensal activo."
-  );
-}
-
-function isSwitchVenueCommand(body: string): boolean {
-  return /^(switch|cambiar(\s+unidad)?|unidad|sucursal|venue|unit)\b/i.test(
-    body.trim(),
-  );
-}
-
-function parseVenueSelection(body: string, venues: StaffVenue[]): string | null {
-  const t = body.trim();
-  if (!t) return null;
-
-  const numOnly = t.match(/^(\d+)$/);
-  if (numOnly) {
-    const idx = Number(numOnly[1]) - 1;
-    if (idx >= 0 && idx < venues.length) return venues[idx].venueId;
-  }
-
-  const numPrefix = t.match(/^(?:venue|unidad|sucursal|unit)\s*#?\s*(\d+)/i);
-  if (numPrefix) {
-    const idx = Number(numPrefix[1]) - 1;
-    if (idx >= 0 && idx < venues.length) return venues[idx].venueId;
-  }
-
-  const lower = t.toLowerCase();
-  for (const v of venues) {
-    const name = v.venueName.toLowerCase();
-    if (lower === name || lower.includes(name) || name.includes(lower)) {
-      return v.venueId;
-    }
-  }
-  return null;
-}
-
-async function loadSession(
-  admin: SupabaseClient,
-  phoneE164: string,
-): Promise<SessionRow | null> {
-  const existing = await admin
-    .from("staff_whatsapp_sessions")
-    .select("*")
-    .eq("phone_e164", phoneE164)
-    .maybeSingle();
-  if (existing.error) throw new Error(existing.error.message);
-  return existing.data ? (existing.data as SessionRow) : null;
-}
-
-async function enterVenueSelection(
-  admin: SupabaseClient,
-  identity: StaffIdentity,
-  session: SessionRow | null,
-  venues: StaffVenue[],
-): Promise<SessionRow> {
-  const options: VenueOption[] = venues.map((v) => ({
-    venue_id: v.venueId,
-    name: v.venueName,
-  }));
-
-  if (session) {
-    const updated = await admin
-      .from("staff_whatsapp_sessions")
-      .update({
-        state: "selecting_venue",
-        venue_id: null,
-        consumer_id: null,
-        ticket_id: null,
-        pending_consumer_code: null,
-        context: { venue_options: options },
-      })
-      .eq("id", session.id)
-      .select("*")
-      .single();
-    if (updated.error) throw new Error(updated.error.message);
-    return updated.data as SessionRow;
-  }
-
-  const inserted = await admin
-    .from("staff_whatsapp_sessions")
-    .insert({
-      phone_e164: identity.phoneE164,
-      staff_user_id: identity.staffUserId,
-      venue_id: null,
-      state: "selecting_venue",
-      context: { venue_options: options },
-    })
-    .select("*")
-    .single();
-  if (inserted.error) throw new Error(inserted.error.message);
-  return inserted.data as SessionRow;
-}
-
-async function applyActiveVenue(
-  admin: SupabaseClient,
-  identity: StaffIdentity,
-  session: SessionRow | null,
-  venue: StaffVenue,
-): Promise<SessionRow> {
-  if (session) {
-    const updated = await admin
-      .from("staff_whatsapp_sessions")
-      .update({
-        venue_id: venue.venueId,
-        state: "idle",
-        staff_user_id: identity.staffUserId,
-        consumer_id: null,
-        ticket_id: null,
-        pending_consumer_code: null,
-        context: {},
-      })
-      .eq("id", session.id)
-      .select("*")
-      .single();
-    if (updated.error) throw new Error(updated.error.message);
-    return updated.data as SessionRow;
-  }
-
-  const inserted = await admin
-    .from("staff_whatsapp_sessions")
-    .insert({
-      phone_e164: identity.phoneE164,
-      staff_user_id: identity.staffUserId,
-      venue_id: venue.venueId,
-      state: "idle",
-    })
-    .select("*")
-    .single();
-  if (inserted.error) throw new Error(inserted.error.message);
-  return inserted.data as SessionRow;
-}
-
-async function resolveActiveVenue(
-  admin: SupabaseClient,
-  identity: StaffIdentity,
-  session: SessionRow | null,
-): Promise<
-  | { kind: "ok"; staff: StaffContext; session: SessionRow }
-  | { kind: "need_selection"; session: SessionRow }
-> {
-  const venues = identity.venues;
-  if (venues.length === 0) {
-    throw new Error("staff has no venue_roles");
-  }
-
-  if (venues.length === 1) {
-    const sessionOut = await applyActiveVenue(admin, identity, session, venues[0]);
-    return {
-      kind: "ok",
-      staff: { ...identity, ...venues[0] },
-      session: sessionOut,
-    };
-  }
-
-  if (!session) {
-    const created = await enterVenueSelection(admin, identity, null, venues);
-    return { kind: "need_selection", session: created };
-  }
-
-  if (session.state === "selecting_venue" || !session.venue_id) {
-    return { kind: "need_selection", session };
-  }
-
-  const active = venues.find((v) => v.venueId === session.venue_id);
-  if (!active) {
-    const created = await enterVenueSelection(admin, identity, session, venues);
-    return { kind: "need_selection", session: created };
-  }
-
-  if (session.staff_user_id !== identity.staffUserId) {
-    await admin
-      .from("staff_whatsapp_sessions")
-      .update({ staff_user_id: identity.staffUserId })
-      .eq("id", session.id);
-  }
-
-  return {
-    kind: "ok",
-    staff: { ...identity, ...active },
-    session,
-  };
-}
-
-async function resetSession(
-  admin: SupabaseClient,
-  sessionId: string,
-  venueId: string | null,
-) {
-  await admin
-    .from("staff_whatsapp_sessions")
-    .update({
-      state: venueId ? "idle" : "selecting_venue",
-      consumer_id: null,
-      ticket_id: null,
-      pending_consumer_code: null,
-      context: {},
-    })
-    .eq("id", sessionId);
 }
 
 async function handleLookupCode(
@@ -1088,158 +812,6 @@ async function handleStaffPaymentConfirm(
   );
 }
 
-export async function onConsumerPaymentConfirmed(
-  admin: SupabaseClient,
-  twilio: TwilioEnv | null,
-  ticketId: string,
-  consumerId: string,
-): Promise<void> {
-  const ticket = await admin
-    .from("tickets")
-    .select(
-      "id, venue_id, staff_payment_confirmed_at, status, opened_by_staff_user_id",
-    )
-    .eq("id", ticketId)
-    .eq("consumer_id", consumerId)
-    .maybeSingle();
-  if (!ticket.data || ticket.data.status !== "awaiting_payment_confirm") return;
-
-  const venueRes = await admin
-    .from("venues")
-    .select("name")
-    .eq("id", ticket.data.venue_id)
-    .single();
-
-  if (ticket.data.staff_payment_confirmed_at) {
-    await tryFinalizeAndReview(
-      admin,
-      ticketId,
-      consumerId,
-      ticket.data.venue_id,
-    );
-
-    if (twilio && ticket.data.opened_by_staff_user_id) {
-      const staffPhone = await staffPhoneForUser(
-        admin,
-        ticket.data.opened_by_staff_user_id,
-      );
-      if (staffPhone) {
-        await sendStaffWhatsAppReply(
-          admin,
-          twilio,
-          staffPhone,
-          `El comensal confirmó el pago en ${venueRes.data?.name ?? "tu local"} ✓\n` +
-            `Responde listo cuando hayas cobrado.`,
-        );
-      }
-    }
-    return;
-  }
-
-  if (twilio && ticket.data.opened_by_staff_user_id) {
-    const staffPhone = await staffPhoneForUser(
-      admin,
-      ticket.data.opened_by_staff_user_id,
-    );
-    if (staffPhone) {
-      await sendStaffWhatsAppReply(
-        admin,
-        twilio,
-        staffPhone,
-        `El comensal confirmó en la app (${venueRes.data?.name ?? "local"}).\n` +
-          `Responde listo cuando cobres.`,
-      );
-    }
-  }
-}
-
-async function tryFinalizeAndReview(
-  admin: SupabaseClient,
-  ticketId: string,
-  consumerId: string,
-  venueId: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const fin = await finalizeInformalTicket(admin, ticketId, consumerId, venueId);
-  if (!fin.ok) return fin;
-  await enqueueReview(admin, consumerId, ticketId, venueId);
-  return { ok: true };
-}
-
-async function enqueueReview(
-  admin: SupabaseClient,
-  consumerId: string,
-  ticketId: string,
-  venueId: string,
-) {
-  const [venueRes, ticketRes] = await Promise.all([
-    admin.from("venues").select("name, slug, photos").eq("id", venueId).single(),
-    admin
-      .from("tickets")
-      .select(
-        "discount_cents, redeem_cents, discount_percent, total_cents, check_subtotal_cents, tip_cents",
-      )
-      .eq("id", ticketId)
-      .single(),
-  ]);
-  const v = venueRes.data;
-  const t = ticketRes.data;
-  const discount = t?.discount_cents ?? 0;
-  const redeem = t?.redeem_cents ?? 0;
-  await admin.from("consumer_pay_notifications").insert({
-    consumer_id: consumerId,
-    ticket_id: ticketId,
-    kind: "review",
-    status: "pending",
-    payload: {
-      venue_id: venueId,
-      venue_slug: v?.slug ?? null,
-      venue_name: v?.name ?? "Partner venue",
-      venue_photo_url: v?.photos?.[0] ?? null,
-      discount_cents: discount,
-      discount_percent: t?.discount_percent ?? null,
-      redeem_cents: redeem,
-      total_reward_cents: discount + redeem,
-      total_cents: t?.total_cents ?? null,
-      currency: "MXN",
-    },
-  });
-}
-
-async function resolveTicketOpener(
-  admin: SupabaseClient,
-  venueId: string,
-  staffUserId: string,
-): Promise<string> {
-  const owner = await admin
-    .from("venue_members")
-    .select("business_id")
-    .eq("venue_id", venueId)
-    .eq("role", "owner")
-    .limit(1)
-    .maybeSingle();
-  if (owner.data?.business_id) return owner.data.business_id;
-  return staffUserId;
-}
-
-async function staffPhoneForUser(
-  admin: SupabaseClient,
-  userId: string,
-): Promise<string | null> {
-  const session = await admin
-    .from("staff_whatsapp_sessions")
-    .select("phone_e164")
-    .eq("staff_user_id", userId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (session.data?.phone_e164) return session.data.phone_e164;
-
-  const { data } = await admin.auth.admin.getUserById(userId);
-  const phone = data.user?.phone;
-  if (!phone) return null;
-  return phone.startsWith("+") ? phone : `+${phone}`;
-}
-
 async function reply(
   admin: SupabaseClient,
   twilio: TwilioEnv,
@@ -1247,66 +819,4 @@ async function reply(
   body: string,
 ) {
   await sendStaffWhatsAppReply(admin, twilio, to, body);
-}
-
-async function listStaffVenues(
-  admin: SupabaseClient,
-  userId: string,
-): Promise<StaffVenue[]> {
-  const roleRows = await admin
-    .from("venue_roles")
-    .select("venue_id, venues(name)")
-    .eq("user_id", userId)
-    .eq("role", "staff");
-  if (roleRows.error || !roleRows.data?.length) return [];
-
-  const venues: StaffVenue[] = [];
-  for (const row of roleRows.data) {
-    const join = row.venues as { name: string } | null;
-    venues.push({
-      venueId: row.venue_id,
-      venueName: join?.name ?? "Venue",
-    });
-  }
-  venues.sort((a, b) => a.venueName.localeCompare(b.venueName));
-  return venues;
-}
-
-export type StaffAccess =
-  | { status: "ok"; identity: StaffIdentity }
-  | { status: "unknown_phone" }
-  | { status: "not_on_team" };
-
-/** Staff auth + venue team membership for this WhatsApp number. */
-export async function resolveStaffAccess(
-  admin: SupabaseClient,
-  phoneE164: string,
-): Promise<StaffAccess> {
-  const digits = phoneE164.replace(/\D/g, "");
-  const userIdRes = await admin.rpc("find_user_id_by_phone", {
-    phone_digits: digits,
-  });
-  const userId = userIdRes.data as string | null;
-  if (!userId) return { status: "unknown_phone" };
-
-  const venues = await listStaffVenues(admin, userId);
-  if (venues.length === 0) return { status: "not_on_team" };
-
-  return {
-    status: "ok",
-    identity: {
-      staffUserId: userId,
-      phoneE164,
-      venues,
-    },
-  };
-}
-
-/** @deprecated Use resolveStaffAccess */
-export async function resolveStaffIdentity(
-  admin: SupabaseClient,
-  phoneE164: string,
-): Promise<StaffIdentity | null> {
-  const access = await resolveStaffAccess(admin, phoneE164);
-  return access.status === "ok" ? access.identity : null;
 }
