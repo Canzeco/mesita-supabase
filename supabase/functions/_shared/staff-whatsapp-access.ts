@@ -20,7 +20,7 @@ async function listStaffVenues(
 
   const venues: StaffVenue[] = [];
   for (const row of roleRows.data) {
-    const join = row.venues as { name: string } | null;
+    const join = row.venues as unknown as { name: string } | null;
     venues.push({
       venueId: row.venue_id,
       venueName: join?.name ?? "Venue",
