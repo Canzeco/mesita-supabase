@@ -15,6 +15,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe@17";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
+import { FORMAL_KINDS } from "../_shared/ticket-kinds.ts";
+import { finalizeFormalTicketPayment } from "../_shared/ticket-formal-mark-paid.ts";
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
@@ -65,17 +67,28 @@ Deno.serve(async (req) => {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        const consumerId =
-          session.client_reference_id ??
-          (session.metadata?.consumer_id as string | undefined) ??
-          null;
-        const subscriptionId =
-          typeof session.subscription === "string"
-            ? session.subscription
-            : session.subscription?.id ?? null;
-        if (consumerId && subscriptionId) {
-          const sub = await stripe.subscriptions.retrieve(subscriptionId);
-          await reconcileSubscription(admin, stripe, consumerId, sub);
+        if (
+          session.mode === "payment" &&
+          session.payment_status === "paid" &&
+          session.metadata?.purpose === "ticket_payment"
+        ) {
+          const ticketId = session.metadata?.ticket_id as string | undefined;
+          if (ticketId) {
+            await handleTicketPaymentCompleted(admin, ticketId);
+          }
+        } else {
+          const consumerId =
+            session.client_reference_id ??
+            (session.metadata?.consumer_id as string | undefined) ??
+            null;
+          const subscriptionId =
+            typeof session.subscription === "string"
+              ? session.subscription
+              : session.subscription?.id ?? null;
+          if (consumerId && subscriptionId) {
+            const sub = await stripe.subscriptions.retrieve(subscriptionId);
+            await reconcileSubscription(admin, stripe, consumerId, sub);
+          }
         }
         break;
       }
@@ -103,6 +116,41 @@ Deno.serve(async (req) => {
     headers: { "Content-Type": "application/json" },
   });
 });
+
+async function handleTicketPaymentCompleted(
+  admin: ReturnType<typeof adminClient>,
+  ticketId: string,
+): Promise<void> {
+  const ticketRow = await admin
+    .from("tickets")
+    .select(
+      "id, venue_id, consumer_id, kind, status, story_status, cashback_cents, redeem_cents",
+    )
+    .eq("id", ticketId)
+    .maybeSingle();
+  if (ticketRow.error || !ticketRow.data) {
+    console.error(
+      "[stripe-handle-webhook] ticket payment: lookup failed",
+      ticketRow.error,
+    );
+    return;
+  }
+  const ticket = ticketRow.data;
+  if (!FORMAL_KINDS.has(ticket.kind)) {
+    console.warn(
+      "[stripe-handle-webhook] ticket payment: non-formal kind",
+      ticket.kind,
+    );
+    return;
+  }
+  const result = await finalizeFormalTicketPayment(admin, ticket);
+  if (!result.ok) {
+    console.error(
+      "[stripe-handle-webhook] ticket payment finalize:",
+      result.error,
+    );
+  }
+}
 
 // Maps a Stripe subscription back to a Mesita consumer via metadata, falling
 // back to the customer's metadata.

@@ -34,9 +34,8 @@ import {
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
-import { FORMAL_KINDS, FORMAL_STORY_KINDS, STORY_KINDS } from "../_shared/ticket-kinds.ts";
-
-const STORY_VERIFIED = new Set(["ai_verified", "waiter_verified"]);
+import { FORMAL_KINDS, STORY_KINDS } from "../_shared/ticket-kinds.ts";
+import { finalizeFormalTicketPayment } from "../_shared/ticket-formal-mark-paid.ts";
 
 type Body = { ticketId?: string };
 
@@ -103,9 +102,9 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Mock mode: informal and any other non-formal kinds are allowed.
   const paidAt = new Date().toISOString();
 
-  // Mock mode: informal and any other non-formal kinds are allowed.
   // Staff marks payment on their side; ticket moves forward once consumer
   // confirms (or immediately for non-confirm flows in the consumer mock path).
   if (!FORMAL_KINDS.has(ticket.kind)) {
@@ -129,127 +128,21 @@ Deno.serve(async (req) => {
     });
   }
 
-  const storyRequired = FORMAL_STORY_KINDS.has(ticket.kind);
-  const storyOk = STORY_VERIFIED.has(ticket.story_status);
-  const nextStatus = storyRequired && !storyOk ? "awaiting_story" : "paid";
-
-  // Optimistic guard: only update if we're still in pending_pay.
-  const updated = await admin
-    .from("tickets")
-    .update({ status: nextStatus, paid_at: paidAt })
-    .eq("id", ticketId)
-    .eq("status", "pending_pay")
-    .select("id, status, paid_at, cashback_cents, story_status")
-    .single();
-  if (updated.error) {
+  const result = await finalizeFormalTicketPayment(admin, ticket);
+  if (!result.ok) {
     return json(
-      { ok: false, error: `ticket_update: ${updated.error.message}` },
-      500,
+      { ok: false, error: result.error, code: result.code },
+      result.status ?? 500,
     );
-  }
-
-  // If the cashback is gated by story verification, stop here. The credit
-  // will run later inside business-verify-story.
-  if (nextStatus === "awaiting_story") {
-    return json({
-      ok: true,
-      ticket: updated.data,
-      cashbackCreditedCents: 0,
-      cashbackRedeemedCents: 0,
-      consumerBalanceAfterCents: null,
-      awaitingStory: true,
-    });
-  }
-
-  // Cashback is ready to credit. Apply redemption FIRST (debit) then earn
-  // (credit), with a single balance write at the end. The ledger rows are
-  // append-only so we can read the trail later.
-  const cashbackCents = ticket.cashback_cents ?? 0;
-  const redeemCents = ticket.redeem_cents ?? 0;
-
-  const consumerRow = await admin
-    .from("consumers")
-    .select("cashback_balance_cents")
-    .eq("id", ticket.consumer_id)
-    .single();
-  if (consumerRow.error) {
-    return json(
-      { ok: false, error: `consumer_balance_read: ${consumerRow.error.message}` },
-      500,
-    );
-  }
-  let balance = consumerRow.data.cashback_balance_cents ?? 0;
-
-  if (redeemCents > 0) {
-    if (redeemCents > balance) {
-      // Concurrent redemption elsewhere shrank the balance. Refuse so the
-      // ledger never goes negative.
-      return json(
-        {
-          ok: false,
-          code: "redeem_exceeds_balance",
-          error: `Consumer balance dropped below the ${redeemCents} cents this ticket would redeem.`,
-        },
-        409,
-      );
-    }
-    balance -= redeemCents;
-    const debit = await admin.from("cashback_ledger").insert({
-      consumer_id: ticket.consumer_id,
-      ticket_id: ticket.id,
-      venue_id: ticket.venue_id,
-      delta_cents: -redeemCents,
-      balance_after_cents: balance,
-      kind: "redeem",
-    });
-    if (debit.error) {
-      return json(
-        { ok: false, error: `ledger_redeem: ${debit.error.message}` },
-        500,
-      );
-    }
-  }
-
-  if (cashbackCents > 0) {
-    balance += cashbackCents;
-    const credit = await admin.from("cashback_ledger").insert({
-      consumer_id: ticket.consumer_id,
-      ticket_id: ticket.id,
-      venue_id: ticket.venue_id,
-      delta_cents: cashbackCents,
-      balance_after_cents: balance,
-      kind: "earn",
-    });
-    if (credit.error) {
-      return json(
-        { ok: false, error: `ledger_earn: ${credit.error.message}` },
-        500,
-      );
-    }
-  }
-
-  if (redeemCents > 0 || cashbackCents > 0) {
-    const balanceUpdate = await admin
-      .from("consumers")
-      .update({ cashback_balance_cents: balance })
-      .eq("id", ticket.consumer_id);
-    if (balanceUpdate.error) {
-      return json(
-        {
-          ok: false,
-          error: `consumer_balance_write: ${balanceUpdate.error.message}`,
-        },
-        500,
-      );
-    }
   }
 
   return json({
     ok: true,
-    ticket: updated.data,
-    cashbackCreditedCents: cashbackCents,
-    cashbackRedeemedCents: redeemCents,
-    consumerBalanceAfterCents: balance,
-    awaitingStory: false,
+    ticket: result.ticket,
+    alreadyPaid: result.alreadyPaid,
+    cashbackCreditedCents: result.cashbackCreditedCents,
+    cashbackRedeemedCents: result.cashbackRedeemedCents,
+    consumerBalanceAfterCents: result.consumerBalanceAfterCents,
+    awaitingStory: result.awaitingStory ?? false,
   });
 });

@@ -1,7 +1,10 @@
 // Payment confirmation + ticket finalization for staff WhatsApp Type A.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { finalizeInformalTicket } from "./ticket-informal.ts";
+import {
+  finalizeInformalTicket,
+  venueInstagramHandleForPayload,
+} from "./ticket-informal.ts";
 import { sendStaffWhatsAppReply } from "./staff-whatsapp-messages.ts";
 import { type TwilioEnv } from "./twilio.ts";
 
@@ -105,7 +108,11 @@ async function enqueueReview(
   venueId: string,
 ) {
   const [venueRes, ticketRes] = await Promise.all([
-    admin.from("venues").select("name, slug, photos").eq("id", venueId).single(),
+    admin
+      .from("venues")
+      .select("name, slug, photos, instagram_url")
+      .eq("id", venueId)
+      .single(),
     admin
       .from("tickets")
       .select(
@@ -128,6 +135,7 @@ async function enqueueReview(
       venue_slug: v?.slug ?? null,
       venue_name: v?.name ?? "Partner venue",
       venue_photo_url: v?.photos?.[0] ?? null,
+      venue_instagram_handle: venueInstagramHandleForPayload(v?.instagram_url),
       discount_cents: discount,
       discount_percent: t?.discount_percent ?? null,
       redeem_cents: redeem,

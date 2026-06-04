@@ -17,6 +17,7 @@ import {
   STORY_KINDS,
 } from "../_shared/ticket-kinds.ts";
 import { isConsumerFirstVisit, selectVenueRate } from "../_shared/membership.ts";
+import { venueInstagramHandleForPayload } from "../_shared/ticket-informal.ts";
 
 type Body = {
   ticketId?: string;
@@ -116,7 +117,7 @@ Deno.serve(async (req) => {
   const venueRow = await admin
     .from("venues")
     .select(
-      "id, name, slug, photos, cashback_percent, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, status",
+      "id, name, slug, photos, instagram_url, cashback_percent, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, status",
     )
     .eq("id", ticket.venue_id)
     .maybeSingle();
@@ -195,6 +196,7 @@ Deno.serve(async (req) => {
       venue_slug: venue.slug ?? null,
       venue_name: venue.name,
       venue_photo_url: venue.photos?.[0] ?? null,
+      venue_instagram_handle: venueInstagramHandleForPayload(venue.instagram_url),
       ticket_kind: kind,
       check_subtotal_cents: snap.checkSubtotalCents,
       tip_cents: snap.tipCents,

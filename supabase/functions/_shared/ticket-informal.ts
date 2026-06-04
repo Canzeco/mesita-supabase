@@ -2,6 +2,7 @@
 // WhatsApp Type-A flow.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { instagramHandleFromUrl } from "./apify.ts";
 import { isConsumerFirstVisit, selectVenueRate } from "./membership.ts";
 
 export type VenueRateRow = {
@@ -98,12 +99,19 @@ export function formatMoneyMx(cents: number, currency = "MXN"): string {
 }
 
 /** Payload for consumer Pay → Tickets (Realtime notification). */
+export function venueInstagramHandleForPayload(
+  instagramUrl: string | null | undefined,
+): string | null {
+  return instagramHandleFromUrl(instagramUrl);
+}
+
 export function buildConsumerBillPayload(
   venue: {
     name: string;
     photos?: string[] | null;
     slug?: string | null;
     monthly_promo_cap?: number | null;
+    instagram_url?: string | null;
   },
   calc: InformalBillCalc,
   venueId: string,
@@ -115,6 +123,7 @@ export function buildConsumerBillPayload(
     venue_slug: venue.slug ?? null,
     venue_name: venue.name,
     venue_photo_url: venue.photos?.[0] ?? null,
+    venue_instagram_handle: venueInstagramHandleForPayload(venue.instagram_url),
     check_subtotal_cents: calc.subtotal,
     tip_cents: calc.tip,
     total_cents: calc.total,
@@ -275,7 +284,11 @@ export async function ensureConsumerReviewNotification(
   if (existing.data) return;
 
   const [venueRes, ticketRes] = await Promise.all([
-    admin.from("venues").select("name, slug, photos").eq("id", venueId).single(),
+    admin
+      .from("venues")
+      .select("name, slug, photos, instagram_url")
+      .eq("id", venueId)
+      .single(),
     admin
       .from("tickets")
       .select(
@@ -301,6 +314,7 @@ export async function ensureConsumerReviewNotification(
       venue_slug: v?.slug ?? null,
       venue_name: v?.name ?? "Partner venue",
       venue_photo_url: v?.photos?.[0] ?? null,
+      venue_instagram_handle: venueInstagramHandleForPayload(v?.instagram_url),
       ticket_kind: t?.kind ?? null,
       check_subtotal_cents: t?.check_subtotal_cents ?? null,
       tip_cents: t?.tip_cents ?? null,

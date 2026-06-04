@@ -8,6 +8,7 @@ import { venueHasVerifiedOwner } from "./venue-ownership.ts";
 
 export type VenueOpsRow = VenueRateRow & {
   plan: string | null;
+  instagram_url?: string | null;
 };
 
 const INFORMAL_DISCOUNT_PLANS = new Set(["informal_pro", "informal_ultra"]);
@@ -170,7 +171,7 @@ export async function loadVenueOpsRow(
   const res = await admin
     .from("venues")
     .select(
-      "id, name, slug, photos, cashback_percent, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type, plan",
+      "id, name, slug, photos, instagram_url, cashback_percent, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type, plan",
     )
     .eq("id", venueId)
     .maybeSingle();
