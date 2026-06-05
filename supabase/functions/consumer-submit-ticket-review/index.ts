@@ -1,6 +1,6 @@
 // Supabase Edge Function — consumer-submit-ticket-review
 //
-// Post-visit review (Food, Service, Ambiance, Overall + comments) after Type A.
+// Post-visit review (Food, Service, Ambiance, Value, Overall + comments).
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -16,6 +16,7 @@ type Body = {
   food?: number;
   service?: number;
   ambiance?: number;
+  value?: number;
   overall?: number;
   comments?: string;
 };
@@ -44,6 +45,7 @@ Deno.serve(async (req) => {
   const food = score(body.food);
   const service = score(body.service);
   const ambiance = score(body.ambiance);
+  const value = score(body.value); // optional — null until the UI sends it
   const overall = score(body.overall);
   if (!ticketId) return json({ ok: false, error: "ticketId is required" }, 400);
   if (food == null || service == null || ambiance == null || overall == null) {
@@ -84,6 +86,7 @@ Deno.serve(async (req) => {
         food,
         service,
         ambiance,
+        value,
         overall,
         comments,
       },
