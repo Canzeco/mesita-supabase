@@ -45,12 +45,21 @@ Deno.serve(async (req) => {
   const food = score(body.food);
   const service = score(body.service);
   const ambiance = score(body.ambiance);
-  const value = score(body.value); // optional — null until the UI sends it
+  const value = score(body.value);
   const overall = score(body.overall);
   if (!ticketId) return json({ ok: false, error: "ticketId is required" }, 400);
-  if (food == null || service == null || ambiance == null || overall == null) {
+  if (
+    food == null ||
+    service == null ||
+    ambiance == null ||
+    value == null ||
+    overall == null
+  ) {
     return json(
-      { ok: false, error: "food, service, ambiance, and overall must be 1–5" },
+      {
+        ok: false,
+        error: "food, service, ambiance, value, and overall must be 1–5",
+      },
       400,
     );
   }
@@ -72,9 +81,10 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "Ticket not found" }, 404);
   }
 
-  const comments = body.comments
-    ? String(body.comments).trim().slice(0, 2000)
-    : null;
+  const comments = String(body.comments ?? "").trim().slice(0, 2000);
+  if (!comments) {
+    return json({ ok: false, error: "A note is required" }, 400);
+  }
 
   const insert = await admin
     .from("ticket_reviews")
