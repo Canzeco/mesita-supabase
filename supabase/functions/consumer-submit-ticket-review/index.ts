@@ -82,8 +82,11 @@ Deno.serve(async (req) => {
   }
 
   const comments = String(body.comments ?? "").trim().slice(0, 2000);
-  if (!comments) {
-    return json({ ok: false, error: "A note is required" }, 400);
+  if (comments.length < 50) {
+    return json(
+      { ok: false, error: "A note of at least 50 characters is required" },
+      400,
+    );
   }
 
   const insert = await admin
