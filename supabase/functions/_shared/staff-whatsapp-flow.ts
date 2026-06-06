@@ -661,7 +661,6 @@ async function handleSubmitBill(
     consumerRes.data as ConsumerRow,
     amounts.subtotal,
     amounts.tip,
-    0,
   );
 
   if (calc.subtotal === 0) {
@@ -684,7 +683,7 @@ async function handleSubmitBill(
       check_subtotal_cents: calc.subtotal,
       tip_cents: calc.tip,
       total_cents: calc.total,
-      redeem_cents: calc.redeemCents,
+      redeem_cents: 0,
       discount_percent: calc.discountPercent,
       discount_cents: calc.discountCents,
     })
@@ -730,9 +729,6 @@ async function handleSubmitBill(
         `Mesita — payment at ${venue.name}\n` +
         `Bill: ${formatMoneyMx(calc.total)}\n` +
         `Discount (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
-        (calc.redeemCents > 0
-          ? `Balance applied: -${formatMoneyMx(calc.redeemCents)}\n`
-          : "") +
         `Amount due: ${formatMoneyMx(calc.amountDueCents)}\n\n` +
         `Confirm payment in the Mesita app → Pay tab.`,
     });
@@ -745,8 +741,6 @@ async function handleSubmitBill(
     `Cuenta lista ✓ (${staff.venueName})\n` +
       `Subtotal: ${formatMoneyMx(calc.subtotal)}\n` +
       `Descuento (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
-      (calc.redeemCents > 0
-        : "") +
       `Paga el comensal: ${formatMoneyMx(calc.amountDueCents)}\n\n` +
       `Le enviamos notificación en la app Mesita → Pay para que confirme.\n` +
       `Cobra ${formatMoneyMx(calc.amountDueCents)} (efectivo o terminal).\n` +
