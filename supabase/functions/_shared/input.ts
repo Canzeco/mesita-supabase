@@ -19,3 +19,25 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function isEmailish(value: unknown): value is string {
   return typeof value === "string" && EMAIL_RE.test(value);
 }
+
+/** Resolve the operator contact email for ownership claims. */
+export function resolveRequesterEmail(opts: {
+  bodyEmail?: string | null;
+  sessionEmail?: string | null;
+  userId: string;
+  /** When true, synthesize a stable placeholder if no real email exists. */
+  allowMockFallback?: boolean;
+}): string | null {
+  const body = (opts.bodyEmail ?? "").trim().toLowerCase();
+  if (isEmailish(body)) return body;
+
+  const session = (opts.sessionEmail ?? "").trim().toLowerCase();
+  if (isEmailish(session)) return session;
+
+  if (opts.allowMockFallback) {
+    const compactId = opts.userId.replace(/-/g, "");
+    return `mock+${compactId}@mesita.ai`;
+  }
+
+  return null;
+}

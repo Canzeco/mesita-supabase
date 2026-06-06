@@ -31,7 +31,7 @@ import {
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
-import { isEmailish } from "../_shared/input.ts";
+import { resolveRequesterEmail } from "../_shared/input.ts";
 
 type Body = { venueId?: string; requesterEmail?: string; note?: string };
 
@@ -90,12 +90,22 @@ Deno.serve(async (req) => {
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
   const venueId = (body.venueId ?? "").trim();
-  const requesterEmail = (body.requesterEmail ?? "").trim().toLowerCase();
   const note = (body.note ?? "").trim().slice(0, 500);
   if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
-  if (!isEmailish(requesterEmail)) {
+
+  const requesterEmail = resolveRequesterEmail({
+    bodyEmail: body.requesterEmail,
+    sessionEmail: authRes.user.emailLower,
+    userId,
+    allowMockFallback: true,
+  });
+  if (!requesterEmail) {
     return json(
-      { ok: false, error: "requesterEmail must look like name@domain.tld" },
+      {
+        ok: false,
+        error:
+          "Add an email to your Mesita account, or sign in with email, to start verification.",
+      },
       400,
     );
   }

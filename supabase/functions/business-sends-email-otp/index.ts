@@ -29,7 +29,7 @@ import {
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
-import { isEmailish } from "../_shared/input.ts";
+import { resolveRequesterEmail } from "../_shared/input.ts";
 import { isOnDomain } from "../_shared/onboarding.ts";
 import {
   insertPendingOtpVerification,
@@ -59,11 +59,22 @@ Deno.serve(async (req) => {
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
   const venueId = (body.venueId ?? "").trim();
-  const requesterEmail = (body.requesterEmail ?? "").trim().toLowerCase();
   if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
-  if (!isEmailish(requesterEmail)) {
+
+  const mockMode = isVenueOtpMockMode();
+  const requesterEmail = resolveRequesterEmail({
+    bodyEmail: body.requesterEmail,
+    sessionEmail: authRes.user.emailLower,
+    userId,
+    allowMockFallback: mockMode,
+  });
+  if (!requesterEmail) {
     return json(
-      { ok: false, error: "requesterEmail must look like name@domain.tld" },
+      {
+        ok: false,
+        error:
+          "Add an email to your Mesita account, or sign in with email, to start verification.",
+      },
       400,
     );
   }
@@ -121,7 +132,6 @@ Deno.serve(async (req) => {
 
   const code = randomSixDigits();
   const codeHash = await sha256Hex(code);
-  const mockMode = isVenueOtpMockMode();
   const mockCode = mockMode ? code : null;
   const sentTo = mockMode ? mockVenueOtpEmail() : venue.email;
 
