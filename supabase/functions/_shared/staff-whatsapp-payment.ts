@@ -79,7 +79,7 @@ export async function tryFinalizeAndReview(
   consumerId: string,
   venueId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const fin = await finalizeInformalTicket(admin, ticketId, consumerId, venueId);
+  const fin = await finalizeInformalTicket(admin, ticketId, consumerId);
   if (!fin.ok) return fin;
   await enqueueReview(admin, consumerId, ticketId, venueId);
   return { ok: true };

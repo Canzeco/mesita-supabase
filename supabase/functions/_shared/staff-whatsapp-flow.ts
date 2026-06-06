@@ -661,7 +661,6 @@ async function handleSubmitBill(
     consumerRes.data as ConsumerRow,
     amounts.subtotal,
     amounts.tip,
-    0,
   );
 
   if (calc.subtotal === 0) {
