@@ -217,9 +217,6 @@ verify_jwt = true
 [functions.consumer-mock-story-detect]
 verify_jwt = true
 
-[functions.consumer-confirm-ticket-payment]
-verify_jwt = true
-
 [functions.consumer-submit-ticket-review]
 verify_jwt = true
 
@@ -383,9 +380,6 @@ verify_jwt = true
 # the EF (STRIPE_WEBHOOK_SECRET), not the gateway.
 
 [functions.consumer-create-subscription]
-verify_jwt = true
-
-[functions.consumer-create-ticket-payment]
 verify_jwt = true
 
 [functions.consumer-claim-instagram]
