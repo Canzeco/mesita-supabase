@@ -43,10 +43,6 @@ const COLUMNS: readonly string[] = [
   "pitch",
   "story",
   "description",
-  // Legacy single-rate column. Superseded by the eight per-tier columns
-  // below (welcome_*_rate / *_rate) added in migration 0027. Kept in the
-  // projection until every reader switches off it.
-  "cashback_percent",
   // Four per-tier promo rates (free / premium). Welcome variants fire on a
   // guest's first visit at the venue; the unprefixed variants apply on every
   // visit afterwards. Legal values: 10, 20, 50, 70 (nullable).

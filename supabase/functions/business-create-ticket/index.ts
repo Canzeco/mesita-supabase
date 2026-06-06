@@ -1,23 +1,17 @@
 // Supabase Edge Function — business-create-ticket
 //
-// Authenticated. The waiter / validator opens a ticket against a consumer at
-// their venue. The body specifies which of the 10 ticket flows is being
-// run (`kind`). The function does these things:
+// Authenticated. The staff / validator opens a discount ticket against a
+// consumer at their venue. The body specifies which discount flow is run
+// (`kind`): dp / s_dp_sf (with story) and their reservation-prefixed variants.
 //
 //   1. Verifies the caller's JWT and venue membership.
 //   2. Loads the venue + consumer, validates input.
-//   3. Branches by the venue's fiscal_type:
-//        - formal  → cashback flows. Inserts ticket as `pending_pay`,
-//                    snapshots cashback_percent, computes earn at gross,
-//                    accepts an optional redeem against the consumer balance.
-//        - informal → discount flows. Inserts ticket as `revealed`,
-//                    snapshots discount_percent + cents, no Stripe rail,
-//                    no balance touched.
+//   3. Snapshots the discount percent + cents off the subtotal. Mesita never
+//      holds money — the discount is applied at the bill, paid off-rail.
 //   4. If the kind includes a story (S in the name), seeds story_status =
-//      'pending' so the post-meal upload + verify flow is gated.
+//      'pending' so the post-meal story verify flow is gated.
 //   5. If the kind is reservation-prefixed (R…), accepts reservation fields
-//      and seeds reservation_status = 'pending' so the AI agent layer can
-//      pick it up.
+//      and seeds reservation_status so the AI agent layer can pick it up.
 //
 // Self-contained: own auth, own DB writes via the service role, no
 // function-to-function calls.
@@ -32,7 +26,6 @@ import {
 } from "../_shared/auth.ts";
 import {
   ACTIONABLE_KINDS,
-  FORMAL_KINDS,
   RESERVATION_KINDS,
   STORY_KINDS,
 } from "../_shared/ticket-kinds.ts";
@@ -46,8 +39,6 @@ type Body = {
   /** Scan-only: link guest code without billing. Bill is submitted separately. */
   scanOnly?: boolean;
   checkSubtotalCents?: number;
-  tipCents?: number;
-  redeemCents?: number; // formal only
   // Reservation fields (R-prefixed kinds)
   reservationAt?: string;
   reservationPartySize?: number;
@@ -73,7 +64,7 @@ Deno.serve(async (req) => {
 
   const venueId = (body.venueId ?? "").toString().trim();
   const consumerCode = (body.consumerCode ?? "").toString().trim().toUpperCase();
-  const kind = (body.kind ?? "p_c").toString().trim();
+  const kind = (body.kind ?? "dp").toString().trim();
 
   if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
   if (!consumerCode) return json({ ok: false, error: "consumerCode is required" }, 400);
@@ -84,7 +75,6 @@ Deno.serve(async (req) => {
     );
   }
 
-  const isFormal = FORMAL_KINDS.has(kind);
   const requiresStory = STORY_KINDS.has(kind);
   const isReservation = RESERVATION_KINDS.has(kind);
   const scanOnly = body.scanOnly === true;
@@ -99,7 +89,7 @@ Deno.serve(async (req) => {
   const venueRow = await admin
     .from("venues")
     .select(
-      "id, name, slug, photos, cashback_percent, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type",
+      "id, name, slug, photos, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type",
     )
     .eq("id", venueId)
     .maybeSingle();
@@ -114,7 +104,7 @@ Deno.serve(async (req) => {
   // ── Consumer lookup ─────────────────────────────────────────────────
   const consumerRow = await admin
     .from("consumers")
-    .select("id, code, full_name, cashback_balance_cents, tier_key")
+    .select("id, code, full_name, tier_key")
     .eq("code", consumerCode)
     .maybeSingle();
   if (consumerRow.error) {
@@ -142,15 +132,13 @@ Deno.serve(async (req) => {
         check_subtotal_cents: null,
         tip_cents: null,
         total_cents: null,
-        cashback_percent: 0,
-        cashback_cents: 0,
         redeem_cents: 0,
         discount_percent: null,
         discount_cents: null,
         revealed_at: null,
       })
       .select(
-        "id, kind, status, story_status, check_subtotal_cents, tip_cents, total_cents, cashback_percent, cashback_cents, redeem_cents, discount_percent, discount_cents, revealed_at, currency, created_at",
+        "id, kind, status, story_status, check_subtotal_cents, tip_cents, total_cents, discount_percent, discount_cents, revealed_at, currency, created_at",
       )
       .single();
     if (insert.error) {
@@ -175,54 +163,20 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Bill totals required when not scan-only.
+  // Bill subtotal required when not scan-only.
   const subtotal = toCents(body.checkSubtotalCents);
-  const tipRaw = toCents(body.tipCents ?? 0);
-  const redeemRequested = toCents(body.redeemCents ?? 0);
   if (subtotal == null) {
     return json(
       { ok: false, error: "checkSubtotalCents must be a non-negative integer" },
       400,
     );
   }
-  if (tipRaw == null) {
-    return json(
-      { ok: false, error: "tipCents must be a non-negative integer" },
-      400,
-    );
-  }
-  // Informal (discount) tickets: promo is off the subtotal only — no tip line.
-  const tip = isFormal ? tipRaw : 0;
-  if (redeemRequested == null) {
-    return json(
-      { ok: false, error: "redeemCents must be a non-negative integer" },
-      400,
-    );
-  }
-  if (!isFormal && redeemRequested > 0) {
-    return json(
-      {
-        ok: false,
-        error: "Redemption isn't allowed on informal/discount tickets.",
-      },
-      400,
-    );
-  }
 
-  const consumerBalance = consumerRow.data.cashback_balance_cents ?? 0;
   const firstVisit = await isConsumerFirstVisit(admin, consumerId, venueId);
   const ratePercent = selectVenueRate(venue, consumerRow.data.tier_key, firstVisit);
   const capPesos = venue.monthly_promo_cap;
 
-  const billRes = computeTicketBill({
-    subtotal,
-    tip,
-    redeemRequested,
-    isFormal,
-    ratePercent,
-    consumerBalance,
-    capPesos,
-  });
+  const billRes = computeTicketBill({ subtotal, ratePercent, capPesos });
   if (!billRes.ok) {
     return json({ ok: false, code: billRes.code, error: billRes.error }, 400);
   }
@@ -277,20 +231,14 @@ Deno.serve(async (req) => {
     if (body.reservationNotes) {
       reservationNotes = String(body.reservationNotes).slice(0, 500);
     }
-    // If the reservation was already confirmed by the venue before checkout
-    // (rare today; common once the AI agent is live) the caller can pass
-    // reservationStatus too. For now we always seed 'confirmed' since the
-    // ticket is being opened *at* the table — the consumer is here, the
-    // reservation succeeded.
+    // The ticket is opened *at* the table — the consumer is here, the
+    // reservation succeeded — so seed 'confirmed'.
     reservationStatus = "confirmed";
   }
 
   // ── Lifecycle status at insert time ───────────────────────────────────
-  // Formal:   ticket opens as `pending_pay` — consumer still needs to pay.
-  // Informal: ticket opens as `revealed` — discount has been shown to the
-  //           waiter and is being applied at the bill right now. The cash
-  //           settles off-rail; Mesita's involvement at the payment step
-  //           ends here.
+  // The discount has been shown to the staff and is being applied at the bill
+  // right now. The cash settles off-rail; Mesita's involvement ends here.
   const status = "awaiting_payment_confirm";
   const storyStatus = requiresStory ? "pending" : "not_required";
 
@@ -307,9 +255,7 @@ Deno.serve(async (req) => {
       check_subtotal_cents: snap.checkSubtotalCents,
       tip_cents: snap.tipCents,
       total_cents: snap.totalCents,
-      cashback_percent: snap.cashbackPercent,
-      cashback_cents: snap.cashbackCents,
-      redeem_cents: snap.redeemCents,
+      redeem_cents: 0,
       discount_percent: snap.discountPercent,
       discount_cents: snap.discountCents,
       revealed_at: null,
@@ -320,7 +266,7 @@ Deno.serve(async (req) => {
       reservation_notes: reservationNotes,
     })
     .select(
-      "id, kind, status, story_status, check_subtotal_cents, tip_cents, total_cents, cashback_percent, cashback_cents, redeem_cents, discount_percent, discount_cents, revealed_at, reservation_status, reservation_at, reservation_party_size, currency, created_at",
+      "id, kind, status, story_status, check_subtotal_cents, tip_cents, total_cents, discount_percent, discount_cents, revealed_at, reservation_status, reservation_at, reservation_party_size, currency, created_at",
     )
     .single();
   if (insert.error) {
@@ -330,7 +276,7 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Push every mock ticket to consumer Pay/Tickets inbox.
+  // Push the ticket to the consumer Pay/Tickets inbox.
   await admin.from("consumer_pay_notifications").insert({
     consumer_id: consumerId,
     ticket_id: insert.data.id,
@@ -345,13 +291,9 @@ Deno.serve(async (req) => {
       check_subtotal_cents: snap.checkSubtotalCents,
       tip_cents: snap.tipCents,
       total_cents: snap.totalCents,
-      discount_cents: isFormal ? 0 : (snap.discountCents ?? 0),
-      discount_percent: isFormal ? 0 : (snap.discountPercent ?? 0),
-      cashback_cents: isFormal ? snap.cashbackCents : 0,
-      cashback_percent: isFormal ? ratePercent : 0,
-      redeem_cents: snap.redeemCents,
-      total_reward_cents: (isFormal ? snap.cashbackCents : (snap.discountCents ?? 0)) +
-        snap.redeemCents,
+      discount_cents: snap.discountCents ?? 0,
+      discount_percent: snap.discountPercent ?? 0,
+      total_reward_cents: snap.discountCents ?? 0,
       reward_cap_mxn: capPesos ?? null,
       amount_due_cents: snap.amountDueCents,
       currency: insert.data.currency ?? "MXN",

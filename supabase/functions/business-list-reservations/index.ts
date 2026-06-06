@@ -3,7 +3,7 @@
 // Authenticated. Returns reservations for a venue the caller is a member
 // of, joined with the guest's display fields + plan (tier) for the
 // capacity view. NO financial fields — reservations never carry money
-// (the entity split keeps discount/cashback on tickets, not bookings).
+// (the entity split keeps discounts on tickets, not bookings).
 //
 // Membership-gated like business-list-tickets; shape + scope filter mirror
 // consumer-list-reservations. Self-contained.

@@ -418,7 +418,6 @@ Deno.serve(async (req) => {
     country,
     pitch: synth.pitch ?? details.editorialSummary?.text ?? null,
     story: synth.story ?? details.generativeSummary?.overview?.text ?? null,
-    cashback_percent: 10,
     photos: photoUrls,
     google_place_id: details.id ?? placeId,
     // Every channel below is best-effort and may be null. classifyLinks

@@ -405,7 +405,7 @@ async function handleLookupCode(
   const consumerRes = await admin
     .from("consumers")
     .select(
-      "id, code, full_name, first_name, last_name, cashback_balance_cents, tier_key, tier_origin, consumer_instagram_followers_count, phone",
+      "id, code, full_name, first_name, last_name, tier_key, tier_origin, consumer_instagram_followers_count, phone",
     )
     .eq("code", code)
     .maybeSingle();
@@ -453,7 +453,6 @@ async function handleLookupCode(
     `Código: ${displayConsumerCode(code)}\n` +
     `Nombre: ${name}\n` +
     `Nivel: ${tier}${igLine}${subLine}\n` +
-    `Saldo Mesita: ${formatMoneyMx(c.cashback_balance_cents ?? 0)}\n\n` +
     `Unidad: ${staff.venueName}\n` +
     `${venueOps.rewardLine}\n`;
 
@@ -647,7 +646,7 @@ async function handleSubmitBill(
   const consumerRes = await admin
     .from("consumers")
     .select(
-      "id, code, full_name, first_name, last_name, cashback_balance_cents, tier_key, tier_origin, consumer_instagram_followers_count, phone",
+      "id, code, full_name, first_name, last_name, tier_key, tier_origin, consumer_instagram_followers_count, phone",
     )
     .eq("id", session.consumer_id)
     .single();
@@ -685,8 +684,6 @@ async function handleSubmitBill(
       check_subtotal_cents: calc.subtotal,
       tip_cents: calc.tip,
       total_cents: calc.total,
-      cashback_percent: 0,
-      cashback_cents: 0,
       redeem_cents: calc.redeemCents,
       discount_percent: calc.discountPercent,
       discount_cents: calc.discountCents,
@@ -749,7 +746,6 @@ async function handleSubmitBill(
       `Subtotal: ${formatMoneyMx(calc.subtotal)}\n` +
       `Descuento (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
       (calc.redeemCents > 0
-        ? `Saldo Mesita: -${formatMoneyMx(calc.redeemCents)}\n`
         : "") +
       `Paga el comensal: ${formatMoneyMx(calc.amountDueCents)}\n\n` +
       `Le enviamos notificación en la app Mesita → Pay para que confirme.\n` +

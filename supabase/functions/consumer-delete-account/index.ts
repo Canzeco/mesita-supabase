@@ -1,13 +1,13 @@
 // Supabase Edge Function — consumer-delete-account
 //
 // Authenticated. Deletes the caller's own consumer account along with every
-// dependent row (tickets, cashback_ledger entries). Also deletes the
+// dependent row (tickets). Also deletes the
 // underlying auth.users row so the email is freed up for re-signup.
 // Self-contained: verifies the JWT, then deletes via service role. Does
 // NOT call any other Edge Function.
 //
-// Cascade order matters: tickets and cashback_ledger reference consumers
-// with ON DELETE RESTRICT, so they must be removed first. The
+// Cascade order matters: tickets reference consumers with ON DELETE
+// RESTRICT, so they must be removed first. The
 // public.consumers row PK references auth.users(id) ON DELETE CASCADE, so
 // deleting the auth row drops the consumers row too — we delete the auth
 // row last for that reason.
@@ -38,14 +38,6 @@ Deno.serve(async (req) => {
   const admin = adminClient(envRes.env);
 
   // Cascade clean-up of dependent rows (RESTRICT FKs).
-  const { error: ledgerErr } = await admin
-    .from("cashback_ledger")
-    .delete()
-    .eq("consumer_id", userId);
-  if (ledgerErr) {
-    return json({ ok: false, error: `cashback_ledger_delete: ${ledgerErr.message}` }, 500);
-  }
-
   const { error: ticketsErr } = await admin
     .from("tickets")
     .delete()

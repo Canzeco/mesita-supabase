@@ -137,7 +137,7 @@ Deno.serve(async (req) => {
     .update(patch)
     .eq("id", userId)
     .select(
-      "id, code, full_name, first_name, last_name, sex, birthday, country, phone, cashback_balance_cents",
+      "id, code, full_name, first_name, last_name, sex, birthday, country, phone",
     )
     .single();
   if (update.error) {

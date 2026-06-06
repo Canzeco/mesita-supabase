@@ -4,98 +4,47 @@ export type TicketBillSnapshot = {
   checkSubtotalCents: number;
   tipCents: number;
   totalCents: number;
-  cashbackPercent: number;
-  cashbackCents: number;
-  redeemCents: number;
-  discountPercent: number | null;
-  discountCents: number | null;
+  discountPercent: number;
+  discountCents: number;
   amountDueCents: number;
   eligibleCents: number;
 };
 
 export type ComputeTicketBillInput = {
   subtotal: number;
-  tip: number;
-  redeemRequested: number;
-  isFormal: boolean;
   ratePercent: number;
-  consumerBalance: number;
   capPesos: number | null;
 };
 
+// Discounts only: the promo rate applies to the subtotal, the discount is
+// applied at the bill, and the consumer pays the venue directly. Mesita never
+// holds a balance, so there is no tip line, redemption, or credit here.
 export function computeTicketBill(
   input: ComputeTicketBillInput,
 ): { ok: true; snapshot: TicketBillSnapshot } | { ok: false; code?: string; error: string } {
-  const { subtotal, tip, redeemRequested, isFormal, ratePercent, consumerBalance, capPesos } =
-    input;
+  const { subtotal, ratePercent, capPesos } = input;
 
   if (subtotal === 0) {
     return { ok: false, error: "Check total can't be zero" };
   }
 
-  const total = isFormal ? subtotal + tip : subtotal;
+  const total = subtotal;
   const eligibleCents = promoEligibleSubtotalCents(subtotal, capPesos);
 
-  let cashbackCents = 0;
-  let redeemCents = 0;
-  let discountCents = 0;
-  let discountPercent: number | null = null;
+  const discountPercent = ratePercent;
+  let discountCents = Math.floor((eligibleCents * ratePercent) / 100);
+  if (discountCents > subtotal) discountCents = subtotal;
 
-  if (isFormal) {
-    if (redeemRequested > consumerBalance) {
-      return {
-        ok: false,
-        code: "redeem_exceeds_balance",
-        error: `Consumer balance is ${consumerBalance} cents — can't redeem ${redeemRequested}.`,
-      };
-    }
-    if (redeemRequested > total) {
-      return {
-        ok: false,
-        code: "redeem_exceeds_total",
-        error: `Redemption ${redeemRequested} can't exceed the check total ${total}.`,
-      };
-    }
-    redeemCents = redeemRequested;
-    cashbackCents = Math.floor((eligibleCents * ratePercent) / 100);
-  } else {
-    discountPercent = ratePercent;
-    discountCents = Math.floor((eligibleCents * ratePercent) / 100);
-    if (discountCents > subtotal) discountCents = subtotal;
-    const payableCents = subtotal - discountCents;
-    const cap = Math.min(consumerBalance, payableCents);
-    if (redeemRequested > consumerBalance) {
-      return {
-        ok: false,
-        code: "redeem_exceeds_balance",
-        error: `Consumer balance is ${consumerBalance} cents — can't redeem ${redeemRequested}.`,
-      };
-    }
-    if (redeemRequested > payableCents) {
-      return {
-        ok: false,
-        code: "redeem_exceeds_total",
-        error: `Redemption ${redeemRequested} can't exceed the amount due ${payableCents}.`,
-      };
-    }
-    redeemCents = redeemRequested > 0 ? redeemRequested : cap;
-  }
-
-  const amountDueCents = isFormal
-    ? Math.max(0, total - redeemCents)
-    : Math.max(0, subtotal - (discountCents ?? 0) - redeemCents);
+  const amountDueCents = Math.max(0, subtotal - discountCents);
 
   return {
     ok: true,
     snapshot: {
       checkSubtotalCents: subtotal,
-      tipCents: tip,
+      tipCents: 0,
       totalCents: total,
-      cashbackPercent: isFormal ? ratePercent : 0,
-      cashbackCents: isFormal ? cashbackCents : 0,
-      redeemCents,
       discountPercent,
-      discountCents: isFormal ? null : discountCents,
+      discountCents,
       amountDueCents,
       eligibleCents,
     },

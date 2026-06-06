@@ -13,8 +13,6 @@ export type VenueRates = {
   welcome_premium_rate: number | null;
   free_rate: number | null;
   premium_rate: number | null;
-  // Legacy single rate — fallback until every venue carries per-tier rates.
-  cashback_percent: number | null;
 };
 
 export type TierConfig = {
@@ -32,7 +30,7 @@ export type TierConfig = {
 // Resolves the promo rate for a guest at a venue. Premium guests get the
 // premium column; everyone else the free column. The "welcome" variant fires
 // on a guest's first visit at this venue, the default variant afterwards.
-// Falls back to the lower tier's rate, then the legacy single rate, then 0.
+// Falls back to the lower tier's rate, then 0.
 // Returns a clamped integer percent — and ONLY that, never the tier.
 export function selectVenueRate(
   venue: VenueRates,
@@ -50,7 +48,6 @@ export function selectVenueRate(
       ? venue.premium_rate ?? venue.free_rate
       : venue.free_rate;
   }
-  if (rate == null) rate = venue.cashback_percent;
   return Math.max(0, Math.min(100, rate ?? 0));
 }
 

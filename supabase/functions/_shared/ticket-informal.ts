@@ -1,5 +1,6 @@
-// Informal (discount) ticket math — shared by business-create-ticket and Staff
-// WhatsApp Type-A flow.
+// Discount ticket math — shared by business-create-ticket and the Staff
+// WhatsApp Type-A flow. Discounts only: Mesita never holds a balance, so there
+// is no redeem/ledger step — the discount is applied straight to the bill.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { instagramHandleFromUrl } from "./apify.ts";
@@ -8,7 +9,6 @@ import { isConsumerFirstVisit, selectVenueRate } from "./membership.ts";
 export type VenueRateRow = {
   id: string;
   name: string;
-  cashback_percent: number;
   welcome_free_rate: number | null;
   welcome_premium_rate: number | null;
   free_rate: number | null;
@@ -25,7 +25,6 @@ export type ConsumerRow = {
   full_name: string | null;
   first_name: string | null;
   last_name: string | null;
-  cashback_balance_cents: number | null;
   tier_key: string | null;
   tier_origin: string | null;
   consumer_instagram_followers_count: number | null;
@@ -40,7 +39,6 @@ export type InformalBillCalc = {
   ratePercent: number;
   discountPercent: number;
   discountCents: number;
-  redeemCents: number;
   amountDueCents: number;
 };
 
@@ -60,8 +58,7 @@ export async function computeInformalBill(
   venue: VenueRateRow,
   consumer: ConsumerRow,
   subtotal: number,
-  tip: number,
-  redeemRequested = 0,
+  _tip: number,
 ): Promise<InformalBillCalc> {
   const total = subtotal;
   const firstVisit = await isConsumerFirstVisit(admin, consumer.id, venue.id);
@@ -74,11 +71,7 @@ export async function computeInformalBill(
   let discountCents = Math.floor((eligibleCents * ratePercent) / 100);
   if (discountCents > subtotal) discountCents = subtotal;
 
-  const consumerBalance = consumer.cashback_balance_cents ?? 0;
-  const payableCents = subtotal - discountCents;
-  const cap = Math.min(consumerBalance, payableCents);
-  const redeemCents = redeemRequested > 0 ? redeemRequested : cap;
-  const amountDueCents = payableCents - redeemCents;
+  const amountDueCents = subtotal - discountCents;
 
   return {
     subtotal,
@@ -88,7 +81,6 @@ export async function computeInformalBill(
     ratePercent,
     discountPercent,
     discountCents,
-    redeemCents,
     amountDueCents,
   };
 }
@@ -117,7 +109,6 @@ export function buildConsumerBillPayload(
   venueId: string,
 ): Record<string, unknown> {
   const discount = calc.discountCents ?? 0;
-  const redeem = calc.redeemCents ?? 0;
   return {
     venue_id: venueId,
     venue_slug: venue.slug ?? null,
@@ -129,8 +120,7 @@ export function buildConsumerBillPayload(
     total_cents: calc.total,
     discount_cents: discount,
     discount_percent: calc.discountPercent,
-    redeem_cents: redeem,
-    total_reward_cents: discount + redeem,
+    total_reward_cents: discount,
     reward_cap_mxn: venue.monthly_promo_cap ?? null,
     amount_due_cents: calc.amountDueCents,
     currency: "MXN",
@@ -140,13 +130,12 @@ export function buildConsumerBillPayload(
 export async function finalizeInformalTicket(
   admin: SupabaseClient,
   ticketId: string,
-  consumerId: string,
-  venueId: string,
+  _consumerId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const ticket = await admin
     .from("tickets")
     .select(
-      "id, status, redeem_cents, discount_cents, consumer_payment_confirmed_at, staff_payment_confirmed_at",
+      "id, status, discount_cents, consumer_payment_confirmed_at, staff_payment_confirmed_at",
     )
     .eq("id", ticketId)
     .maybeSingle();
@@ -161,17 +150,6 @@ export async function finalizeInformalTicket(
     return { ok: false, error: "payment confirmations incomplete" };
   }
 
-  const redeemCents = ticket.data.redeem_cents ?? 0;
-  const consumerRow = await admin
-    .from("consumers")
-    .select("cashback_balance_cents")
-    .eq("id", consumerId)
-    .single();
-  if (consumerRow.error) {
-    return { ok: false, error: consumerRow.error.message };
-  }
-  const balance = consumerRow.data.cashback_balance_cents ?? 0;
-
   const now = new Date().toISOString();
   const update = await admin
     .from("tickets")
@@ -182,22 +160,6 @@ export async function finalizeInformalTicket(
     })
     .eq("id", ticketId);
   if (update.error) return { ok: false, error: update.error.message };
-
-  if (redeemCents > 0) {
-    const newBalance = balance - redeemCents;
-    await admin.from("cashback_ledger").insert({
-      consumer_id: consumerId,
-      ticket_id: ticketId,
-      venue_id: venueId,
-      delta_cents: -redeemCents,
-      balance_after_cents: newBalance,
-      kind: "redeem",
-    });
-    await admin
-      .from("consumers")
-      .update({ cashback_balance_cents: newBalance })
-      .eq("id", consumerId);
-  }
 
   return { ok: true };
 }
@@ -248,12 +210,7 @@ export async function prepareTicketForReview(
       }
     }
 
-    const fin = await finalizeInformalTicket(
-      admin,
-      ticketId,
-      consumerId,
-      row.venue_id,
-    );
+    const fin = await finalizeInformalTicket(admin, ticketId, consumerId);
     if (!fin.ok) return fin;
 
     await ensureConsumerReviewNotification(
@@ -292,7 +249,7 @@ export async function ensureConsumerReviewNotification(
     admin
       .from("tickets")
       .select(
-        "kind, discount_cents, redeem_cents, discount_percent, cashback_percent, cashback_cents, total_cents, check_subtotal_cents, tip_cents",
+        "kind, discount_cents, discount_percent, total_cents, check_subtotal_cents, tip_cents",
       )
       .eq("id", ticketId)
       .single(),
@@ -301,8 +258,6 @@ export async function ensureConsumerReviewNotification(
   const v = venueRes.data;
   const t = ticketRes.data;
   const discount = t?.discount_cents ?? 0;
-  const redeem = t?.redeem_cents ?? 0;
-  const cashback = t?.cashback_cents ?? 0;
 
   await admin.from("consumer_pay_notifications").insert({
     consumer_id: consumerId,
@@ -320,10 +275,7 @@ export async function ensureConsumerReviewNotification(
       tip_cents: t?.tip_cents ?? null,
       discount_cents: discount,
       discount_percent: t?.discount_percent ?? null,
-      cashback_percent: t?.cashback_percent ?? null,
-      cashback_cents: cashback,
-      redeem_cents: redeem,
-      total_reward_cents: discount + redeem + cashback,
+      total_reward_cents: discount,
       total_cents: t?.total_cents ?? null,
       currency: "MXN",
     },
