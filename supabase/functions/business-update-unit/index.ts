@@ -56,7 +56,6 @@ type UpdateBody = {
   phone?: string | null;
   pitch?: string | null;
   story?: string | null;
-  cashback_percent?: number | null;
   // Four per-tier promo rates (migration 0032). Welcome variants fire on a
   // guest's first visit at the venue; the unprefixed variants apply on every
   // visit afterwards. DB constraint enforces the legal set {10, 20, 50, 70}.
@@ -153,7 +152,7 @@ const EDITABLE_STATUSES = new Set(["active", "paused", "archived"]);
 
 // Plan catalog the EF accepts — all five tiers in the venue_plan enum.
 // Ordered Free → Pro (formal/informal) → Ultra (formal/informal). The
-// mechanic (cashback vs discount) is fixed by fiscal_type; Pro vs Ultra
+// mechanic is fixed by fiscal_type; Pro vs Ultra
 // only changes price + visibility tier. See business UI plans.ts for the
 // picker catalog this is the server-side counterpart of.
 const VALID_PLANS = new Set([
@@ -293,11 +292,6 @@ Deno.serve(async (req) => {
   if ("phone" in body) update.phone = optString(body.phone, 40);
   if ("pitch" in body) update.pitch = optString(body.pitch, 200);
   if ("story" in body) update.story = optString(body.story, 1500);
-  if ("cashback_percent" in body) {
-    update.cashback_percent =
-      body.cashback_percent == null ? null : clampInt(body.cashback_percent, 0, 100);
-  }
-
   // Four per-tier promo rates. Each is nullable (null clears the offer) or
   // one of {10, 20, 50, 70}. The DB has a matching CHECK constraint so a
   // mis-shaped client can't slip through; this is the friendly 400 layer.

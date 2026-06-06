@@ -2,7 +2,7 @@
 //
 // Authenticated. A validator (any venue_member) looks up a consumer by
 // the 8-digit code on their QR (0000-0000). Returns the consumer's display name +
-// current cashback balance so the validator UI can show "Pato — $55
+// current profile so the validator UI can show "Pato — $55
 // available" before opening a ticket. Membership of *some* venue is
 // enough — we don't enforce which venue here because lookup is global.
 
@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
 
   const { data: consumer, error } = await admin
     .from("consumers")
-    .select("id, code, full_name, cashback_balance_cents")
+    .select("id, code, full_name")
     .eq("code", code)
     .maybeSingle();
   if (error) {

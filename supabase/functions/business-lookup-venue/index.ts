@@ -43,7 +43,7 @@ import { isOnDomain } from "../_shared/onboarding.ts";
 type Body = { placeId?: string };
 
 const VENUE_COLUMNS =
-  "id, slug, name, status, listing_type, address, phone, email, website_url, photos, category, vibe, cashback_percent, created_at, updated_at";
+  "id, slug, name, status, listing_type, address, phone, email, website_url, photos, category, vibe, created_at, updated_at";
 
 type VenueRow = {
   id: string;

@@ -72,7 +72,6 @@ type VenueRow = {
   phone: string | null;
   pitch: string | null;
   story: string | null;
-  cashback_percent: number | null;
   photos: string[] | null;
   [key: string]: unknown;
   embedding: unknown | null;

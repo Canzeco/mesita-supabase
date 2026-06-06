@@ -1,7 +1,7 @@
 // Supabase Edge Function — consumer-list-reservations (natural caller)
 //
 // Authenticated read of the caller's reservations. Returns booking
-// metadata joined with the venue summary — NO discount / cashback /
+// metadata joined with the venue summary — NO discount /
 // money fields, because the entity split's contract is that the
 // reservation card never carries financial info. The (optional)
 // linked coupon is exposed by id only so the client can cross-

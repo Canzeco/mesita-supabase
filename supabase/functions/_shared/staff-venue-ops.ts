@@ -45,7 +45,7 @@ export function maxConfiguredPromoRate(venue: VenueRates): number {
   return Math.max(0, Math.min(100, max));
 }
 
-/** Discount % from Promos toggles only (null/Off = 0). Ignores legacy cashback_percent. */
+/** Discount % from Promos toggles only (null/Off = 0). */
 export function selectDiscountPromoRate(
   venue: VenueRates,
   tier: string | null | undefined,
@@ -74,7 +74,7 @@ export function assessDiscountTicketOps(
       ok: false,
       code: "formal_venue",
       staffMessage:
-        "Este local usa Cashback (plan formal), no descuentos en cuenta.\n\n" +
+        "Este local no está configurado para descuentos en cuenta.\n\n" +
         "Mesita Ops por WhatsApp solo abre tickets con descuento (tipo A).\n" +
         "Para usar este canal: Mesita Business → Promos → elige «Pro/Ultra con Descuentos» y configura porcentajes.",
     };
@@ -171,7 +171,7 @@ export async function loadVenueOpsRow(
   const res = await admin
     .from("venues")
     .select(
-      "id, name, slug, photos, instagram_url, cashback_percent, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type, plan",
+      "id, name, slug, photos, instagram_url, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type, plan",
     )
     .eq("id", venueId)
     .maybeSingle();

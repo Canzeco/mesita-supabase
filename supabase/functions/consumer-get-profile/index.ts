@@ -2,7 +2,7 @@
 //
 // Authenticated. Returns the caller's consumer profile, creating it on first
 // call (with sequential 8-digit `code` 0000-0000 for validators / WhatsApp)
-// and returning the cached cashback balance.
+// and returning the consumer profile.
 //
 // Self-contained: verifies the JWT, does its own DB read/upsert through the
 // service role, never calls another Edge Function.
@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
   // Read once. If absent, insert with a generated code and re-read.
   const existing = await admin
     .from("consumers")
-    .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, cashback_balance_cents, tier_key, tier_origin, consumer_instagram_followers_count, tier_expires_at")
+    .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, tier_key, tier_origin, consumer_instagram_followers_count, tier_expires_at")
     .eq("id", userId)
     .maybeSingle();
   if (existing.error) {
@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
       const inserted = await admin
         .from("consumers")
         .insert({ id: userId, code: codeResult.data as string })
-        .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, cashback_balance_cents, tier_key, tier_origin, consumer_instagram_followers_count, tier_expires_at")
+        .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, tier_key, tier_origin, consumer_instagram_followers_count, tier_expires_at")
         .single();
       if (!inserted.error) {
         consumer = inserted.data;
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
       .from("consumers")
       .update({ code: codeResult.data as string })
       .eq("id", userId)
-      .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, cashback_balance_cents, tier_key, tier_origin, consumer_instagram_followers_count, tier_expires_at")
+      .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, tier_key, tier_origin, consumer_instagram_followers_count, tier_expires_at")
       .single();
     if (updated.error) {
       return json({ ok: false, error: `consumer_code_set: ${updated.error.message}` }, 500);
