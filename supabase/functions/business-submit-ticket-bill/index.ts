@@ -1,10 +1,10 @@
 // Supabase Edge Function — business-submit-ticket-bill
 //
 // Billing step after scan: attach the check subtotal to an open ticket and
-// snapshot the discount. The reward is applied right here, so the ticket also
-// closes here:
-//   Type A (no story):  -> revealed (review queued for the consumer)
-//   Type B (with story): -> awaiting_story (closes once the story verifies)
+// snapshot the discount. The discount is applied right here, but the ticket
+// closes only when staff confirm payment (business-mark-paid):
+//   Type A (no story):  -> awaiting_payment_confirm
+//   Type B (with story): -> awaiting_story (then awaiting_payment_confirm)
 // The discounted bill is delivered to the consumer's Pay inbox either way.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -18,10 +18,7 @@ import {
 import { computeTicketBill } from "../_shared/business-ticket-billing.ts";
 import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
 import { isConsumerFirstVisit, selectVenueRate } from "../_shared/membership.ts";
-import {
-  closeTicketAndEnqueueReview,
-  venueInstagramHandleForPayload,
-} from "../_shared/ticket-informal.ts";
+import { venueInstagramHandleForPayload } from "../_shared/ticket-informal.ts";
 
 type Body = {
   ticketId?: string;
@@ -124,18 +121,18 @@ Deno.serve(async (req) => {
   }
   const snap = billRes.snapshot;
 
-  // Type A closes at billing; Type B waits for the story to verify.
+  // Type A goes straight to the staff payment-confirm gate; Type B waits for
+  // the story to verify first. Either way the ticket closes only when staff
+  // tap Paid received (business-mark-paid).
   const now = new Date().toISOString();
   const storyStatus = requiresStory ? "pending" : "not_required";
-  const status = requiresStory ? "awaiting_story" : "revealed";
+  const status = requiresStory ? "awaiting_story" : "awaiting_payment_confirm";
 
   const update = await admin
     .from("tickets")
     .update({
       status,
       story_status: storyStatus,
-      revealed_at: requiresStory ? null : now,
-      paid_at: requiresStory ? null : now,
       check_subtotal_cents: snap.checkSubtotalCents,
       tip_cents: snap.tipCents,
       total_cents: snap.totalCents,
@@ -182,16 +179,7 @@ Deno.serve(async (req) => {
     },
   });
 
-  // Type A is done — queue the review now. Type B queues it after the story.
-  if (!requiresStory) {
-    await closeTicketAndEnqueueReview(
-      admin,
-      ticketId,
-      ticket.consumer_id,
-      venue.id,
-    );
-  }
-
+  // The review is queued only when staff confirm payment (business-mark-paid).
   return json({ ok: true, ticket: update.data });
 });
 
