@@ -1,4 +1,4 @@
-// Ticket-kind taxonomy used by business-create-ticket, business-mark-paid,
+// Ticket-kind taxonomy used by business-create-ticket, business-submit-ticket-bill,
 // and business-verify-story. Single source of truth so a new flow added
 // to one EF can't drift from the others.
 //

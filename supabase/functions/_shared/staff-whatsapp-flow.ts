@@ -16,7 +16,7 @@ import {
   resolveActiveVenue,
   venuePickerText,
 } from "./staff-whatsapp-session.ts";
-import { resolveTicketOpener, tryFinalizeAndReview } from "./staff-whatsapp-payment.ts";
+import { resolveTicketOpener } from "./staff-whatsapp-payment.ts";
 import type {
   SessionRow,
   StaffContext,
@@ -48,6 +48,7 @@ import { venueHasVerifiedOwner } from "./venue-ownership.ts";
 import { replyStaffCoach } from "./staff-whatsapp-replies.ts";
 import {
   buildConsumerBillPayload,
+  closeTicketAndEnqueueReview,
   computeInformalBill,
   formatMoneyMx,
   type ConsumerRow,
@@ -57,7 +58,6 @@ import { sendWhatsAppText, type TwilioEnv } from "./twilio.ts";
 
 export type { StaffAccess, StaffIdentity, StaffVenue } from "./staff-whatsapp-types.ts";
 export { resolveStaffAccess, resolveStaffIdentity } from "./staff-whatsapp-access.ts";
-export { onConsumerPaymentConfirmed } from "./staff-whatsapp-payment.ts";
 
 export async function handleStaffInboundMessage(opts: {
   admin: SupabaseClient;
@@ -315,15 +315,6 @@ export async function handleStaffInboundMessage(opts: {
       session,
     );
     if (blocked) return;
-  }
-
-  if (
-    intent.intent === "confirm_payment" &&
-    session.ticket_id &&
-    (intent.confirm === true || intent.confirm === null)
-  ) {
-    await handleStaffPaymentConfirm(admin, twilio, staff, session);
-    return;
   }
 
   if (intent.consumer_code && session.state === "idle" && codeInBody) {
@@ -670,6 +661,7 @@ async function handleSubmitBill(
 
   const opener = await resolveTicketOpener(admin, staff.venueId, staff.staffUserId);
 
+  const now = new Date().toISOString();
   const insert = await admin
     .from("tickets")
     .insert({
@@ -678,8 +670,10 @@ async function handleSubmitBill(
       opened_by: opener,
       opened_by_staff_user_id: staff.staffUserId,
       kind: "dp",
-      status: "awaiting_payment_confirm",
+      status: "revealed",
       story_status: "not_required",
+      revealed_at: now,
+      paid_at: now,
       check_subtotal_cents: calc.subtotal,
       tip_cents: calc.tip,
       total_cents: calc.total,
@@ -702,22 +696,25 @@ async function handleSubmitBill(
   const ticketId = insert.data.id;
   const payload = buildConsumerBillPayload(venue, calc, staff.venueId);
 
+  // Deliver the discounted bill receipt to the consumer's Pay inbox.
   await admin.from("consumer_pay_notifications").insert({
     consumer_id: session.consumer_id,
     ticket_id: ticketId,
-    kind: "payment_confirm",
-    status: "pending",
+    kind: "bill",
+    status: "completed",
+    resolved_at: now,
     payload,
   });
 
-  await admin
-    .from("staff_whatsapp_sessions")
-    .update({
-      state: "awaiting_staff_payment_confirm",
-      ticket_id: ticketId,
-      context: { bill: payload },
-    })
-    .eq("id", session.id);
+  // Type A closes at billing — queue the consumer's review right away.
+  await closeTicketAndEnqueueReview(
+    admin,
+    ticketId,
+    session.consumer_id,
+    staff.venueId,
+  );
+
+  await resetSession(admin, session.id, staff.venueId);
 
   const guestPhone = consumerRes.data.phone;
   if (guestPhone) {
@@ -726,11 +723,11 @@ async function handleSubmitBill(
       from: twilio.whatsappFromConsumers,
       to: guestPhone,
       body:
-        `Mesita — payment at ${venue.name}\n` +
+        `Mesita — ${venue.name}\n` +
         `Bill: ${formatMoneyMx(calc.total)}\n` +
         `Discount (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
-        `Amount due: ${formatMoneyMx(calc.amountDueCents)}\n\n` +
-        `Confirm payment in the Mesita app → Pay tab.`,
+        `You pay: ${formatMoneyMx(calc.amountDueCents)}\n\n` +
+        `Pay at the table. Leave a quick review in the Mesita app → Pay tab.`,
     });
   }
 
@@ -741,64 +738,9 @@ async function handleSubmitBill(
     `Cuenta lista ✓ (${staff.venueName})\n` +
       `Subtotal: ${formatMoneyMx(calc.subtotal)}\n` +
       `Descuento (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
-      `Paga el comensal: ${formatMoneyMx(calc.amountDueCents)}\n\n` +
-      `Le enviamos notificación en la app Mesita → Pay para que confirme.\n` +
-      `Cobra ${formatMoneyMx(calc.amountDueCents)} (efectivo o terminal).\n` +
-      `Cuando cobres, responde listo.`,
-  );
-}
-
-async function handleStaffPaymentConfirm(
-  admin: SupabaseClient,
-  twilio: TwilioEnv,
-  staff: StaffContext,
-  session: SessionRow,
-) {
-  if (!session.ticket_id || !session.consumer_id) return;
-
-  const now = new Date().toISOString();
-  await admin
-    .from("tickets")
-    .update({ staff_payment_confirmed_at: now })
-    .eq("id", session.ticket_id);
-
-  const ticket = await admin
-    .from("tickets")
-    .select("consumer_payment_confirmed_at, status")
-    .eq("id", session.ticket_id)
-    .single();
-
-  if (ticket.data?.consumer_payment_confirmed_at) {
-    const done = await tryFinalizeAndReview(
-      admin,
-      session.ticket_id,
-      session.consumer_id,
-      staff.venueId,
-    );
-    if (!done.ok) {
-      await reply(admin, twilio, staff.phoneE164, `Error al cerrar: ${done.error}`);
-      return;
-    }
-    await resetSession(admin, session.id, staff.venueId);
-    await reply(
-      admin,
-      twilio,
-      staff.phoneE164,
-      "Pago registrado ✓ Ticket cerrado. El comensal verá la reseña en la app.",
-    );
-    return;
-  }
-
-  await admin
-    .from("staff_whatsapp_sessions")
-    .update({ state: "awaiting_staff_payment_confirm" })
-    .eq("id", session.id);
-
-  await reply(
-    admin,
-    twilio,
-    staff.phoneE164,
-    "Quedó tu confirmación. Esperamos que el comensal confirme en la app Mesita.",
+      `Cobra al comensal: ${formatMoneyMx(calc.amountDueCents)} (efectivo o terminal).\n\n` +
+      `Ticket cerrado ✓ El comensal ya puede dejar su reseña en la app.\n` +
+      `Manda el código del siguiente comensal cuando quieras.`,
   );
 }
 

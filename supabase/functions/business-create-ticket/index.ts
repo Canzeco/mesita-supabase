@@ -31,6 +31,7 @@ import {
 } from "../_shared/ticket-kinds.ts";
 import { isConsumerFirstVisit, selectVenueRate } from "../_shared/membership.ts";
 import { computeTicketBill } from "../_shared/business-ticket-billing.ts";
+import { closeTicketAndEnqueueReview } from "../_shared/ticket-informal.ts";
 
 type Body = {
   venueId?: string;
@@ -237,9 +238,10 @@ Deno.serve(async (req) => {
   }
 
   // ── Lifecycle status at insert time ───────────────────────────────────
-  // The discount has been shown to the staff and is being applied at the bill
-  // right now. The cash settles off-rail; Mesita's involvement ends here.
-  const status = "awaiting_payment_confirm";
+  // The discount is applied at the bill right now and settles off-rail, so the
+  // ticket closes here for Type A. Type B stays open for the story to verify.
+  const now = new Date().toISOString();
+  const status = requiresStory ? "awaiting_story" : "revealed";
   const storyStatus = requiresStory ? "pending" : "not_required";
 
   // ── Insert ────────────────────────────────────────────────────────────
@@ -258,7 +260,8 @@ Deno.serve(async (req) => {
       redeem_cents: 0,
       discount_percent: snap.discountPercent,
       discount_cents: snap.discountCents,
-      revealed_at: null,
+      revealed_at: requiresStory ? null : now,
+      paid_at: requiresStory ? null : now,
       reservation_status: reservationStatus,
       reservation_at: reservationAt,
       reservation_party_size: reservationPartySize,
@@ -276,12 +279,13 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Push the ticket to the consumer Pay/Tickets inbox.
+  // Deliver the discounted bill receipt to the consumer Pay/Tickets inbox.
   await admin.from("consumer_pay_notifications").insert({
     consumer_id: consumerId,
     ticket_id: insert.data.id,
-    kind: "payment_confirm",
-    status: "pending",
+    kind: "bill",
+    status: "completed",
+    resolved_at: now,
     payload: {
       venue_id: venue.id,
       venue_slug: venue.slug ?? null,
@@ -299,6 +303,11 @@ Deno.serve(async (req) => {
       currency: insert.data.currency ?? "MXN",
     },
   });
+
+  // Type A closes immediately — queue the consumer's review now.
+  if (!requiresStory) {
+    await closeTicketAndEnqueueReview(admin, insert.data.id, consumerId, venue.id);
+  }
 
   return json(
     {

@@ -1,7 +1,11 @@
 // Supabase Edge Function — business-submit-ticket-bill
 //
-// Billing step after scan: attach the check subtotal to an open ticket, snapshot
-// the discount, and move it to awaiting_payment_confirm (consumer Pay inbox).
+// Billing step after scan: attach the check subtotal to an open ticket and
+// snapshot the discount. The reward is applied right here, so the ticket also
+// closes here:
+//   Type A (no story):  -> revealed (review queued for the consumer)
+//   Type B (with story): -> awaiting_story (closes once the story verifies)
+// The discounted bill is delivered to the consumer's Pay inbox either way.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -14,7 +18,10 @@ import {
 import { computeTicketBill } from "../_shared/business-ticket-billing.ts";
 import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
 import { isConsumerFirstVisit, selectVenueRate } from "../_shared/membership.ts";
-import { venueInstagramHandleForPayload } from "../_shared/ticket-informal.ts";
+import {
+  closeTicketAndEnqueueReview,
+  venueInstagramHandleForPayload,
+} from "../_shared/ticket-informal.ts";
 
 type Body = {
   ticketId?: string;
@@ -117,14 +124,18 @@ Deno.serve(async (req) => {
   }
   const snap = billRes.snapshot;
 
+  // Type A closes at billing; Type B waits for the story to verify.
+  const now = new Date().toISOString();
   const storyStatus = requiresStory ? "pending" : "not_required";
-  const status = "awaiting_payment_confirm";
+  const status = requiresStory ? "awaiting_story" : "revealed";
 
   const update = await admin
     .from("tickets")
     .update({
       status,
       story_status: storyStatus,
+      revealed_at: requiresStory ? null : now,
+      paid_at: requiresStory ? null : now,
       check_subtotal_cents: snap.checkSubtotalCents,
       tip_cents: snap.tipCents,
       total_cents: snap.totalCents,
@@ -145,11 +156,13 @@ Deno.serve(async (req) => {
     );
   }
 
+  // Deliver the discounted bill to the consumer's Pay inbox.
   await admin.from("consumer_pay_notifications").insert({
     consumer_id: ticket.consumer_id,
     ticket_id: ticketId,
-    kind: "payment_confirm",
-    status: "pending",
+    kind: "bill",
+    status: "completed",
+    resolved_at: now,
     payload: {
       venue_id: venue.id,
       venue_slug: venue.slug ?? null,
@@ -168,6 +181,16 @@ Deno.serve(async (req) => {
       currency: update.data.currency ?? "MXN",
     },
   });
+
+  // Type A is done — queue the review now. Type B queues it after the story.
+  if (!requiresStory) {
+    await closeTicketAndEnqueueReview(
+      admin,
+      ticketId,
+      ticket.consumer_id,
+      venue.id,
+    );
+  }
 
   return json({ ok: true, ticket: update.data });
 });

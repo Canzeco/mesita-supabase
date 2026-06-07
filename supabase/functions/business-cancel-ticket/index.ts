@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
   if (ticket.data.status === "cancelled") {
     return json({ ok: true, alreadyCancelled: true });
   }
-  const cancellable = new Set(["open", "pending_pay", "awaiting_payment_confirm"]);
+  const cancellable = new Set(["open", "awaiting_story"]);
   if (!cancellable.has(ticket.data.status)) {
     return json(
       { ok: false, error: `Cannot cancel a ${ticket.data.status} ticket` },
@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
     .from("tickets")
     .update({ status: "cancelled", cancelled_at: cancelledAt, cancel_reason: reason })
     .eq("id", ticketId)
-    .in("status", ["open", "pending_pay", "awaiting_payment_confirm"])
+    .in("status", ["open", "awaiting_story"])
     .select("id, status, cancelled_at, cancel_reason")
     .single();
   if (update.error) {

@@ -286,9 +286,6 @@ verify_jwt = true
 [functions.business-list-tickets]
 verify_jwt = true
 
-[functions.business-mark-paid]
-verify_jwt = true
-
 [functions.business-cancel-ticket]
 verify_jwt = true
 
