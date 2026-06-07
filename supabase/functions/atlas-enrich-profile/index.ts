@@ -4,10 +4,11 @@
 // caller (business-create-unit) seeds the venue from Google Places, then hands
 // it to this agent, which runs the full Atlas pipeline end to end:
 //
-//   ① SOURCES (tier-gated)   Perplexity channel discovery → Apify (Google Maps
+//   ① SOURCES (tier-gated)   Firecrawl Search + website footer (primary) →
+//                            Perplexity (fallback only) → Apify (Google Maps
 //                            reviews+photos, Instagram, Facebook) → Firecrawl
 //                            website. Google/Mesita = spine (always); the
-//                            social/website/SERP layer is gated by tier ≥ 2.
+//                            social/website layer is gated by tier ≥ 2.
 //   ② IMAGE FUNNEL           gather per source → SAVE (pre-select, per-source
 //                            caps, ≤50 total) → ANALYZE (vision describes each)
 //                            → SORT (text model ranks by the experience rubric)
@@ -60,6 +61,7 @@ import {
   fbSlugCandidate,
   igProfileMatchesVenue,
   isDeadIgStub,
+  discoverChannelsPerplexity,
   resolveChannels,
 } from "../_shared/atlas-channel-discovery.ts";
 

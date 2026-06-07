@@ -84,15 +84,31 @@ const PROVIDER_PRIOR: Record<DiscoveryField, Record<CandidateProvider, number>> 
 };
 
 const FIELD_THRESHOLD: Record<DiscoveryField, number> = {
-  // Tolerance policy:
-  // - stricter (less false positives): website/facebook/opentable/ubereats
-  // - softer (prefer finding a plausible handle): instagram
-  website: 0.5,
+  // Tolerance policy (Atlas Notion benchmark-backed):
+  // - stricter: website/facebook/opentable/ubereats (minimize false positives)
+  // - softer: instagram (Apify identity-check follows; prefer finding a handle)
+  website: 0.52,
   instagram: 0.48,
-  facebook: 0.54,
-  opentable: 0.54,
-  ubereats: 0.38,
+  facebook: 0.58,
+  opentable: 0.58,
+  ubereats: 0.52,
 };
+
+// Provider order per Atlas catalog — Firecrawl + website footer first;
+// Perplexity is fallback-only except Uber Eats (hybrid).
+const PRIMARY_PROVIDERS: Record<DiscoveryField, CandidateProvider[]> = {
+  website: ["google", "website_footer", "firecrawl"],
+  instagram: ["website_footer", "firecrawl", "google"],
+  facebook: ["website_footer", "firecrawl", "google"],
+  opentable: ["seed", "website_footer", "firecrawl"],
+  ubereats: ["seed", "website_footer", "firecrawl"],
+};
+
+const GENERIC_PATH_SEGMENTS = new Set([
+  "mexico", "monterrey", "cdmx", "guadalajara", "restaurants", "restaurant",
+  "delivery", "food", "store", "stores", "city", "near-me", "search",
+  "browse", "category", "categories", "mx", "usa", "us",
+]);
 
 type DiscoveryContext = {
   nameTokens: string[];
@@ -185,17 +201,67 @@ function scoreCandidate(field: DiscoveryField, c: DiscoveryCandidate, ctx: Disco
   if (field === "instagram" && path.split("/").filter(Boolean).length > 1) score -= 0.2;
   if (field === "ubereats" && !path.includes("/store/")) score -= 1.5;
   if (field === "opentable" && !path.startsWith("/r/")) score -= 1.5;
+  for (const seg of path.split("/").filter(Boolean)) {
+    if (GENERIC_PATH_SEGMENTS.has(seg)) score -= 0.35;
+  }
+  if (
+    (field === "instagram" || field === "facebook" || field === "opentable" || field === "ubereats") &&
+    c.provider === "perplexity" &&
+    !ctx.nameTokens.some((t) => hay.includes(t))
+  ) {
+    score -= 0.45;
+  }
   return Math.round(score * 1000) / 1000;
+}
+
+function countNameTokensInHay(hay: string, ctx: DiscoveryContext): number {
+  let hits = 0;
+  for (const t of ctx.nameTokens) {
+    if (hay.includes(t)) hits += 1;
+  }
+  return hits;
+}
+
+// Search-sourced candidates must carry at least one venue name token in the
+// URL path (footer/google/seed links are trusted without this gate).
+export function passesNameGate(
+  field: DiscoveryField,
+  c: DiscoveryCandidate,
+  ctx: DiscoveryContext,
+): boolean {
+  if (c.provider === "website_footer" || c.provider === "google" || c.provider === "seed") {
+    return true;
+  }
+  let u: URL | null = null;
+  try {
+    u = new URL(c.url);
+  } catch {
+    return false;
+  }
+  const hay = foldText((u.hostname ?? "") + (u.pathname ?? ""));
+  const nameHits = countNameTokensInHay(hay, ctx);
+  if (field === "instagram" || field === "facebook") {
+    if (c.provider === "perplexity") return nameHits >= 1;
+    return nameHits >= 1 || ctx.nameTokens.length === 0;
+  }
+  if (field === "opentable" || field === "ubereats") {
+    return nameHits >= 1;
+  }
+  return true;
 }
 
 function selectBestCandidate(
   field: DiscoveryField,
   candidates: DiscoveryCandidate[],
   ctx: DiscoveryContext,
+  providers?: CandidateProvider[],
 ): DiscoverySelection | null {
-  if (!candidates.length) return null;
+  const filtered = candidates.filter((c) =>
+    (!providers || providers.includes(c.provider)) && passesNameGate(field, c, ctx)
+  );
+  if (!filtered.length) return null;
   const bestByUrl = new Map<string, DiscoverySelection>();
-  for (const c of candidates) {
+  for (const c of filtered) {
     const score = scoreCandidate(field, c, ctx);
     const cur = bestByUrl.get(c.url);
     if (!cur || score > cur.score) bestByUrl.set(c.url, { ...c, score });
@@ -206,6 +272,59 @@ function selectBestCandidate(
   const top = ranked[0] ?? null;
   if (!top) return null;
   return top.score >= FIELD_THRESHOLD[field] ? top : null;
+}
+
+function selectPrimaryCandidate(
+  field: DiscoveryField,
+  candidates: DiscoveryCandidate[],
+  ctx: DiscoveryContext,
+): DiscoverySelection | null {
+  return selectBestCandidate(field, candidates, ctx, PRIMARY_PROVIDERS[field]);
+}
+
+function selectHybridUberEats(
+  candidates: DiscoveryCandidate[],
+  ctx: DiscoveryContext,
+): DiscoverySelection | null {
+  const fc = selectBestCandidate(
+    "ubereats",
+    candidates,
+    ctx,
+    ["seed", "website_footer", "firecrawl"],
+  );
+  const pp = selectBestCandidate("ubereats", candidates, ctx, ["perplexity"]);
+  if (fc && pp) {
+    if (fc.score >= pp.score - 0.05) return fc;
+    return pp.score >= FIELD_THRESHOLD.ubereats ? pp : fc;
+  }
+  return fc ?? pp;
+}
+
+async function verifyPageMatchesVenue(
+  firecrawlKey: string | undefined,
+  url: string,
+  ctx: DiscoveryContext,
+  venueName: string,
+): Promise<boolean> {
+  if (!firecrawlKey) return true;
+  const scraped = await firecrawlScrape(firecrawlKey, url, {
+    formats: ["markdown"],
+    onlyMainContent: true,
+    signalTimeoutMs: 12000,
+  });
+  if (!scraped?.markdown) return false;
+  const metaTitle = typeof scraped.metadata.title === "string" ? scraped.metadata.title : "";
+  const metaDesc = typeof scraped.metadata.description === "string"
+    ? scraped.metadata.description
+    : "";
+  const hay = foldText(`${metaTitle} ${metaDesc} ${scraped.markdown.slice(0, 4000)}`);
+  const nameHits = countNameTokensInHay(hay, ctx);
+  if (nameHits >= 1) return true;
+  const brand = foldText(venueName).replace(/[^a-z0-9]/g, "");
+  if (brand.length >= 5 && hay.replace(/[^a-z0-9]/g, "").includes(brand.slice(0, Math.min(brand.length, 8)))) {
+    return true;
+  }
+  return false;
 }
 
 function isFallbackProvider(field: DiscoveryField, provider: CandidateProvider): boolean {
@@ -429,7 +548,7 @@ export async function resolveChannels(opts: {
     addDiscoveryCandidates(pool, "website", webHits, "firecrawl", "search");
     if (needOpenTable) addDiscoveryCandidates(pool, "opentable", otHits, "firecrawl", "search");
     if (needUberEats) addDiscoveryCandidates(pool, "ubereats", ueHits, "firecrawl", "search");
-    if (!website) applySelection("website", selectBestCandidate("website", pool.website, ctx));
+    if (!website) applySelection("website", selectPrimaryCandidate("website", pool.website, ctx));
 
     // Website footer links are strong social/reservation/delivery signals.
     if (website) {
@@ -450,26 +569,29 @@ export async function resolveChannels(opts: {
         }
       }
     }
-    if (!instagram) applySelection("instagram", selectBestCandidate("instagram", pool.instagram, ctx));
-    if (!facebook) applySelection("facebook", selectBestCandidate("facebook", pool.facebook, ctx));
+    if (!instagram) applySelection("instagram", selectPrimaryCandidate("instagram", pool.instagram, ctx));
+    if (!facebook) applySelection("facebook", selectPrimaryCandidate("facebook", pool.facebook, ctx));
     if (needOpenTable && !opentable) {
-      applySelection("opentable", selectBestCandidate("opentable", pool.opentable, ctx));
+      applySelection("opentable", selectPrimaryCandidate("opentable", pool.opentable, ctx));
     }
-    if (needUberEats && !uberEats && !opts.perplexityKey) {
-      applySelection("ubereats", selectBestCandidate("ubereats", pool.ubereats, ctx));
+    if (needUberEats && !uberEats) {
+      applySelection("ubereats", selectPrimaryCandidate("ubereats", pool.ubereats, ctx));
     }
   }
 
-  // 3. Perplexity fallback/cross-check.
-  // Run socials + delivery lookups in parallel when both are needed.
-  const needPerplexityChannels =
-    !!opts.perplexityKey && (!instagram || !facebook || !website || !!opts.firecrawlKey);
-  const needPerplexityDelivery =
-    !!opts.perplexityKey && wantDelivery && (!opentable || !uberEats);
+  // 3. Perplexity — fallback only (Atlas Notion policy). Never re-run when
+  // Firecrawl/website-footer already resolved a channel. Uber Eats is hybrid:
+  // always merge Perplexity citations, then pick the best validated candidate.
+  const needPerplexitySocial =
+    !!opts.perplexityKey && (!instagram || !facebook || !website);
+  const needPerplexityOpenTable =
+    !!opts.perplexityKey && wantDelivery && !opentable;
+  const needPerplexityUberEats =
+    !!opts.perplexityKey && wantDelivery;
 
-  if (needPerplexityChannels || needPerplexityDelivery) {
+  if (needPerplexitySocial || needPerplexityOpenTable || needPerplexityUberEats) {
     const [pp, dd] = await Promise.all([
-      needPerplexityChannels
+      needPerplexitySocial
         ? discoverChannelsPerplexity(
             opts.perplexityKey!,
             opts.name,
@@ -477,7 +599,7 @@ export async function resolveChannels(opts: {
             opts.category,
           )
         : Promise.resolve(null),
-      needPerplexityDelivery
+      (needPerplexityOpenTable || needPerplexityUberEats)
         ? discoverDeliveryPerplexity(
             opts.perplexityKey!,
             opts.name,
@@ -488,19 +610,19 @@ export async function resolveChannels(opts: {
     ]);
 
     if (pp) {
-      if (pp.instagram_url) {
+      if (!instagram && pp.instagram_url) {
         addDiscoveryCandidates(pool, "instagram", [pp.instagram_url], "perplexity", "json_or_citations");
       }
-      if (pp.facebook_url) {
+      if (!facebook && pp.facebook_url) {
         addDiscoveryCandidates(pool, "facebook", [pp.facebook_url], "perplexity", "json_or_citations");
       }
-      if (pp.website_url) {
+      if (!website && pp.website_url) {
         addDiscoveryCandidates(pool, "website", [pp.website_url], "perplexity", "json_or_citations");
       }
     }
 
     if (dd) {
-      if (dd.opentable_url) {
+      if (!opentable && dd.opentable_url) {
         addDiscoveryCandidates(pool, "opentable", [dd.opentable_url], "perplexity", "json_or_citations");
       }
       if (dd.uber_eats_url) {
@@ -508,17 +630,84 @@ export async function resolveChannels(opts: {
       }
     }
 
-    if (!website) applySelection("website", selectBestCandidate("website", pool.website, ctx));
-    if (!instagram) applySelection("instagram", selectBestCandidate("instagram", pool.instagram, ctx));
-    if (!facebook) applySelection("facebook", selectBestCandidate("facebook", pool.facebook, ctx));
+    if (!website) {
+      applySelection(
+        "website",
+        selectBestCandidate("website", pool.website, ctx, ["perplexity"]),
+      );
+    }
+    if (!instagram) {
+      applySelection(
+        "instagram",
+        selectBestCandidate("instagram", pool.instagram, ctx, ["perplexity"]),
+      );
+    }
+    if (!facebook) {
+      applySelection(
+        "facebook",
+        selectBestCandidate("facebook", pool.facebook, ctx, ["perplexity"]),
+      );
+    }
     if (wantDelivery && !opentable) {
-      applySelection("opentable", selectBestCandidate("opentable", pool.opentable, ctx));
+      applySelection(
+        "opentable",
+        selectBestCandidate("opentable", pool.opentable, ctx, ["perplexity"]),
+      );
     }
     if (wantDelivery && !uberEats) {
-      applySelection("ubereats", selectBestCandidate("ubereats", pool.ubereats, ctx));
+      applySelection("ubereats", selectHybridUberEats(pool.ubereats, ctx));
     }
   } else if (wantDelivery && !uberEats) {
-    applySelection("ubereats", selectBestCandidate("ubereats", pool.ubereats, ctx));
+    applySelection("ubereats", selectPrimaryCandidate("ubereats", pool.ubereats, ctx));
+  }
+
+  // 4. Firecrawl page verification for links that persist without Apify gating.
+  if (opts.firecrawlKey) {
+    if (facebook && via.facebook !== "google") {
+      const ok = await verifyPageMatchesVenue(opts.firecrawlKey, facebook, ctx, opts.name);
+      if (!ok) {
+        facebook = null;
+        delete via.facebook;
+        provenance.facebook = {
+          ...provenance.facebook,
+          url: null,
+          provider: null,
+          source: null,
+          score: 0,
+          fallback_used: false,
+        };
+      }
+    }
+    if (opentable && via.opentable !== "seed") {
+      const ok = await verifyPageMatchesVenue(opts.firecrawlKey, opentable, ctx, opts.name);
+      if (!ok) {
+        opentable = null;
+        delete via.opentable;
+        provenance.opentable = {
+          ...provenance.opentable,
+          url: null,
+          provider: null,
+          source: null,
+          score: 0,
+          fallback_used: false,
+        };
+      }
+    }
+    if (uberEats && via.ubereats !== "seed") {
+      const ok = await verifyPageMatchesVenue(opts.firecrawlKey, uberEats, ctx, opts.name);
+      if (!ok) {
+        uberEats = null;
+        delete via.ubereats;
+        provenance.ubereats = {
+          ...provenance.ubereats,
+          url: null,
+          provider: null,
+          source: null,
+          score: 0,
+          fallback_used: false,
+        };
+      }
+    }
   }
 
   for (const field of ["website", "instagram", "facebook", "opentable", "ubereats"] as DiscoveryField[]) {
@@ -549,8 +738,9 @@ export async function resolveChannels(opts: {
 
 
 // Perplexity fallback: resolve channel URLs from search. An LLM, so every URL
-// it returns is host-validated before we trust it.
-async function discoverChannelsPerplexity(
+// it returns is host-validated before we trust it. Facebook/website prefer
+// citation-mined URLs (Atlas Notion: do not trust prose-only claims).
+export async function discoverChannelsPerplexity(
   key: string,
   name: string,
   locationLine: string,
@@ -617,11 +807,9 @@ async function discoverChannelsPerplexity(
       pickInstagram([String(answer.instagram_url ?? "")]) ??
       validHost(answer.instagram_url, ["instagram.com"]) ??
       pickInstagram(hitUrls);
-    const facebook_url =
-      facebookPageFromUrl(String(answer.facebook_url ?? "")) ??
-      validHost(answer.facebook_url, ["facebook.com", "fb.com"]) ??
-      pickFacebook(hitUrls);
-    const website_url = validHost(answer.website_url, null);
+    // Facebook + website: citations only — reduces Perplexity false positives.
+    const facebook_url = pickFacebook(hitUrls);
+    const website_url = pickWebsite(hitUrls);
     if (!instagram_url && !facebook_url && !website_url) return null;
     return { instagram_url, facebook_url, website_url };
   } catch {
@@ -690,12 +878,10 @@ async function discoverDeliveryPerplexity(
     const answer = (safeParseJson(data.choices?.[0]?.message?.content ?? "") as
       | { opentable_url?: unknown; uber_eats_url?: unknown }
       | null) ?? {};
-    const opentable_url =
-      pickChannel([String(answer.opentable_url ?? "")], "opentable_url") ??
-      pickChannel(hitUrls, "opentable_url");
-    const uber_eats_url =
-      pickChannel([String(answer.uber_eats_url ?? "")], "uber_eats_url") ??
-      pickChannel(hitUrls, "uber_eats_url");
+    const opentable_url = pickChannel(hitUrls, "opentable_url") ??
+      pickChannel([String(answer.opentable_url ?? "")], "opentable_url");
+    const uber_eats_url = pickChannel(hitUrls, "uber_eats_url") ??
+      pickChannel([String(answer.uber_eats_url ?? "")], "uber_eats_url");
     if (!opentable_url && !uber_eats_url) return null;
     return { opentable_url, uber_eats_url };
   } catch {

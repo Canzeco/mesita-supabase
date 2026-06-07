@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Pujol",
+    "city": "Ciudad de México",
+    "locationLine": "Ciudad de México, Mexico",
+    "category": "fine_dining",
+    "truth": {
+      "instagram_url": "https://www.instagram.com/pujolmx",
+      "facebook_url": "https://www.facebook.com/pujolmx",
+      "opentable_url": null,
+      "uber_eats_url": null
+    }
+  },
+  {
+    "name": "Quintonil",
+    "city": "Ciudad de México",
+    "locationLine": "Ciudad de México, Mexico",
+    "category": "fine_dining",
+    "truth": {
+      "instagram_url": "https://www.instagram.com/quintonil",
+      "facebook_url": null,
+      "opentable_url": null,
+      "uber_eats_url": null
+    }
+  },
+  {
+    "name": "Cosmo",
+    "city": "San Pedro Garza García",
+    "locationLine": "San Pedro Garza García, Nuevo León, Mexico",
+    "category": "restaurant",
+    "truth": {
+      "instagram_url": null,
+      "facebook_url": "https://www.facebook.com/cosmosanpedro",
+      "opentable_url": null,
+      "uber_eats_url": null
+    }
+  }
+]
