@@ -17,6 +17,7 @@ import {
   requireMembership,
 } from "../_shared/auth.ts";
 import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
+import { closeTicketAndEnqueueReview } from "../_shared/ticket-informal.ts";
 
 type Body = {
   ticketId?: string;
@@ -54,7 +55,7 @@ Deno.serve(async (req) => {
 
   const ticketRow = await admin
     .from("tickets")
-    .select("id, venue_id, consumer_id, kind, status, story_status")
+    .select("id, venue_id, consumer_id, kind, status, story_status, total_cents")
     .eq("id", ticketId)
     .maybeSingle();
   if (ticketRow.error) {
@@ -115,6 +116,20 @@ Deno.serve(async (req) => {
     );
   }
 
-  // The discount was applied at the bill — nothing to credit or claw back.
+  // Approving the story is the final gate for Type B: close the ticket and
+  // queue the consumer's review. The discount was already applied at the bill,
+  // so there is nothing to credit or claw back. Reject is informational only.
+  if (decision === "approve" && (ticket.total_cents ?? 0) > 0) {
+    const closed = await closeTicketAndEnqueueReview(
+      admin,
+      ticketId,
+      ticket.consumer_id,
+      ticket.venue_id,
+    );
+    if (!closed.ok) {
+      return json({ ok: false, error: `ticket_close: ${closed.error}` }, 500);
+    }
+  }
+
   return json({ ok: true, ticket: updated.data });
 });

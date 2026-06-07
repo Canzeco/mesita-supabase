@@ -11,6 +11,7 @@ import {
   readEFEnv,
 } from "../_shared/auth.ts";
 import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
+import { closeTicketAndEnqueueReview } from "../_shared/ticket-informal.ts";
 
 type Body = { ticketId?: string };
 
@@ -35,7 +36,7 @@ Deno.serve(async (req) => {
 
   const ticketRow = await admin
     .from("tickets")
-    .select("id, consumer_id, kind, story_status")
+    .select("id, consumer_id, venue_id, kind, story_status, total_cents")
     .eq("id", ticketId)
     .maybeSingle();
   if (ticketRow.error) {
@@ -91,6 +92,16 @@ Deno.serve(async (req) => {
     return json(
       { ok: false, error: `story_mock: ${updated.error.message}` },
       500,
+    );
+  }
+
+  // Verifying the story closes the Type B ticket and queues the review.
+  if ((ticket.total_cents ?? 0) > 0) {
+    await closeTicketAndEnqueueReview(
+      admin,
+      ticketId,
+      ticket.consumer_id,
+      ticket.venue_id,
     );
   }
 

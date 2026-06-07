@@ -127,28 +127,24 @@ export function buildConsumerBillPayload(
   };
 }
 
+/**
+ * Close a reward ticket: reveal it (idempotent) and stamp the close time.
+ * Discounts only — the reward was applied at the bill, so closing is just a
+ * state flip; there is no payment to settle.
+ */
 export async function finalizeInformalTicket(
   admin: SupabaseClient,
   ticketId: string,
-  _consumerId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const ticket = await admin
     .from("tickets")
-    .select(
-      "id, status, discount_cents, consumer_payment_confirmed_at, staff_payment_confirmed_at",
-    )
+    .select("id, status")
     .eq("id", ticketId)
     .maybeSingle();
   if (ticket.error || !ticket.data) {
     return { ok: false, error: ticket.error?.message ?? "ticket not found" };
   }
   if (ticket.data.status === "revealed") return { ok: true };
-  if (
-    !ticket.data.consumer_payment_confirmed_at ||
-    !ticket.data.staff_payment_confirmed_at
-  ) {
-    return { ok: false, error: "payment confirmations incomplete" };
-  }
 
   const now = new Date().toISOString();
   const update = await admin
@@ -164,9 +160,22 @@ export async function finalizeInformalTicket(
   return { ok: true };
 }
 
-const REVIEW_READY_STATUSES = new Set(["revealed", "paid", "awaiting_story"]);
+/** Reveal a ticket and queue the consumer's review prompt. */
+export async function closeTicketAndEnqueueReview(
+  admin: SupabaseClient,
+  ticketId: string,
+  consumerId: string,
+  venueId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const fin = await finalizeInformalTicket(admin, ticketId);
+  if (!fin.ok) return fin;
+  await ensureConsumerReviewNotification(admin, consumerId, ticketId, venueId);
+  return { ok: true };
+}
 
-/** Reveal ticket + ensure review inbox row exists before consumer submits review. */
+const REVIEW_READY_STATUSES = new Set(["revealed", "awaiting_story"]);
+
+/** Ensure the review inbox row exists before the consumer submits a review. */
 export async function prepareTicketForReview(
   admin: SupabaseClient,
   ticketId: string,
@@ -174,9 +183,7 @@ export async function prepareTicketForReview(
 ): Promise<{ ok: true; venueId: string } | { ok: false; error: string }> {
   const ticket = await admin
     .from("tickets")
-    .select(
-      "id, venue_id, status, consumer_payment_confirmed_at, staff_payment_confirmed_at",
-    )
+    .select("id, venue_id, status")
     .eq("id", ticketId)
     .eq("consumer_id", consumerId)
     .maybeSingle();
@@ -186,33 +193,6 @@ export async function prepareTicketForReview(
 
   const row = ticket.data;
   if (REVIEW_READY_STATUSES.has(row.status)) {
-    await ensureConsumerReviewNotification(
-      admin,
-      consumerId,
-      ticketId,
-      row.venue_id,
-    );
-    return { ok: true, venueId: row.venue_id };
-  }
-
-  if (
-    row.status === "awaiting_payment_confirm" &&
-    row.consumer_payment_confirmed_at
-  ) {
-    const now = new Date().toISOString();
-    if (!row.staff_payment_confirmed_at) {
-      const staffConfirm = await admin
-        .from("tickets")
-        .update({ staff_payment_confirmed_at: now })
-        .eq("id", ticketId);
-      if (staffConfirm.error) {
-        return { ok: false, error: staffConfirm.error.message };
-      }
-    }
-
-    const fin = await finalizeInformalTicket(admin, ticketId, consumerId);
-    if (!fin.ok) return fin;
-
     await ensureConsumerReviewNotification(
       admin,
       consumerId,
