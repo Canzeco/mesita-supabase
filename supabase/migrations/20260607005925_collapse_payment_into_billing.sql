@@ -1,17 +1,14 @@
--- Collapse the discount-payment step into billing (reward ticket Design 3).
+-- Simplify discount payment attestation (reward ticket Design 2a).
 --
--- Mesita never touches money, so the dual "paid issued / paid received"
--- handshake was ceremony. A reward ticket now closes the moment the bill is
--- issued (Type A) or the story is verified (Type B):
---
---   Type A (no story):  open -> (bill) -> revealed
---   Type B (with story): open -> (bill) -> awaiting_story -> (story) -> revealed
+-- Mesita never touches money. The dual consumer/staff handshake is replaced
+-- with staff-only confirmation: bill (and story if Type B) -> awaiting_payment_confirm
+-- -> staff marks paid -> revealed.
 --
 -- The two payment-confirmation timestamps are removed. The ticket_status enum
--- keeps its now-dormant values ('awaiting_payment_confirm', 'pending_pay',
--- 'paid') because Postgres can't drop enum values in place; nothing writes them
--- anymore. The consumer inbox 'payment_confirm' kind is renamed to 'bill' since
--- it now only delivers the receipt, not a payment action.
+-- keeps legacy values ('awaiting_payment_confirm', 'pending_pay', 'paid') because
+-- Postgres can't drop enum values in place; 'awaiting_payment_confirm' is still
+-- the active pre-close state. The consumer inbox 'payment_confirm' kind is
+-- renamed to 'bill' since it only delivers the receipt, not a payment action.
 
 -- 1. Drop the payment-confirmation columns.
 alter table public.tickets drop column if exists consumer_payment_confirmed_at;

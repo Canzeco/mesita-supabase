@@ -81,8 +81,8 @@ Transcript (last 20 messages per phone) for LLM context: `staff_whatsapp_message
 
 1. Staff sends guest **code** → verified in WhatsApp.
 2. Staff sends **subtotal + tip** (one or several messages).
-3. Edge function creates ticket + row in `consumer_pay_notifications` (`kind: payment_confirm`).
-4. **Consumer** sees it on **Mesita app → Pay → QR and Tickets** (Realtime on `consumer_pay_notifications`; ticket card shows venue photo, total reward, step 1 Pay / step 2 Review).
-5. Consumer confirms payment in Pay; staff replies **listo** when cash/terminal is collected.
+3. Edge function creates ticket + row in `consumer_pay_notifications` (`kind: bill`).
+4. **Consumer** sees it on **Mesita app → Pay → QR and Tickets** (Realtime on `consumer_pay_notifications`; ticket card shows venue photo, total reward, passive Pay step / Review).
+5. Guest pays at the table; staff replies **listo** (or taps **Paid received** in the business console) when cash/terminal is collected.
 
 Staff coach replies are **static** (no LLM rewrite) so WhatsApp never invents amounts or codes. Optional WhatsApp text to the guest phone is secondary; the app Pay notification is the source of truth.

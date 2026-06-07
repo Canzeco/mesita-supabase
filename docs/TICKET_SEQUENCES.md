@@ -26,30 +26,20 @@ Source of truth for consumer, staff (WhatsApp), and business-console flows.
 
 ### Discount payment sequence
 
-Dual attestation for off-rail (table) discount visits:
+Staff-only confirmation for off-rail (table) discount visits:
 
-1. Consumer taps **Paid issued**.
-2. Waiter taps **Paid received**.
+1. Consumer sees passive payment instructions in the app (no payment button).
+2. Guest pays the discounted total at the table.
+3. Waiter taps **Paid received** (business console or WhatsApp **listo**).
 
-Ticket advances to review only when both timestamps are set (`consumer_payment_confirmed_at`, `staff_payment_confirmed_at`).
-
-### Cashback payment sequence
-
-1. Bot creates and sends a Stripe checkout to the consumer.
-2. Consumer pays online from their phone.
-
-No waiter payment confirmation — Stripe (or `business-mark-paid` in mock) is the source of truth.
-
-### Cashback landing sequence
-
-1. Cashback lands into the consumer's Mesita balance.
+Ticket advances to review when staff confirms (`business-mark-paid` → `revealed`).
 
 ### Review sequence
 
 1. Food, service, ambiance, overall.
 2. Comments.
 
-Runs on the consumer app after payment (and before cashback landing on types C/D).
+Runs on the consumer app after staff payment confirmation.
 
 ## Ticket types
 
@@ -74,29 +64,6 @@ Kinds: `dp`, `r_dp`.
 
 Kinds: `s_dp_sf`, `r_s_dp_sf`. Story runs **after** billing, before discount payment.
 
-### Type C — Cashback, no story
-
-1. Scan sequence
-2. Billing sequence
-3. Cashback payment sequence
-4. Review sequence
-5. Cashback landing sequence
-
-Kinds: `p_c`, `r_p_c`.
-
-### Type D — Cashback, with story
-
-1. ~~Story sequence~~ — not in product (no pre-scan story gate)
-2. Scan sequence
-3. Billing sequence
-4. Story sequence — post-billing verification (doc label: fallback; same step as B, different mechanic)
-5. Cashback payment sequence
-6. ~~Story sequence (fallback)~~ — not in product (no post-pay story gate)
-7. Review sequence
-8. Cashback landing sequence
-
-Kinds: `s_p_sf_c`, `r_s_p_sf_c`. Story runs **after** billing, before Stripe pay.
-
 ## Implementation map
 
 | Surface | Module |
@@ -104,7 +71,6 @@ Kinds: `s_p_sf_c`, `r_s_p_sf_c`. Story runs **after** billing, before Stripe pay
 | Consumer stepper | `mesita-web-consumer/src/lib/ticket-flow-steps.ts` |
 | Business floor | `mesita-web-business/src/lib/ticket-staff-lifecycle.ts` |
 | Scan + bill | `business-create-ticket` (`scanOnly`), `business-submit-ticket-bill` |
-| Discount pay | `consumer-confirm-ticket-payment`, staff WhatsApp `handleStaffPaymentConfirm` |
-| Formal pay | Stripe checkout + `business-mark-paid` / webhook |
+| Discount pay | `business-mark-paid`, staff WhatsApp `handleStaffPaymentConfirm` |
 | Story | IG tag detection, `business-verify-story` |
 | WhatsApp waiter | `supabase/functions/_shared/staff-whatsapp-flow.ts` |
