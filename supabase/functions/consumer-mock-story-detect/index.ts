@@ -11,7 +11,6 @@ import {
   readEFEnv,
 } from "../_shared/auth.ts";
 import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
-import { closeTicketAndEnqueueReview } from "../_shared/ticket-informal.ts";
 
 type Body = { ticketId?: string };
 
@@ -36,7 +35,7 @@ Deno.serve(async (req) => {
 
   const ticketRow = await admin
     .from("tickets")
-    .select("id, consumer_id, venue_id, kind, story_status, total_cents")
+    .select("id, consumer_id, venue_id, kind, status, story_status, total_cents")
     .eq("id", ticketId)
     .maybeSingle();
   if (ticketRow.error) {
@@ -76,7 +75,10 @@ Deno.serve(async (req) => {
     );
   }
 
+  // Verifying the story advances a billed Type B ticket to the staff
+  // payment-confirm gate; it still closes when staff tap Paid received.
   const now = new Date().toISOString();
+  const billed = (ticket.total_cents ?? 0) > 0;
   const updated = await admin
     .from("tickets")
     .update({
@@ -84,6 +86,9 @@ Deno.serve(async (req) => {
       story_submitted_at: now,
       story_verified_at: now,
       story_reject_reason: null,
+      status: billed && ticket.status === "awaiting_story"
+        ? "awaiting_payment_confirm"
+        : ticket.status,
     })
     .eq("id", ticketId)
     .select("id, kind, status, story_status, story_submitted_at, story_verified_at")
@@ -92,16 +97,6 @@ Deno.serve(async (req) => {
     return json(
       { ok: false, error: `story_mock: ${updated.error.message}` },
       500,
-    );
-  }
-
-  // Verifying the story closes the Type B ticket and queues the review.
-  if ((ticket.total_cents ?? 0) > 0) {
-    await closeTicketAndEnqueueReview(
-      admin,
-      ticketId,
-      ticket.consumer_id,
-      ticket.venue_id,
     );
   }
 

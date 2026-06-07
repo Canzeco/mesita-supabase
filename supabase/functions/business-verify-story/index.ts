@@ -17,7 +17,6 @@ import {
   requireMembership,
 } from "../_shared/auth.ts";
 import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
-import { closeTicketAndEnqueueReview } from "../_shared/ticket-informal.ts";
 
 type Body = {
   ticketId?: string;
@@ -96,10 +95,20 @@ Deno.serve(async (req) => {
     ? "waiter_verified"
     : "waiter_rejected";
 
+  // Approving the story advances Type B to the staff payment-confirm gate
+  // (only if it's been billed). The ticket still closes later when staff tap
+  // Paid received. Reject is informational only.
+  const billed = (ticket.total_cents ?? 0) > 0;
+  const nextStatus =
+    decision === "approve" && billed && ticket.status === "awaiting_story"
+      ? "awaiting_payment_confirm"
+      : ticket.status;
+
   const updated = await admin
     .from("tickets")
     .update({
       story_status: nextStoryStatus,
+      status: nextStatus,
       story_verified_at: verifiedAt,
       story_verified_by: userId,
       story_reject_reason: decision === "reject" ? reason : null,
@@ -114,21 +123,6 @@ Deno.serve(async (req) => {
       { ok: false, error: `ticket_update: ${updated.error.message}` },
       500,
     );
-  }
-
-  // Approving the story is the final gate for Type B: close the ticket and
-  // queue the consumer's review. The discount was already applied at the bill,
-  // so there is nothing to credit or claw back. Reject is informational only.
-  if (decision === "approve" && (ticket.total_cents ?? 0) > 0) {
-    const closed = await closeTicketAndEnqueueReview(
-      admin,
-      ticketId,
-      ticket.consumer_id,
-      ticket.venue_id,
-    );
-    if (!closed.ok) {
-      return json({ ok: false, error: `ticket_close: ${closed.error}` }, 500);
-    }
   }
 
   return json({ ok: true, ticket: updated.data });
