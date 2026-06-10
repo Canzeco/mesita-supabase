@@ -119,10 +119,10 @@ const COST = {
 
 type Body = { venue_id?: string };
 
-// Atlas writes a venue description at most this long. The column + the
-// business Place editor accept up to 2000 chars; Atlas fills the first half
-// and leaves the business room to expand it.
-const ATLAS_DESCRIPTION_MAX = 1000;
+// Atlas About target: a full public narrative, not a blurb. ~7 chars/word
+// (word + space) gives a predictable synthesis budget.
+const ATLAS_DESCRIPTION_TARGET_WORDS = 1000;
+const ATLAS_DESCRIPTION_MAX = ATLAS_DESCRIPTION_TARGET_WORDS * 7;
 
 const PROFILE_SCHEMA = {
   type: "object",
@@ -853,9 +853,13 @@ Deno.serve(async (req) => {
     (row.category ? ` (category: ${row.category})` : "") +
     `, using ONLY the source material below. Return a single JSON object ` +
     `matching the schema. Build products.menu from website content when ` +
-    `present (real dish names + prices only). Write "description" as an ` +
-    `inviting, factual 2-4 sentence venue description for the public Place ` +
-    `page (max ${ATLAS_DESCRIPTION_MAX} characters), grounded in the sources. ` +
+    `present (real dish names + prices only). Write "description" as the ` +
+    `public About section for the Place page: a rich, inviting, factual ` +
+    `narrative of roughly ${ATLAS_DESCRIPTION_TARGET_WORDS} words (max ` +
+    `${ATLAS_DESCRIPTION_MAX} characters). Use short paragraphs. Cover ` +
+    `atmosphere, cuisine, signature dishes or experiences, history or ` +
+    `neighborhood context, and what makes a visit worthwhile — only when ` +
+    `the sources support it. No filler or invented detail. ` +
     `Use null or [] for anything the ` +
     `sources don't support. Never invent ratings, reviewer quotes, prices, or ` +
     `a chef's name.` +
@@ -919,9 +923,8 @@ Deno.serve(async (req) => {
     if (parsed.editorial_summary) {
       update.editorial_summary = parsed.editorial_summary;
     }
-    // The place's public description — written at the end of every run. Hard
-    // cap at 1000 chars (the column/editor allow 2000; the business can expand
-    // it). Only overwrite when synthesis actually produced text.
+    // The place's public About — written at the end of every run. Hard cap at
+    // ~1000 words. Only overwrite when synthesis actually produced text.
     if (parsed.description && parsed.description.trim()) {
       update.description = parsed.description.trim().slice(0, ATLAS_DESCRIPTION_MAX);
     }
