@@ -1,4 +1,4 @@
-// Supabase Edge Function — business-verify-phone
+// Supabase Edge Function — business-verify-phone-otp
 //
 // Phase 2 of the automatic-phone path. The operator received the 6-digit
 // code via the call/SMS (or saw it in the mock banner) and typed it

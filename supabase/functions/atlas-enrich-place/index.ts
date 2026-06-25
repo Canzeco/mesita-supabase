@@ -20,7 +20,7 @@
 // source is best-effort + independent; whatever fails degrades to null.
 //
 // Agent contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Invoked by business-create-unit (on create) and admin-enrich-venue
+// bearer. Invoked by business-create-unit (on create) and admin-enrich-place
 // (re-run). Writes the venue row + enrichment_sources.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -397,7 +397,7 @@ Deno.serve(async (req) => {
     const mediaRes = await invokeArtificialCaller(
       envRes.env,
       "atlas-enrich-place",
-      "atlas-save-venue-media",
+      "atlas-save-place-media",
       { venue_id: venueId, assets: mediaAssets, preferred_photo_urls: funnel.finalPhotos },
     );
     mediaAsync = mediaRes.ok

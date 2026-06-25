@@ -2,7 +2,7 @@
 //
 // Thin facade for the business /add page picker. Resolves the caller's
 // user id (so the atlas caller can flag verified_partner_self vs _other
-// on already-owned venues) and forwards to atlas-suggest-venue for the
+// on already-owned venues) and forwards to atlas-suggest-places for the
 // actual Google+Mesita merge.
 //
 // JWT-protected: clients must send the Supabase anon JWT in Authorization.
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     predictions?: unknown[];
     error?: string;
     code?: string;
-  }>(env, "business-suggest-places", "atlas-suggest-venue", {
+  }>(env, "business-suggest-places", "atlas-suggest-places", {
     input: body.input,
     sessionToken: body.sessionToken,
     callerUserId,

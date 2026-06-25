@@ -1,4 +1,4 @@
-// Supabase Edge Function — admin-enrich-venue (admin caller)
+// Supabase Edge Function — admin-enrich-place (admin caller)
 //
 // Super-admin tool to (re)run the qualitative profile enricher on an existing
 // venue. New venues are enriched automatically at create time by
@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
 
   const enrichRes = await invokeArtificialCaller(
     envRes.env,
-    "admin-enrich-venue",
+    "admin-enrich-place",
     "atlas-enrich-place",
     { venue_id: venueId },
   );

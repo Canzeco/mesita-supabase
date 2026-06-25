@@ -1,4 +1,4 @@
-// Supabase Edge Function — admin-find-venue
+// Supabase Edge Function — admin-find-place
 //
 // Resolves a Google Place ID to a Mesita venue (id + name + slug) when
 // the venue is already onboarded. Used by the admin console's "open in

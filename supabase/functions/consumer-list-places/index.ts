@@ -1,10 +1,10 @@
-// Supabase Edge Function — consumer-list-venues
+// Supabase Edge Function — consumer-list-places
 //
 // Public endpoint. Returns venues that are visible to consumers
 // (status in 'active', 'lead'). Self-contained: no calls to other functions.
 //
-// Local:  supabase functions serve consumer-list-venues
-// Deploy: supabase functions deploy consumer-list-venues
+// Local:  supabase functions serve consumer-list-places
+// Deploy: supabase functions deploy consumer-list-places
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";

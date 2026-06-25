@@ -4,7 +4,7 @@
 // the caller's user id (so the atlas caller can flag
 // verified_partner_self vs _other on already-owned venues — relevant
 // when a consumer who also runs a venue searches for it from inside
-// the consumer app) and forwards to atlas-suggest-venue for the
+// the consumer app) and forwards to atlas-suggest-places for the
 // actual Google + Mesita merge.
 //
 // Mirrors business-suggest-places exactly — the caller-namespace
@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
     predictions?: unknown[];
     error?: string;
     code?: string;
-  }>(env, "consumer-suggest-places", "atlas-suggest-venue", {
+  }>(env, "consumer-suggest-places", "atlas-suggest-places", {
     input: body.input,
     sessionToken: body.sessionToken,
     callerUserId,

@@ -1,7 +1,7 @@
 // Shared helper — venue tag vocabulary (public.venue_tags, migration
 // 20260625060037_venue_tags). Mirrors categories.ts: the list is config that
 // lives in the DB, read live, never hardcoded. Both the business tag picker
-// (business-list-tags) and the consumer detail enrichment (consumer-get-venue)
+// (business-list-tags) and the consumer detail enrichment (consumer-get-place)
 // resolve slugs → labelled catalog entries through here, so a venue's tags are
 // always canonical catalog entries (snake_case slugs) and never free text.
 

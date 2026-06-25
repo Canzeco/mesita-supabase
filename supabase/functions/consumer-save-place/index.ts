@@ -1,4 +1,4 @@
-// Supabase Edge Function — consumer-save-venue (natural caller)
+// Supabase Edge Function — consumer-save-place (natural caller)
 //
 // Toggle a venue's bookmark state for the calling consumer. Inserting a
 // saved_venues row fires the `tg_saved_venues_issue_coupon` trigger which
@@ -10,8 +10,8 @@
 // auto-issued coupon, if any — saves the client a follow-up round trip
 // to refresh the wallet after a save.
 //
-// Local:  supabase functions serve consumer-save-venue
-// Deploy: supabase functions deploy consumer-save-venue
+// Local:  supabase functions serve consumer-save-place
+// Deploy: supabase functions deploy consumer-save-place
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";

@@ -537,7 +537,7 @@ Deno.serve(async (req) => {
   // so the qualitative fields (details{}, summary, products, popular times,
   // zone/city, established_year, executive_chef) land before we return.
   // Best-effort — the venue already exists; a failed/timed-out enrich just
-  // leaves those nullable fields empty (admin-enrich-venue can re-run).
+  // leaves those nullable fields empty (admin-enrich-place can re-run).
   // atlas-enrich-place reads only `venue_id` from the body and re-loads
   // everything else from the freshly-inserted row — don't ship fields it
   // ignores.

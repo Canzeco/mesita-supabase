@@ -1,10 +1,10 @@
-// Supabase Edge Function — consumer-list-saved-venues (natural caller)
+// Supabase Edge Function — consumer-list-saved-places (natural caller)
 //
 // Authenticated read of the caller's bookmarks. Returns saved_venues
 // joined with the venue summary the saved card needs (name, slug,
 // hero photo, category, price level, distance computed client-side).
 //
-// Deploy: supabase functions deploy consumer-list-saved-venues
+// Deploy: supabase functions deploy consumer-list-saved-places
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { clampIntRange, corsPreflight, json, readJsonOr } from "../_shared/http.ts";

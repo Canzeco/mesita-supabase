@@ -1,6 +1,6 @@
 // Supabase Edge Function — business-get-place (natural caller)
 //
-// Thin facade for the business /add page. Forwards to the atlas-get-venue
+// Thin facade for the business /add page. Forwards to the atlas-get-place
 // artificial caller; everything Google-shaped lives there.
 //
 // JWT-protected: clients must send the Supabase anon JWT in Authorization.
@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
   const result = await invokeArtificialCaller(
     env,
     "business-get-place",
-    "atlas-get-venue",
+    "atlas-get-place",
     body,
   );
   if (!result.ok) {

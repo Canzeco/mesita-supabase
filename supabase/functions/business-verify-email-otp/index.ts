@@ -1,4 +1,4 @@
-// Supabase Edge Function — business-verify-email
+// Supabase Edge Function — business-verify-email-otp
 //
 // Phase 2 of the automatic-email path. The operator received the
 // 6-digit code at the venue's on-domain email (or saw it in the mock
@@ -9,7 +9,7 @@
 //   - leaves the row pending with payload.codeVerifiedAt stamped, so
 //     the admin queue can show "verified, awaiting manual approval"
 //
-// Mirrors business-verify-phone end-to-end; the only differences are
+// Mirrors business-verify-phone-otp end-to-end; the only differences are
 // the method filter (ai_email) and the auto-verify flag it consults
 // (auto_verify_ai_email).
 //

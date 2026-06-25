@@ -1,4 +1,4 @@
-// Supabase Edge Function — consumer-get-venue
+// Supabase Edge Function — consumer-get-place
 //
 // Public. Returns a single venue by id (uuid) or slug, plus the business
 // authority info needed for the detail page (vibe / channels / etc.).

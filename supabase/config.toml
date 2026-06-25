@@ -127,10 +127,10 @@ verify_jwt = true
 # --- Consumer (public reads + authed writes) ---
 
 # Public catalog reads. RLS enforces which venue statuses are visible.
-[functions.consumer-list-venues]
+[functions.consumer-list-places]
 verify_jwt = false
 
-[functions.consumer-get-venue]
+[functions.consumer-get-place]
 verify_jwt = false
 
 # Personalised discovery surfaces. JWT required so we can read the
@@ -162,25 +162,25 @@ verify_jwt = false
 # umbrella for every venue-research / venue-data-source surface (Google,
 # Foursquare, schema.org, …).
 
-[functions.atlas-suggest-venue]
+[functions.atlas-suggest-places]
 verify_jwt = false
 
-[functions.atlas-search-venues]
+[functions.atlas-discover-places]
 verify_jwt = false
 
-[functions.atlas-get-venue]
+[functions.atlas-get-place]
 verify_jwt = false
 
 # Place enricher agent — runs the Atlas tier pipeline (Google contents → links →
 # source gather → image funnel → grounded synthesis) to complete the venue
 # profile (details{}, About, menus, popular times, photos). Internal-only;
-# invoked by business-create-unit and admin-enrich-venue with the service-role bearer.
+# invoked by business-create-unit and admin-enrich-place with the service-role bearer.
 [functions.atlas-enrich-place]
 verify_jwt = false
 
 # Async media persistence worker — stores source metadata immediately and mirrors
 # source images to Supabase Storage in background. Internal-only.
-[functions.atlas-save-venue-media]
+[functions.atlas-save-place-media]
 verify_jwt = false
 
 # Authed consumer writes / reads tied to the signed-in consumer's own data.
@@ -196,10 +196,10 @@ verify_jwt = true
 # Entity-split EFs (migration 0031). consumer-list-tickets stays for
 # now while clients migrate; the new surfaces split saved-venues,
 # reservations, and coupons into first-class entities.
-[functions.consumer-save-venue]
+[functions.consumer-save-place]
 verify_jwt = true
 
-[functions.consumer-list-saved-venues]
+[functions.consumer-list-saved-places]
 verify_jwt = true
 
 [functions.consumer-list-coupons]
@@ -262,19 +262,19 @@ verify_jwt = true
 [functions.business-send-email-otp]
 verify_jwt = true
 
-[functions.business-verify-email]
+[functions.business-verify-email-otp]
 verify_jwt = true
 
 [functions.business-send-phone-otp]
 verify_jwt = true
 
-[functions.business-verify-phone]
+[functions.business-verify-phone-otp]
 verify_jwt = true
 
 # State-aware Place ID → Mesita venue lookup. Powers the /add page's
 # inline result card (not_in_mesita / web_listed_unclaimed / pending /
 # verified_partner).
-[functions.business-find-venue]
+[functions.business-find-place]
 verify_jwt = true
 
 # One-shot dashboard bundle: user + venues + active venue + recent tickets.
@@ -337,7 +337,7 @@ verify_jwt = true
 # before doing anything privileged.
 
 # Tiny session-check used by the admin web's app shell.
-[functions.admin-get-identity]
+[functions.auth-get-identity]
 verify_jwt = true
 
 # Ownership-verification queue surface for super-admins.
@@ -357,17 +357,17 @@ verify_jwt = true
 
 # Bulk Google Places Text Search proxy. Many queries in, deduped
 # Place IDs out.
-[functions.admin-search-places]
+[functions.admin-discover-places]
 verify_jwt = true
 
 # Resolve a Google Place ID to a Mesita venue. Powers the admin
 # console's "open in business" link generator.
-[functions.admin-find-venue]
+[functions.admin-find-place]
 verify_jwt = true
 
 # Super-admin free-text venue search (name / slug / id) for the admin
 # console's Manage Single Unit venue picker.
-[functions.admin-search-venues]
+[functions.admin-search-places]
 verify_jwt = true
 
 # DESTRUCTIVE full reset. Gated on super_admins + a typed "RESET"
@@ -396,7 +396,7 @@ verify_jwt = true
 verify_jwt = true
 
 # Re-run the profile enricher on an existing venue (super-admin only).
-[functions.admin-enrich-venue]
+[functions.admin-enrich-place]
 verify_jwt = true
 
 # --- Membership (Free / Premium) ---
@@ -449,4 +449,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.bench-firecrawl]
+verify_jwt = false
+
+[functions.atlas-enrich-event]
 verify_jwt = false

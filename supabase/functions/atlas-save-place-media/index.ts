@@ -1,4 +1,4 @@
-// Supabase Edge Function — atlas-save-venue-media (artificial caller / async)
+// Supabase Edge Function — atlas-save-place-media (artificial caller / async)
 //
 // Receives gathered source image URLs + metadata from Atlas enrichment, stores
 // metadata rows immediately, then mirrors assets to Supabase Storage in the
@@ -131,7 +131,7 @@ async function processAssetsInBackground(
       .eq("venue_id", venueId)
       .eq("source_url", asset.source_url);
     if (error) {
-      console.error("[atlas-save-venue-media] asset_update:", error.message);
+      console.error("[atlas-save-place-media] asset_update:", error.message);
     }
   }
 
@@ -148,7 +148,7 @@ async function processAssetsInBackground(
     .update({ photos: finalPhotos })
     .eq("id", venueId);
   if (venueErr) {
-    console.error("[atlas-save-venue-media] venue_update:", venueErr.message);
+    console.error("[atlas-save-place-media] venue_update:", venueErr.message);
   }
 }
 

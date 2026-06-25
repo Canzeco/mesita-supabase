@@ -205,7 +205,7 @@ export async function checkMembership(
 // Pattern moved out of 12+ admin EFs that each reimplemented the same
 // lookup + lazy backfill. Callers that need a hard 403 should use
 // `requireSuperAdmin` below; callers that want to render a soft "you're
-// not on the list" state (admin-get-identity, business-get-overview) should
+// not on the list" state (auth-get-identity, business-get-overview) should
 // call this directly and inspect the boolean.
 export async function checkSuperAdmin(
   admin: SupabaseClient,

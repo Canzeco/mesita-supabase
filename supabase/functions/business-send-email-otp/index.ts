@@ -14,7 +14,7 @@
 //
 // Mock mode: no transactional email provider is wired yet, so the
 // plaintext code is returned in `mockCode`. The operator types it back
-// in the UI; business-verify-email closes the loop. Provider wiring
+// in the UI; business-verify-email-otp closes the loop. Provider wiring
 // (Resend / Postmark / etc.) lands later without changing the contract.
 //
 // The email NEVER comes from the user. We always send to the email

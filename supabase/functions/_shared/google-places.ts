@@ -19,7 +19,7 @@ const GOOGLE_PLACES_KEY_ENVS = ["GMP_KEY", "SUPA_GMP_KEY"] as const;
 // Table A; we pick the broadest 5 that cover Mesita's universe. Trade-off:
 // cuisine-specific Table A types (italian_restaurant, mexican_restaurant,
 // sushi_restaurant, …) get filtered out because each place has exactly one
-// primary type. The Mesita-side ILIKE fallback in atlas-suggest-venue
+// primary type. The Mesita-side ILIKE fallback in atlas-suggest-places
 // still surfaces them once they've been onboarded.
 export const MESITA_PRIMARY_TYPES = [
   "restaurant",
@@ -116,7 +116,7 @@ export function friendlyGoogleError(
 }
 
 // Throws an Error with the classified message — used by code paths that
-// can't gracefully degrade per-call (e.g., admin-search-places' per-query
+// can't gracefully degrade per-call (e.g., admin-discover-places' per-query
 // worker, where one bad query shouldn't crash the batch but should be
 // reported alongside the others).
 export async function googleErrorFromResponse(r: Response): Promise<Error> {

@@ -1,4 +1,4 @@
-// Supabase Edge Function — business-find-venue
+// Supabase Edge Function — business-find-place
 //
 // Returns the Mesita state of a venue keyed by Google Place ID, so the
 // /add page can show the right UI without redirecting:
