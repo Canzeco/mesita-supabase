@@ -33,6 +33,7 @@ import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { invokeArtificialCaller, requireInternalCaller } from "../_shared/internal.ts";
 import { instagramHandleFromUrl } from "../_shared/apify.ts";
 import {
+  discoverEmailPerplexity,
   discoverPhonePerplexity,
   fbSlugCandidate,
   resolveChannels,
@@ -78,7 +79,7 @@ Deno.serve(async (req) => {
   const { data: row } = await admin
     .from("venues")
     .select(
-      "name, address, city, category, instagram_url, facebook_url, website_url, opentable_url, uber_eats_url, rappi_url, tiktok_url, tripadvisor_url, yelp_url, phone, google_place_id, google_stars_overall, google_review_count, editorial_summary, photos",
+      "name, address, city, category, instagram_url, facebook_url, website_url, opentable_url, uber_eats_url, rappi_url, tiktok_url, tripadvisor_url, yelp_url, phone, email, google_place_id, google_stars_overall, google_review_count, editorial_summary, photos",
     )
     .eq("id", venueId)
     .maybeSingle();
@@ -114,6 +115,9 @@ Deno.serve(async (req) => {
   // (the venues.phone column from create) is the first source; Agent Y has a
   // last-resort Perplexity leg below when it's still empty.
   let resolvedPhone = strOrNull(row.phone);
+  // Email is NOT a URL either — Mesita seed (venues.email) first; Agent Y has a
+  // last-resort Perplexity leg below when it's still empty.
+  let resolvedEmail = strOrNull(row.email);
 
   // Tier 3 — all channel links resolved in one Link Discovery Agent (Agent Y) pass.
   const needsDiscovery =
@@ -128,7 +132,8 @@ Deno.serve(async (req) => {
       !resolvedTikTok ||
       !resolvedTripAdvisor ||
       !resolvedYelp ||
-      !resolvedPhone);
+      !resolvedPhone ||
+      !resolvedEmail);
   const runDiscovery = needsDiscovery;
 
   const runReviews = cfg.googleLayer && !!APIFY_KEY && !!placeId;
@@ -218,6 +223,21 @@ Deno.serve(async (req) => {
         phoneVia = "perplexity";
       }
     }
+    // Agent Y last-resort EMAIL leg — same shape as phone: only when still empty.
+    let emailVia: string | null = null;
+    if (!resolvedEmail && PERPLEXITY_KEY) {
+      const email = await discoverEmailPerplexity(
+        PERPLEXITY_KEY,
+        name,
+        locationLine,
+        category,
+        { website: resolvedWebsite, serpContext: serpSummary ?? undefined },
+      );
+      if (email) {
+        resolvedEmail = email;
+        emailVia = "perplexity";
+      }
+    }
     sources.discovery = {
       ok: true,
       via: found.via,
@@ -233,6 +253,8 @@ Deno.serve(async (req) => {
       yelp: !!resolvedYelp,
       phone: !!resolvedPhone,
       phone_via: phoneVia,
+      email: !!resolvedEmail,
+      email_via: emailVia,
     };
   }
 
@@ -252,6 +274,8 @@ Deno.serve(async (req) => {
   if (resolvedYelp && resolvedYelp !== row.yelp_url) update.yelp_url = resolvedYelp;
   // Phone (Mesita seed or Agent Y's last-resort lookup); persist when changed.
   if (resolvedPhone && resolvedPhone !== row.phone) update.phone = resolvedPhone;
+  // Email — same treatment as phone.
+  if (resolvedEmail && resolvedEmail !== row.email) update.email = resolvedEmail;
 
   const igHandle = instagramHandleFromUrl(resolvedInstagram);
   const fbHandleCandidate = fbSlugCandidate(resolvedFacebook);

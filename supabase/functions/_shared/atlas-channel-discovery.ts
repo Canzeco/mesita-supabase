@@ -1574,6 +1574,44 @@ export async function discoverPhonePerplexity(
   return normalisePhone(res.answer.phone);
 }
 
+// Normalise an email candidate to a lowercased, format-valid address or null.
+function normaliseEmail(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const e = raw.trim().toLowerCase();
+  // Strict-enough shape: local@domain.tld, no spaces. Rejects obvious junk.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) return null;
+  return e;
+}
+
+// ── Agent Y last-resort EMAIL leg ────────────────────────────────────────────
+// Email is NOT a URL either, so it lives outside the channel pool. Final
+// fallback used only when the Mesita seed + Google data gave us no email: a
+// single Perplexity Agent lookup for the venue's official public email, grounded
+// by its website (prefer an address on the site's own domain) + the Agent X SERP
+// summary. Returns a format-valid address or null (null on anything uncertain).
+export async function discoverEmailPerplexity(
+  key: string,
+  name: string,
+  locationLine: string,
+  category: string | null,
+  hints: { website?: string | null; serpContext?: string } = {},
+): Promise<string | null> {
+  const prompt =
+    `Find the official public contact email for the venue "${name}"` +
+    (locationLine ? ` in ${locationLine}` : "") +
+    (category ? ` (category: ${category})` : "") + ".\n" +
+    serpGroundingLine(hints.serpContext) +
+    (hints.website ? `Its official website is ${hints.website} — strongly prefer an email on that domain.\n\n` : "") +
+    `Return strict JSON {"email": "<address>"} or {"email": null} if you cannot ` +
+    `confirm it. Never invent an address.`;
+  const res = await callPerplexityAgent(key, prompt, {
+    type: "object",
+    properties: { email: { type: ["string", "null"] } },
+  });
+  if (!res) return null;
+  return normaliseEmail(res.answer.email);
+}
+
 
 // Bare page slug of a Facebook URL, usable as an Instagram-handle candidate
 // (venues reuse handles across networks). Numeric profile.php?id= pages and
