@@ -85,6 +85,12 @@ Deno.serve(async (req) => {
     .maybeSingle();
   if (!row) return json({ ok: false, error: "Venue not found" }, 404);
 
+  // ADEA lifecycle: flip to 'running' the moment we accept the work, so a
+  // concurrent consumer read (RLS-gated on 'ready') and the owner both see the
+  // in-flight state. 'ready' lands atomically in the final update below; the
+  // caller marks 'failed' if this invocation errors.
+  await admin.from("venues").update({ adea_status: "running" }).eq("id", venueId);
+
   // Admin config (app_settings) — read at run time; callers don't pass overrides.
   const cfg = await loadAtlasConfig(admin);
 
@@ -427,6 +433,9 @@ Deno.serve(async (req) => {
   };
 
   update.enrichment_sources = sources;
+  // Land 'ready' atomically with the enrichment write so consumers (RLS) only
+  // ever see a fully-enriched venue, never a half-written one.
+  update.adea_status = "ready";
 
   const { error: updErr } = await admin.from("venues").update(update).eq("id", venueId);
   if (updErr) return json({ ok: false, error: `venue_update: ${updErr.message}` }, 500);

@@ -22,6 +22,10 @@ import { firecrawlScrape } from "../_shared/firecrawl.ts";
 import { fetchVenueCategories, inferVenueCategory } from "../_shared/categories.ts";
 import { ATLAS_FIELD_LIMITS } from "../_shared/atlas-field-limits.ts";
 
+// Supabase background-task API — keeps the worker alive past the HTTP response
+// so the fire-and-forget enrichment dispatch completes. Declared for deno check.
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
+
 const GOOGLE_FIELD_MASK = [
   "id",
   "displayName",
@@ -405,6 +409,11 @@ Deno.serve(async (req) => {
     // admin-decide-verification approves an ownership claim.
     listing_type: "web" as const,
     status: "active" as const,
+    // ADEA lifecycle starts 'pending'; the non-blocking enrich dispatched below
+    // flips it 'running' → 'ready' (or 'failed'). The public select RLS policy
+    // only exposes 'ready' venues, so the listing stays hidden from consumers
+    // until enrichment lands.
+    adea_status: "pending" as const,
     lat: details.location?.latitude ?? null,
     lng: details.location?.longitude ?? null,
     address,
@@ -533,26 +542,25 @@ Deno.serve(async (req) => {
   // claim — until then, the venue is publicly listed but unowned, and
   // the caller can't manage anything on it.
 
-  // One-run completion: hand the fresh venue to the profile-enricher agent
-  // so the qualitative fields (details{}, summary, products, popular times,
-  // zone/city, established_year, executive_chef) land before we return.
-  // Best-effort — the venue already exists; a failed/timed-out enrich just
-  // leaves those nullable fields empty (admin-enrich-place can re-run).
-  // atlas-enrich-place reads only `venue_id` from the body and re-loads
-  // everything else from the freshly-inserted row — don't ship fields it
-  // ignores.
-  let profileEnrichError: string | null = null;
-  try {
-    const enrichRes = await invokeArtificialCaller(
+  // Hand the fresh venue to the profile-enricher agent NON-BLOCKING: create
+  // returns immediately and the heavy Atlas pipeline runs in a background task
+  // (EdgeRuntime.waitUntil). atlas-enrich-place flips adea_status 'running' →
+  // 'ready'; if the invocation errors we mark it 'failed' here. The venue
+  // surfaces to consumers (RLS gates on adea_status='ready') only once
+  // enrichment completes. atlas-enrich-place reads only `venue_id` from the body
+  // and re-loads everything else from the freshly-inserted row.
+  const markEnrichFailed = () =>
+    admin.from("venues").update({ adea_status: "failed" }).eq("id", venue.id);
+  EdgeRuntime.waitUntil(
+    invokeArtificialCaller(
       env,
       "business-create-unit",
       "atlas-enrich-place",
       { venue_id: venue.id },
-    );
-    if (!enrichRes.ok) profileEnrichError = enrichRes.error;
-  } catch (err) {
-    profileEnrichError = err instanceof Error ? err.message : "enrich_failed";
-  }
+    )
+      .then((enrichRes) => (enrichRes.ok ? undefined : markEnrichFailed()))
+      .catch(() => markEnrichFailed()),
+  );
 
   return json(
     {
@@ -560,8 +568,11 @@ Deno.serve(async (req) => {
       venue,
       enrichment: {
         google: true,
-        profileEnriched: !profileEnrichError,
-        profileEnrichError,
+        // Enrichment runs asynchronously now — reports the dispatch, not
+        // completion. The venue lands 'ready' (discoverable) in the background;
+        // adea_status starts 'pending' here.
+        enrichmentTriggered: true,
+        enrichmentAsync: true,
         // photoCount = seed photos persisted at create. Atlas re-gathers +
         // vision-ranks asynchronously, so this is the pre-enrich seed count.
         photoCount: photoUrls.length,
