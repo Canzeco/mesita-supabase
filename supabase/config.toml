@@ -365,6 +365,11 @@ verify_jwt = true
 [functions.admin-find-venue]
 verify_jwt = true
 
+# Super-admin free-text venue search (name / slug / id) for the admin
+# console's Manage Single Unit venue picker.
+[functions.admin-search-venues]
+verify_jwt = true
+
 # DESTRUCTIVE full reset. Gated on super_admins + a typed "RESET"
 # confirmation. Wipes all data, keeps the super-admin allowlist.
 [functions.admin-reset-database]
