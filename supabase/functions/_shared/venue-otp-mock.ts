@@ -9,7 +9,7 @@ export function isVenueOtpMockMode(): boolean {
 }
 
 /**
- * Flip to true only when business-sends-phone-otp / -email-otp actually place
+ * Flip to true only when business-send-phone-otp / -email-otp actually place
  * outbound traffic AND product has signed off. Until then, venues are never contacted.
  */
 export function venueOtpOutboundImplemented(): boolean {

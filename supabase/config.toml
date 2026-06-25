@@ -255,26 +255,26 @@ verify_jwt = true
 [functions.business-get-verification]
 verify_jwt = true
 
-[functions.business-requests-manual-review]
+[functions.business-request-manual-review]
 verify_jwt = true
 
 # Email / phone OTP flow for ownership verification.
-[functions.business-sends-email-otp]
+[functions.business-send-email-otp]
 verify_jwt = true
 
-[functions.business-verifies-email]
+[functions.business-verify-email]
 verify_jwt = true
 
-[functions.business-sends-phone-otp]
+[functions.business-send-phone-otp]
 verify_jwt = true
 
-[functions.business-verifies-phone]
+[functions.business-verify-phone]
 verify_jwt = true
 
 # State-aware Place ID → Mesita venue lookup. Powers the /add page's
 # inline result card (not_in_mesita / web_listed_unclaimed / pending /
 # verified_partner).
-[functions.business-lookup-venue]
+[functions.business-find-venue]
 verify_jwt = true
 
 # One-shot dashboard bundle: user + venues + active venue + recent tickets.
@@ -288,7 +288,7 @@ verify_jwt = true
 [functions.business-submit-ticket-bill]
 verify_jwt = true
 
-[functions.business-mark-paid]
+[functions.business-mark-ticket-paid]
 verify_jwt = true
 
 [functions.business-list-tickets]
@@ -337,7 +337,7 @@ verify_jwt = true
 # before doing anything privileged.
 
 # Tiny session-check used by the admin web's app shell.
-[functions.admin-whoami]
+[functions.admin-get-identity]
 verify_jwt = true
 
 # Ownership-verification queue surface for super-admins.

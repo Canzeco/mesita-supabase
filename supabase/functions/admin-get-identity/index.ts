@@ -1,4 +1,4 @@
-// Supabase Edge Function — admin-whoami
+// Supabase Edge Function — admin-get-identity
 //
 // Tiny session-check called by the admin web's app shell. Returns the
 // caller's email + whether their email is in public.super_admins. The
