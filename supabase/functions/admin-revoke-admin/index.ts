@@ -2,9 +2,11 @@
 //
 // Removes an email from the super-admin allowlist (public.super_admins).
 // Caller must already be a super-admin. Two safety guards: a caller
-// cannot revoke their own access (no self-lockout), and the last
-// remaining admin cannot be removed (no empty allowlist). Revoking an
-// email that isn't on the list is a no-op success.
+// cannot revoke their own access (no self-lockout, enforced here), and the
+// last remaining admin cannot be removed (no empty allowlist, enforced
+// atomically by the security-definer public.admin_revoke_admin function so
+// concurrent revokes can't race past it). Revoking an email that isn't on
+// the list is a no-op success.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -41,7 +43,8 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "An email is required" }, 400);
   }
 
-  // Guard 1: no self-lockout.
+  // Guard: no self-lockout. (The "never empty the allowlist" guard lives in
+  // the SQL function below so it's atomic under concurrent revokes.)
   if (email === authRes.user.emailLower) {
     return json(
       { ok: false, error: "You can't remove your own admin access." },
@@ -49,28 +52,19 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Guard 2: never empty the allowlist.
-  const { count, error: countErr } = await admin
-    .from("super_admins")
-    .select("email", { count: "exact", head: true });
-  if (countErr) {
-    return json({ ok: false, error: `count_failed: ${countErr.message}` }, 500);
-  }
-  if ((count ?? 0) <= 1) {
-    return json(
-      { ok: false, error: "Can't remove the last remaining admin." },
-      400,
-    );
-  }
-
-  const { data, error } = await admin
-    .from("super_admins")
-    .delete()
-    .eq("email", email)
-    .select("email");
+  // Atomic count-check + delete behind a transaction advisory lock.
+  const { data, error } = await admin.rpc("admin_revoke_admin", {
+    p_email: email,
+  });
   if (error) {
+    if ((error.message ?? "").includes("last_admin")) {
+      return json(
+        { ok: false, error: "Can't remove the last remaining admin." },
+        400,
+      );
+    }
     return json({ ok: false, error: `revoke_failed: ${error.message}` }, 500);
   }
 
-  return json({ ok: true, removed: (data ?? []).length });
+  return json({ ok: true, removed: typeof data === "number" ? data : 0 });
 });
