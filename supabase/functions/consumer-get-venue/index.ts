@@ -12,6 +12,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { readAnonEnv } from "../_shared/auth.ts";
 import { VENUE_PUBLIC_COLUMNS as VENUE_COLUMNS } from "../_shared/venue-columns.ts";
+import { resolveVenueTags } from "../_shared/tags.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -45,6 +46,14 @@ Deno.serve(async (req) => {
   if (error) return json({ ok: false, error: error.message }, 500);
   if (!data) return json({ ok: false, error: "Venue not found" }, 404);
 
-  return json({ ok: true, venue: data });
+  // Resolve the venue's tag slugs (venues.tags) into ordered, labelled catalog
+  // entries so the detail modal can render chips without a second round-trip or
+  // a client-side tag dictionary. Unknown slugs are dropped.
+  const tags = await resolveVenueTags(
+    supabase,
+    (data as { tags?: string[] | null }).tags,
+  );
+
+  return json({ ok: true, venue: data, tags });
 });
 

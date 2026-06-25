@@ -245,6 +245,11 @@ verify_jwt = true
 [functions.business-delete-unit]
 verify_jwt = true
 
+# Tag vocabulary for the Place tag picker. Authenticated (the console always
+# has a session); reads the world-readable venue_tags config via the anon key.
+[functions.business-list-tags]
+verify_jwt = true
+
 # Ownership-verification submit + status-poll, called from /add on
 # business.mesita.ai.
 [functions.business-get-verification]

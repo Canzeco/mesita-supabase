@@ -1,0 +1,225 @@
+-- venue_tags — Mesita's controlled TAG vocabulary: 101 attribute tags across 17
+-- facets (payment, booking, service, vibe, occasion, amenities, dietary, menu,
+-- drinks, entertainment, crowd, setting, hours, dress, wellness, experiences,
+-- values). Tags describe a place indirectly (eating/payment method, amenities,
+-- atmosphere, dietary…), modeled on Google Places + OpenTable attributes and
+-- tuned for Mexico.
+--
+-- "slug" is the canonical snake_case machine value, stored per-venue in the
+-- existing venues.tags text[] column. "label_es"/"label_en" are display names
+-- (Spanish-first consumer + English business console). "facet" groups tags for
+-- the picker UI; "section" marks which macro-group a tag applies to — like
+-- venue_categories' two sections, plus 'Both' for cross-cutting tags.
+--
+-- Like venue_categories / membership_tiers, this is non-secret config:
+-- world-readable, writes are service-role only (RLS on, no write policy). The
+-- seed lives in seed_venue_tags() so this migration and admin_reset_database()
+-- share one source of truth; a reset re-seeds idempotently (config never truncated).
+
+create table public.venue_tags (
+  slug       text primary key,
+  label_es   text not null,
+  label_en   text not null,
+  facet      text not null check (facet in (
+    'payment','booking','service','vibe','occasion','amenities','dietary',
+    'menu','drinks','entertainment','crowd','setting','hours','dress',
+    'wellness','experiences','values'
+  )),
+  section    text not null check (section in ('Food & Nightlife', 'Experiences & Wellness', 'Both')),
+  sort_order smallint not null,
+  created_at timestamptz not null default now()
+);
+
+create or replace function public.seed_venue_tags()
+returns void
+language sql
+set search_path = ''
+as $function$
+  insert into public.venue_tags (slug, label_es, label_en, facet, section, sort_order) values
+    ('cash', 'Efectivo', 'Cash', 'payment', 'Both', 1),
+    ('cards', 'Tarjetas', 'Credit & debit cards', 'payment', 'Both', 2),
+    ('contactless', 'Pago sin contacto', 'Contactless / NFC', 'payment', 'Both', 3),
+    ('meal_vouchers', 'Vales de despensa', 'Meal vouchers', 'payment', 'Both', 4),
+    ('cash_only', 'Solo efectivo', 'Cash only', 'payment', 'Both', 5),
+    ('accepts_reservations', 'Acepta reservaciones', 'Accepts reservations', 'booking', 'Both', 6),
+    ('reservations_required', 'Reservación obligatoria', 'Reservations required', 'booking', 'Both', 7),
+    ('walk_ins_welcome', 'Sin reservación', 'Walk-ins welcome', 'booking', 'Both', 8),
+    ('online_booking', 'Reserva en línea', 'Online booking', 'booking', 'Both', 9),
+    ('usually_a_wait', 'Suele haber fila', 'Usually a wait', 'booking', 'Both', 10),
+    ('dine_in', 'Para comer aquí', 'Dine-in', 'service', 'Food & Nightlife', 11),
+    ('takeout', 'Para llevar', 'Takeout', 'service', 'Food & Nightlife', 12),
+    ('delivery', 'A domicilio', 'Delivery', 'service', 'Food & Nightlife', 13),
+    ('drive_through', 'Drive-thru', 'Drive-through', 'service', 'Food & Nightlife', 14),
+    ('catering', 'Catering', 'Catering', 'service', 'Food & Nightlife', 15),
+    ('casual', 'Casual', 'Casual', 'vibe', 'Both', 16),
+    ('upscale', 'Sofisticado', 'Upscale', 'vibe', 'Both', 17),
+    ('romantic', 'Romántico', 'Romantic', 'vibe', 'Both', 18),
+    ('cozy', 'Acogedor', 'Cozy', 'vibe', 'Both', 19),
+    ('trendy', 'De moda', 'Trendy', 'vibe', 'Both', 20),
+    ('lively', 'Animado', 'Lively', 'vibe', 'Both', 21),
+    ('quiet', 'Tranquilo', 'Quiet', 'vibe', 'Both', 22),
+    ('instagrammable', 'Instagrameable', 'Instagrammable', 'vibe', 'Both', 23),
+    ('date_night', 'Cita romántica', 'Date night', 'occasion', 'Both', 24),
+    ('groups', 'Grupos grandes', 'Good for groups', 'occasion', 'Both', 25),
+    ('families', 'Familias', 'Families', 'occasion', 'Both', 26),
+    ('business_meals', 'Comidas de negocios', 'Business meals', 'occasion', 'Both', 27),
+    ('special_occasions', 'Ocasiones especiales', 'Special occasions', 'occasion', 'Both', 28),
+    ('working_laptop', 'Trabajar con laptop', 'Good for working', 'occasion', 'Both', 29),
+    ('wifi', 'Wi-Fi', 'Wi-Fi', 'amenities', 'Both', 30),
+    ('air_conditioning', 'Aire acondicionado', 'Air conditioning', 'amenities', 'Both', 31),
+    ('parking', 'Estacionamiento', 'Parking', 'amenities', 'Both', 32),
+    ('valet', 'Valet parking', 'Valet parking', 'amenities', 'Both', 33),
+    ('outdoor_seating', 'Mesas al aire libre', 'Outdoor seating', 'amenities', 'Both', 34),
+    ('rooftop', 'Terraza / Rooftop', 'Rooftop', 'amenities', 'Both', 35),
+    ('private_room', 'Salón privado', 'Private room', 'amenities', 'Both', 36),
+    ('wheelchair_accessible', 'Accesible silla de ruedas', 'Wheelchair accessible', 'amenities', 'Both', 37),
+    ('vegetarian', 'Vegetariano', 'Vegetarian options', 'dietary', 'Food & Nightlife', 38),
+    ('vegan', 'Vegano', 'Vegan options', 'dietary', 'Food & Nightlife', 39),
+    ('gluten_free', 'Sin gluten', 'Gluten-free options', 'dietary', 'Food & Nightlife', 40),
+    ('healthy', 'Saludable', 'Healthy options', 'dietary', 'Food & Nightlife', 41),
+    ('organic', 'Orgánico', 'Organic', 'dietary', 'Food & Nightlife', 42),
+    ('keto', 'Keto', 'Keto-friendly', 'dietary', 'Food & Nightlife', 43),
+    ('breakfast', 'Desayuno', 'Breakfast', 'menu', 'Food & Nightlife', 44),
+    ('brunch', 'Brunch', 'Brunch', 'menu', 'Food & Nightlife', 45),
+    ('dinner', 'Cena', 'Dinner', 'menu', 'Food & Nightlife', 46),
+    ('coffee', 'Café', 'Coffee', 'menu', 'Food & Nightlife', 47),
+    ('dessert', 'Postres', 'Dessert', 'menu', 'Food & Nightlife', 48),
+    ('kids_menu', 'Menú infantil', 'Kids'' menu', 'menu', 'Food & Nightlife', 49),
+    ('street_food', 'Comida callejera', 'Street food', 'menu', 'Food & Nightlife', 50),
+    ('full_bar', 'Bar completo', 'Full bar', 'drinks', 'Food & Nightlife', 51),
+    ('cocktails', 'Coctelería', 'Cocktails', 'drinks', 'Food & Nightlife', 52),
+    ('craft_beer', 'Cerveza artesanal', 'Craft beer', 'drinks', 'Food & Nightlife', 53),
+    ('wine_list', 'Carta de vinos', 'Wine list', 'drinks', 'Food & Nightlife', 54),
+    ('mezcal_tequila', 'Mezcal y tequila', 'Mezcal & tequila', 'drinks', 'Food & Nightlife', 55),
+    ('happy_hour', 'Happy hour', 'Happy hour', 'drinks', 'Food & Nightlife', 56),
+    ('non_alcoholic', 'Sin alcohol', 'Non-alcoholic options', 'drinks', 'Food & Nightlife', 57),
+    ('live_music', 'Música en vivo', 'Live music', 'entertainment', 'Both', 58),
+    ('dj', 'DJ', 'DJ', 'entertainment', 'Both', 59),
+    ('karaoke', 'Karaoke', 'Karaoke', 'entertainment', 'Both', 60),
+    ('dancing', 'Pista de baile', 'Dancing', 'entertainment', 'Both', 61),
+    ('sports_screening', 'Transmite deportes', 'Sports on TV', 'entertainment', 'Both', 62),
+    ('family_friendly', 'Para toda la familia', 'Family-friendly', 'crowd', 'Both', 63),
+    ('lgbtq_friendly', 'LGBTQ+ friendly', 'LGBTQ+ friendly', 'crowd', 'Both', 64),
+    ('pet_friendly', 'Pet friendly', 'Pet-friendly', 'crowd', 'Both', 65),
+    ('local_favorite', 'Favorito local', 'Local favorite', 'crowd', 'Both', 66),
+    ('tourist_favorite', 'Favorito de turistas', 'Tourist favorite', 'crowd', 'Both', 67),
+    ('adults_only', 'Solo adultos', 'Adults only', 'crowd', 'Both', 68),
+    ('scenic_view', 'Con vista', 'Scenic view', 'setting', 'Both', 69),
+    ('beachfront', 'En la playa', 'Beachfront', 'setting', 'Both', 70),
+    ('downtown', 'En el centro', 'Downtown', 'setting', 'Both', 71),
+    ('mall_location', 'En plaza comercial', 'Inside a mall', 'setting', 'Both', 72),
+    ('hidden_gem', 'Joya escondida', 'Hidden gem', 'setting', 'Both', 73),
+    ('open_late', 'Abierto hasta tarde', 'Open late', 'hours', 'Both', 74),
+    ('open_24h', 'Abierto 24 horas', 'Open 24 hours', 'hours', 'Both', 75),
+    ('open_early', 'Abre temprano', 'Opens early', 'hours', 'Both', 76),
+    ('seasonal', 'De temporada', 'Seasonal', 'hours', 'Both', 77),
+    ('casual_dress', 'Vestimenta casual', 'Casual', 'dress', 'Food & Nightlife', 78),
+    ('smart_casual', 'Smart casual', 'Smart casual', 'dress', 'Food & Nightlife', 79),
+    ('formal_dress', 'Formal / Etiqueta', 'Formal', 'dress', 'Food & Nightlife', 80),
+    ('unisex', 'Unisex', 'Unisex', 'wellness', 'Experiences & Wellness', 81),
+    ('lockers', 'Lockers', 'Lockers', 'wellness', 'Experiences & Wellness', 82),
+    ('showers', 'Regaderas', 'Showers', 'wellness', 'Experiences & Wellness', 83),
+    ('sauna', 'Sauna', 'Sauna', 'wellness', 'Experiences & Wellness', 84),
+    ('jacuzzi', 'Jacuzzi', 'Jacuzzi', 'wellness', 'Experiences & Wellness', 85),
+    ('pool', 'Alberca', 'Pool', 'wellness', 'Experiences & Wellness', 86),
+    ('private_cabins', 'Cabinas privadas', 'Private cabins', 'wellness', 'Experiences & Wellness', 87),
+    ('couples_treatment', 'Tratamiento en pareja', 'Couples treatment', 'wellness', 'Experiences & Wellness', 88),
+    ('day_pass', 'Pase del día', 'Day pass', 'wellness', 'Experiences & Wellness', 89),
+    ('guided', 'Con guía', 'Guided', 'experiences', 'Experiences & Wellness', 90),
+    ('equipment_provided', 'Equipo incluido', 'Equipment provided', 'experiences', 'Experiences & Wellness', 91),
+    ('beginner_friendly', 'Para principiantes', 'Beginner-friendly', 'experiences', 'Experiences & Wellness', 92),
+    ('all_ages', 'Para todas las edades', 'All ages', 'experiences', 'Experiences & Wellness', 93),
+    ('kids_activity', 'Actividad infantil', 'Kids'' activity', 'experiences', 'Experiences & Wellness', 94),
+    ('team_building', 'Team building', 'Team building', 'experiences', 'Experiences & Wellness', 95),
+    ('transport_included', 'Transporte incluido', 'Transport included', 'experiences', 'Experiences & Wellness', 96),
+    ('english_spoken', 'Inglés disponible', 'English spoken', 'experiences', 'Experiences & Wellness', 97),
+    ('outdoor_activity', 'Al aire libre', 'Outdoor', 'experiences', 'Experiences & Wellness', 98),
+    ('eco_friendly', 'Eco-friendly', 'Eco-friendly', 'values', 'Both', 99),
+    ('woman_owned', 'Negocio de mujeres', 'Woman-owned', 'values', 'Both', 100),
+    ('locally_owned', 'Negocio local', 'Locally owned', 'values', 'Both', 101)
+  on conflict (slug) do update set
+    label_es   = excluded.label_es,
+    label_en   = excluded.label_en,
+    facet      = excluded.facet,
+    section    = excluded.section,
+    sort_order = excluded.sort_order;
+$function$;
+
+select public.seed_venue_tags();
+
+alter table public.venue_tags enable row level security;
+
+create policy venue_tags_select_all on public.venue_tags
+  for select using (true);
+
+grant select on public.venue_tags to anon, authenticated;
+
+-- Extend the reset routine: venue_tags is config (like venue_categories), so it
+-- is NOT truncated — it is re-seeded idempotently so a reset always leaves the
+-- full tag vocabulary present.
+create or replace function public.admin_reset_database()
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'pg_catalog', 'public', 'auth'
+as $function$
+declare
+  deleted_users bigint;
+begin
+  truncate table
+    public.ticket_reviews,
+    public.consumer_pay_notifications,
+    public.staff_whatsapp_messages,
+    public.staff_whatsapp_sessions,
+    public.consumer_subscriptions,
+    public.stripe_events,
+    public.reservations,
+    public.coupons,
+    public.saved_venues,
+    public.tickets,
+    public.venue_verifications,
+    public.business_invites,
+    public.staff_invites,
+    public.venue_roles,
+    public.venue_members,
+    public.venues,
+    public.consumers,
+    public.businesses
+  restart identity cascade;
+
+  update public.consumer_code_counter set next_value = 0 where id = 1;
+
+  insert into public.membership_tiers
+    (key, label, rank, follower_threshold, monthly_reservation_limit, price_cents, currency, recommendation_weight)
+  values
+    ('free',    'Free',    0, null, 2,    0,     'MXN', 1.0),
+    ('premium', 'Premium', 1, 1000, null, 20000, 'MXN', 1.5)
+  on conflict (key) do update set
+    label                     = excluded.label,
+    rank                      = excluded.rank,
+    follower_threshold        = excluded.follower_threshold,
+    monthly_reservation_limit = excluded.monthly_reservation_limit,
+    price_cents               = excluded.price_cents,
+    currency                  = excluded.currency,
+    recommendation_weight     = excluded.recommendation_weight;
+
+  perform public.seed_venue_categories();
+  perform public.seed_venue_tags();
+
+  delete from auth.users u
+  where u.email is null
+     or lower(u.email) not in (
+       select lower(email) from public.super_admins
+     );
+  get diagnostics deleted_users = row_count;
+
+  return jsonb_build_object(
+    'ok', true,
+    'deleted_auth_users', deleted_users,
+    'preserved_media_assets', true,
+    'reset_at', now()
+  );
+end;
+$function$;
+
+notify pgrst, 'reload schema';
