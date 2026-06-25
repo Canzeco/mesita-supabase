@@ -430,7 +430,6 @@ Deno.serve(async (req) => {
     facebook_url: channels.facebook_url,
     tiktok_url: channels.tiktok_url,
     x_url: channels.x_url,
-    youtube_url: channels.youtube_url,
     threads_url: channels.threads_url,
     reddit_url: channels.reddit_url,
     whatsapp_url: channels.whatsapp_url,

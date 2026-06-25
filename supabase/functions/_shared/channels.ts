@@ -12,7 +12,6 @@ export type ChannelKey =
   | "facebook_url"
   | "tiktok_url"
   | "x_url"
-  | "youtube_url"
   | "threads_url"
   | "reddit_url"
   | "whatsapp_url"
@@ -38,8 +37,6 @@ export function matchChannel(host: string): ChannelKey | null {
   if (h === "tiktok.com" || h.endsWith(".tiktok.com")) return "tiktok_url";
   if (h === "twitter.com" || h.endsWith(".twitter.com")) return "x_url";
   if (h === "x.com" || h.endsWith(".x.com")) return "x_url";
-  if (h === "youtube.com" || h.endsWith(".youtube.com")) return "youtube_url";
-  if (h === "youtu.be") return "youtube_url";
   if (h === "threads.net" || h.endsWith(".threads.net")) return "threads_url";
   if (h === "threads.com" || h.endsWith(".threads.com")) return "threads_url";
   if (h === "reddit.com" || h.endsWith(".reddit.com")) return "reddit_url";
@@ -121,7 +118,6 @@ export function classifyLinks(input: (string | null | undefined)[]): Channels {
     facebook_url: pickShortest(buckets.facebook_url),
     tiktok_url: pickShortest(buckets.tiktok_url),
     x_url: pickShortest(buckets.x_url),
-    youtube_url: pickShortest(buckets.youtube_url),
     threads_url: pickShortest(buckets.threads_url),
     reddit_url: pickShortest(buckets.reddit_url),
     whatsapp_url: pickShortest(buckets.whatsapp_url),
