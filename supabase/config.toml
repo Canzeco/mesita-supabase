@@ -426,3 +426,22 @@ verify_jwt = false
 
 [functions.twilio-bootstrap-staff-invite]
 verify_jwt = false
+
+# --- Link-discovery benchmark (Sonar vs Search vs Agent vs Firecrawl) ---
+#
+# Throwaway test harness comparing four link-finding methods over the 50
+# restaurants in restaurants_benchmark.csv. Each takes { name, city } and
+# returns the six links. JWT off so the `tester` caller can hit them with
+# the anon key. Secrets: PERPLEXITY_KEY, FIRECRAWL_KEY.
+
+[functions.bench-sonar]
+verify_jwt = false
+
+[functions.bench-search]
+verify_jwt = false
+
+[functions.bench-agent]
+verify_jwt = false
+
+[functions.bench-firecrawl]
+verify_jwt = false
