@@ -1,19 +1,17 @@
-// Supabase Edge Function — business-verifies-email
+// Supabase Edge Function — business-verify-phone
 //
-// Phase 2 of the automatic-email path. The operator received the
-// 6-digit code at the venue's on-domain email (or saw it in the mock
-// banner) and typed it into the UI. This EF hash-compares against
-// payload.codeHash and either:
+// Phase 2 of the automatic-phone path. The operator received the 6-digit
+// code via the call/SMS (or saw it in the mock banner) and typed it
+// into the UI. This EF hash-compares against the stored payload.codeHash
+// and either:
 //
-//   - grants ownership immediately (auto_verify_ai_email=true, default)
-//   - leaves the row pending with payload.codeVerifiedAt stamped, so
-//     the admin queue can show "verified, awaiting manual approval"
+//   - grants ownership immediately (auto_verify_ai_call=true, the default)
+//   - leaves the row pending with payload.codeVerifiedAt stamped, so the
+//     admin queue can show "code verified, awaiting manual approval"
 //
-// Mirrors business-verifies-phone end-to-end; the only differences are
-// the method filter (ai_email) and the auto-verify flag it consults
-// (auto_verify_ai_email).
-//
-// Auth: any signed-in user. Only the original requester can redeem.
+// Auth: any signed-in user. The EF only accepts codes for rows where
+// requester_id === auth.user.id, so businesses can't redeem codes from
+// other operators' requests.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -51,8 +49,8 @@ Deno.serve(async (req) => {
     verificationId,
     code,
     userId,
-    methodFilter: "ai_email",
-    autoVerifyColumn: "auto_verify_ai_email",
+    methodFilter: "ai_call",
+    autoVerifyColumn: "auto_verify_ai_call",
   });
 });
 

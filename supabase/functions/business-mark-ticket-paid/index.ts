@@ -1,4 +1,4 @@
-// Supabase Edge Function — business-mark-paid
+// Supabase Edge Function — business-mark-ticket-paid
 //
 // Staff-only payment confirmation. The guest pays the discounted total at the
 // table; staff tap "Paid received" here, which closes the ticket (revealed)

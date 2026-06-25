@@ -1,4 +1,4 @@
-// Supabase Edge Function — business-sends-email-otp
+// Supabase Edge Function — business-send-email-otp
 //
 // Phase 1 of the automatic-email path for /add ownership verification.
 // Sends a 6-digit OTP to the venue's Firecrawl-discovered email — but
@@ -14,7 +14,7 @@
 //
 // Mock mode: no transactional email provider is wired yet, so the
 // plaintext code is returned in `mockCode`. The operator types it back
-// in the UI; business-verifies-email closes the loop. Provider wiring
+// in the UI; business-verify-email closes the loop. Provider wiring
 // (Resend / Postmark / etc.) lands later without changing the contract.
 //
 // The email NEVER comes from the user. We always send to the email

@@ -1,4 +1,4 @@
-// Supabase Edge Function — business-requests-manual-review
+// Supabase Edge Function — business-request-manual-review
 //
 // Always-available fallback for /add ownership verification. Used when:
 //

@@ -1,4 +1,4 @@
-// Supabase Edge Function — business-sends-phone-otp
+// Supabase Edge Function — business-send-phone-otp
 //
 // Phase 1 of the automatic-phone path for /add ownership verification.
 // Generates a 6-digit code, hashes it (SHA-256), inserts a pending

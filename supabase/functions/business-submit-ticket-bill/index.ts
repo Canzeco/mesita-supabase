@@ -2,7 +2,7 @@
 //
 // Billing step after scan: attach the check subtotal to an open ticket and
 // snapshot the discount. The discount is applied right here, but the ticket
-// closes only when staff confirm payment (business-mark-paid):
+// closes only when staff confirm payment (business-mark-ticket-paid):
 //   Type A (no story):  -> awaiting_payment_confirm
 //   Type B (with story): -> awaiting_story (then awaiting_payment_confirm)
 // The discounted bill is delivered to the consumer's Pay inbox either way.
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
 
   // Type A goes straight to the staff payment-confirm gate; Type B waits for
   // the story to verify first. Either way the ticket closes only when staff
-  // tap Paid received (business-mark-paid).
+  // tap Paid received (business-mark-ticket-paid).
   const now = new Date().toISOString();
   const storyStatus = requiresStory ? "pending" : "not_required";
   const status = requiresStory ? "awaiting_story" : "awaiting_payment_confirm";
@@ -179,7 +179,7 @@ Deno.serve(async (req) => {
     },
   });
 
-  // The review is queued only when staff confirm payment (business-mark-paid).
+  // The review is queued only when staff confirm payment (business-mark-ticket-paid).
   return json({ ok: true, ticket: update.data });
 });
 
