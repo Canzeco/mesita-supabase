@@ -20,6 +20,7 @@ import { invokeArtificialCaller } from "../_shared/internal.ts";
 import { classifyLinks } from "../_shared/channels.ts";
 import { firecrawlScrape } from "../_shared/firecrawl.ts";
 import { fetchVenueCategories, inferVenueCategory } from "../_shared/categories.ts";
+import { ATLAS_FIELD_LIMITS } from "../_shared/atlas-field-limits.ts";
 
 const GOOGLE_FIELD_MASK = [
   "id",
@@ -389,7 +390,7 @@ Deno.serve(async (req) => {
   const hours = weeklyHoursFromPeriods(details.regularOpeningHours?.periods);
 
   const insertRow = {
-    name: synth.name || venueName,
+    name: (synth.name || venueName).slice(0, ATLAS_FIELD_LIMITS.venueName.max),
     slug,
     category: resolvedCategorySlug,
     category_label:

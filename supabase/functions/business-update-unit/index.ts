@@ -22,11 +22,13 @@ import {
   inferVenueCategory,
   type VenueCategory,
 } from "../_shared/categories.ts";
+import { ATLAS_FIELD_LIMITS } from "../_shared/atlas-field-limits.ts";
 
-const MAX_PHOTOS = 30;
-const MAX_TAGS = 12;
-const MAX_TAG_LEN = 40;
-const MAX_PR_LINKS = 10;
+const MAX_PHOTOS = ATLAS_FIELD_LIMITS.photos.max;
+const MAX_TAGS = ATLAS_FIELD_LIMITS.tagsPerVenue.max;
+const MAX_TAG_LEN = ATLAS_FIELD_LIMITS.tagSlugLength.max;
+const MAX_PR_WHATSAPP = ATLAS_FIELD_LIMITS.prWhatsappNumbers.max;
+const MAX_PR_INSTAGRAM = ATLAS_FIELD_LIMITS.prInstagramAccounts.max;
 // Matches the business Place editor's About field cap (PLACE_DESCRIPTION_MAX).
 const MAX_DESCRIPTION_LEN = 2000;
 
@@ -191,7 +193,9 @@ Deno.serve(async (req) => {
   if ("name" in body) {
     const n = (body.name ?? "").toString().trim();
     if (!n) return json({ ok: false, error: "name cannot be empty" }, 400);
-    if (n.length > 120) return json({ ok: false, error: "name too long" }, 400);
+    if (n.length > ATLAS_FIELD_LIMITS.venueName.max) {
+      return json({ ok: false, error: "name too long" }, 400);
+    }
     update.name = n;
   }
   if ("category" in body) {
@@ -420,13 +424,16 @@ Deno.serve(async (req) => {
     }
     update.tags = clean;
   }
-  for (const arrayField of ["whatsapp_pr_urls", "instagram_pr_urls"] as const) {
+  for (const [arrayField, maxLinks] of [
+    ["whatsapp_pr_urls", MAX_PR_WHATSAPP],
+    ["instagram_pr_urls", MAX_PR_INSTAGRAM],
+  ] as const) {
     if (!(arrayField in body)) continue;
     const value = body[arrayField];
     if (!Array.isArray(value)) {
       return json({ ok: false, error: `${arrayField} must be an array of https:// URLs` }, 400);
     }
-    const clean = value.filter(isUrl).slice(0, MAX_PR_LINKS);
+    const clean = value.filter(isUrl).slice(0, maxLinks);
     update[arrayField] = clean;
   }
 
