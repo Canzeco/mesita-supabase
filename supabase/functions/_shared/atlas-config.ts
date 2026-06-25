@@ -1,8 +1,7 @@
-// Atlas enrichment: run-time config + per-run cost budget + shared types.
+// Atlas enrichment: run-time config + shared types.
 //
 // Every knob lives in app_settings and is read at run time — the DB is the
-// single source of truth; callers never pass overrides. The cost budget is a
-// safety valve (rough per-call USD estimates), not billing.
+// single source of truth; callers never pass overrides.
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
@@ -22,15 +21,15 @@ export const QUALITY_MODEL: Record<string, string> = {
   high: "gpt-4o",
 };
 
-// Tier gates (Atlas catalog). Google/Mesita is the always-on spine.
-// - SOCIAL_LAYER (≥2): Instagram / Facebook / Website / SERP.
-// - RESERVATION_DELIVERY (≥3): OpenTable + UberEats.
-// - NICHE_SOCIAL (≥3): YouTube / TikTok / TripAdvisor / Yelp (loyal to the
-//   ADEA field pages, which place these at T3; flip to 4 if the re-tiering
-//   migration supersedes them).
-export const SOCIAL_LAYER_TIER = 2;
-export const RESERVATION_DELIVERY_TIER = 3;
-export const NICHE_SOCIAL_TIER = 3;
+// Execution tier gates (ADEA catalog — Notion Enrichment Strategy 2026-06).
+// T0 = spine (always on). Admin ceiling T1–T5 gates each stage in order:
+//   T1 Google spine · T2 all links (one agent) · T3 source gather ·
+//   T4 perception · T5 heavy scrapes · Final = Cognition (always).
+export const EXEC_GOOGLE_TIER = 1;
+export const EXEC_LINKS_TIER = 2;
+export const EXEC_GATHER_TIER = 3;
+export const EXEC_PERCEPTION_TIER = 4;
+export const EXEC_HEAVY_TIER = 5;
 
 // Hard ceiling on photos persisted to the venue, regardless of per-source caps.
 // Safety bound on the candidate pool before save (the real, source-independent
@@ -42,8 +41,8 @@ export const PHOTO_CEILING = 50;
 export const ATLAS_DESCRIPTION_TARGET_WORDS = 1000;
 export const ATLAS_DESCRIPTION_MAX = ATLAS_DESCRIPTION_TARGET_WORDS * 7;
 
-// Rough per-call cost estimates (USD). Approximate but enough to make the
-// per-run cap meaningful — it's a safety valve, not billing.
+// Rough per-call cost estimates (USD). Used by the admin cost calculator —
+// approximate, not billing.
 export const COST = {
   compass: 0.05, // Apify Google Maps (reviews + images)
   instagram: 0.02, // Apify IG profile scraper
@@ -89,11 +88,12 @@ export type AtlasConfig = {
   analyzeInstagramImages: number;
   imageAnalysisPrompt: string;
   imageSortingPrompt: string;
-  costCapUsd: number;
-  // Derived tier gates.
-  socialLayer: boolean;
-  reservationDeliveryLayer: boolean;
-  nicheSocialLayer: boolean;
+  // Derived execution-tier gates.
+  googleLayer: boolean;
+  linkDiscoveryLayer: boolean;
+  sourceGatherLayer: boolean;
+  perceptionLayer: boolean;
+  heavyScrapeLayer: boolean;
 };
 
 const DEFAULT_ANALYSIS_PROMPT =
@@ -109,7 +109,7 @@ export async function loadAtlasConfig(admin: SupabaseClient): Promise<AtlasConfi
   const { data: cfg } = await admin
     .from("app_settings")
     .select(
-      "atlas_source_tier_ceiling, atlas_synthesis_quality, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_per_run_cost_cap_usd, atlas_website_crawl_max_pages",
+      "atlas_source_tier_ceiling, atlas_synthesis_quality, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_website_crawl_max_pages",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -134,33 +134,10 @@ export async function loadAtlasConfig(admin: SupabaseClient): Promise<AtlasConfi
       (cfg?.atlas_image_analysis_prompt as string | undefined)?.trim() || DEFAULT_ANALYSIS_PROMPT,
     imageSortingPrompt:
       (cfg?.atlas_image_sorting_prompt as string | undefined)?.trim() || DEFAULT_SORTING_PROMPT,
-    costCapUsd: num(Number(cfg?.atlas_per_run_cost_cap_usd), 1.0) || 1.0,
-    socialLayer: tierCeiling >= SOCIAL_LAYER_TIER,
-    reservationDeliveryLayer: tierCeiling >= RESERVATION_DELIVERY_TIER,
-    nicheSocialLayer: tierCeiling >= NICHE_SOCIAL_TIER,
-  };
-}
-
-// Per-run USD budget. reserve() BEFORE each step, in priority order — a step
-// that doesn't fit the remaining budget is disabled (its reserve returns false),
-// so the run never exceeds the per-run cap.
-export type Budget = {
-  reserve: (label: string, c: number) => boolean;
-  cost: Record<string, number>;
-  spent: () => number;
-};
-
-export function createBudget(capUsd: number): Budget {
-  let plannedUsd = 0;
-  const cost: Record<string, number> = {};
-  return {
-    cost,
-    reserve(label, c) {
-      if (plannedUsd + c > capUsd) return false;
-      plannedUsd += c;
-      cost[label] = c;
-      return true;
-    },
-    spent: () => plannedUsd,
+    googleLayer: tierCeiling >= EXEC_GOOGLE_TIER,
+    linkDiscoveryLayer: tierCeiling >= EXEC_LINKS_TIER,
+    sourceGatherLayer: tierCeiling >= EXEC_GATHER_TIER,
+    perceptionLayer: tierCeiling >= EXEC_PERCEPTION_TIER,
+    heavyScrapeLayer: tierCeiling >= EXEC_HEAVY_TIER,
   };
 }

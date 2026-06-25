@@ -525,10 +525,10 @@ export async function resolveChannels(opts: {
   city: string | null;
   locationLine: string;
   category: string | null;
-  // Tier-3 OpenTable + UberEats resolution is opt-in: the caller only flips
-  // this on when the venue's source-tier ceiling reaches 3.
+  // Tier-2 Link Discovery resolves every channel URL in one agent pass when
+  // the caller's source-tier ceiling reaches 2 (all links unlock together).
   resolveReservationDelivery?: boolean;
-  // Tier-3 niche socials (YouTube / TikTok / TripAdvisor / Yelp), same gate.
+  // Same gate — YouTube / TikTok / TripAdvisor / Yelp ride the same agent call.
   resolveNicheSocial?: boolean;
   have: {
     instagram: string | null;

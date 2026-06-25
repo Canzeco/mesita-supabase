@@ -337,6 +337,9 @@ verify_jwt = true
 # before doing anything privileged.
 
 # Tiny session-check used by the admin web's app shell.
+[functions.admin-get-identity]
+verify_jwt = true
+
 [functions.auth-get-identity]
 verify_jwt = true
 
@@ -355,9 +358,16 @@ verify_jwt = true
 [functions.admin-set-auto-verify]
 verify_jwt = true
 
+[functions.admin-get-atlas-fields]
+verify_jwt = true
+
 # Bulk Google Places Text Search proxy. Many queries in, deduped
 # Place IDs out.
 [functions.admin-discover-places]
+verify_jwt = true
+
+# Google Places autocomplete for Create Single Unit (admin console).
+[functions.admin-suggest-places]
 verify_jwt = true
 
 # Resolve a Google Place ID to a Mesita venue. Powers the admin

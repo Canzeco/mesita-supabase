@@ -40,9 +40,6 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const q = typeof bodyRes.body.query === "string" ? bodyRes.body.query.trim() : "";
-  if (q.length < 2) {
-    return json({ ok: false, error: "query must be at least 2 characters" }, 400);
-  }
   const limit =
     typeof bodyRes.body.limit === "number" && Number.isInteger(bodyRes.body.limit)
       ? Math.min(Math.max(bodyRes.body.limit, 1), 50)
@@ -50,21 +47,34 @@ Deno.serve(async (req) => {
 
   const cols = "id, slug, name, category, category_label, status, address, photos";
   let rows;
-  if (UUID_RE.test(q)) {
+
+  if (q.length === 0) {
+    // Empty query — browse recent units for the catalog landing state.
+    const { data, error } = await admin
+      .from("venues")
+      .select(cols)
+      .order("updated_at", { ascending: false })
+      .limit(limit);
+    if (error) return json({ ok: false, error: `search_failed: ${error.message}` }, 500);
+    rows = data ?? [];
+  } else if (UUID_RE.test(q)) {
     // Exact id paste — return that one venue.
     const { data, error } = await admin.from("venues").select(cols).eq("id", q).maybeSingle();
     if (error) return json({ ok: false, error: `search_failed: ${error.message}` }, 500);
     rows = data ? [data] : [];
+  } else if (q.length < 2) {
+    return json({ ok: false, error: "query must be at least 2 characters" }, 400);
   } else {
     // Free-text: match name OR slug, newest-touched first. Strip characters
     // that break the PostgREST or() grammar (comma / parens), then escape LIKE
     // wildcards so the remaining text matches literally.
-    const safe = q.replace(/[,()]/g, " ").trim();
-    const pattern = `%${safe.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
+    const safe = q.replace(/[,()"]/g, " ").trim();
+    const escaped = safe.replace(/[%_\\]/g, (m) => `\\${m}`);
+    const pattern = `%${escaped}%`;
     const { data, error } = await admin
       .from("venues")
       .select(cols)
-      .or(`name.ilike.${pattern},slug.ilike.${pattern}`)
+      .or(`name.ilike."${pattern}",slug.ilike."${pattern}"`)
       .order("updated_at", { ascending: false })
       .limit(limit);
     if (error) return json({ ok: false, error: `search_failed: ${error.message}` }, 500);
