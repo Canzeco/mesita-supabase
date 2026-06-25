@@ -17,6 +17,61 @@ import { haversineKm, radiusBoundingBox } from "./geo.ts";
 const RECOMMENDER_VENUE_COLUMNS =
   VENUE_PUBLIC_COLUMNS + ", embedding, embedding_source_hash";
 
+// Shape of a candidate venue row as projected by RECOMMENDER_VENUE_COLUMNS.
+// Both rankers (recommender-rank-deck, recommender-rank-catalog) cast the
+// candidate pool to this type. The trailing `embedding` /
+// `embedding_source_hash` are ranker-internal and get stripped by
+// stripInternal before the row crosses back over the wire to the client.
+export type VenueRow = {
+  id: string;
+  slug: string;
+  name: string;
+  category: string | null;
+  vibe: string | null;
+  price_level: number | null;
+  listing_type: "partner" | "web";
+  status: string;
+  fiscal_type: string | null;
+  plan: string | null;
+  lat: number | null;
+  lng: number | null;
+  address: string | null;
+  closes_at: string | null;
+  phone: string | null;
+  pitch: string | null;
+  story: string | null;
+  photos: string[] | null;
+  [key: string]: unknown;
+  embedding: unknown | null;
+  embedding_source_hash: string | null;
+};
+
+// Minimal consumer-context the rankers thread into intent composition /
+// category proposal. Anonymous requests pass null; tier drives the Premium
+// overlay and aspirational curation.
+export type ConsumerProfile = {
+  full_name: string | null;
+  country: string | null;
+  birthday: string | null;
+  sex: string | null;
+  tier?: string | null;
+};
+
+export function clampPositive(v: unknown, def: number, max: number): number {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n) || n <= 0) return def;
+  return Math.min(n, max);
+}
+
+// Drops the two ranker-internal columns so the row is safe to return to the
+// client. The leading-underscore rest-omit destructuring discards them.
+export function stripInternal(
+  v: VenueRow,
+): Omit<VenueRow, "embedding" | "embedding_source_hash"> {
+  const { embedding: _e, embedding_source_hash: _h, ...rest } = v;
+  return rest;
+}
+
 type CandidatePoolOptions = {
   lat: number | null;
   lng: number | null;

@@ -15,3 +15,15 @@ export async function venueHasVerifiedOwner(
   if (error) return false;
   return (count ?? 0) > 0;
 }
+
+export async function isLastOwnerOfVenue(
+  admin: SupabaseClient,
+  venueId: string,
+): Promise<boolean> {
+  const { count } = await admin
+    .from("venue_members")
+    .select("id", { count: "exact", head: true })
+    .eq("venue_id", venueId)
+    .eq("role", "owner");
+  return (count ?? 0) <= 1;
+}

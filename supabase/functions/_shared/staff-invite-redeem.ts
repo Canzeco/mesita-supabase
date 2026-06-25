@@ -62,7 +62,7 @@ export async function findPendingStaffInviteByToken(
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
   if (error || !data) return null;
-  const join = data.venues as { name: string } | null;
+  const join = data.venues as unknown as { name: string } | null;
   return {
     id: data.id,
     venue_id: data.venue_id,
@@ -78,7 +78,6 @@ export async function findPendingStaffInviteForPhone(
   admin: SupabaseClient,
   phoneE164: string,
 ): Promise<PendingStaffInvite | null> {
-  const digits = phoneDigits(phoneE164);
   const { data, error } = await admin
     .from("staff_invites")
     .select(
@@ -92,7 +91,7 @@ export async function findPendingStaffInviteForPhone(
   for (const row of data) {
     if (!row.phone) continue;
     if (!phonesMatch(row.phone, phoneE164)) continue;
-    const join = row.venues as { name: string } | null;
+    const join = row.venues as unknown as { name: string } | null;
     return {
       id: row.id,
       venue_id: row.venue_id,

@@ -5,6 +5,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import {
+  parseTwilioForm,
   readTwilioEnv,
   validateTwilioRequest,
   webhookUrlForFunction,
@@ -20,8 +21,7 @@ Deno.serve(async (req) => {
     return new Response("Twilio not configured", { status: 500 });
   }
 
-  const raw = await req.clone().text();
-  const params = Object.fromEntries(new URLSearchParams(raw));
+  const params = await parseTwilioForm(req);
   const url = webhookUrlForFunction("twilio-whatsapp-status");
   const valid = await validateTwilioRequest(
     twilio.env.authToken,

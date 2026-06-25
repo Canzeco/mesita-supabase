@@ -11,19 +11,17 @@
 // Deploy: supabase functions deploy business-list-reservations
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJson } from "../_shared/http.ts";
+import { clampIntRange, corsPreflight, json, readJson } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
   readEFEnv,
   requireMembership,
 } from "../_shared/auth.ts";
+import { RESERVATION_SELECT } from "../_shared/reservation-columns.ts";
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 200;
-
-const RESERVATION_SELECT =
-  "id, reserved_at, party_size, status, notes, confirmed_at, completed_at, cancelled_at, created_at, consumer:consumers(id, code, full_name, tier_key, tier_origin)";
 
 type Scope = "upcoming" | "past" | "all";
 type Body = { venueId?: string; limit?: number; scope?: Scope };
@@ -44,10 +42,7 @@ Deno.serve(async (req) => {
   const body = bodyRes.body;
   const venueId = (body.venueId ?? "").toString().trim();
   if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
-  const limit = Math.max(
-    1,
-    Math.min(MAX_LIMIT, Math.trunc(Number(body.limit ?? DEFAULT_LIMIT))),
-  );
+  const limit = clampIntRange(Number(body.limit ?? DEFAULT_LIMIT), 1, MAX_LIMIT);
   const scope: Scope =
     body.scope === "past" || body.scope === "all" ? body.scope : "upcoming";
 

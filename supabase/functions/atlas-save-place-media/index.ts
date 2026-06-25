@@ -9,6 +9,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
+import { dedup } from "../_shared/parse-utils.ts";
 
 const IMAGE_BUCKET = "venue-images";
 const MAX_ASSETS = 120;
@@ -356,15 +357,4 @@ function imageIdFromPath(path: string): string | null {
     : filename;
   if (/^[a-f0-9]{64}$/i.test(candidate)) return candidate.toLowerCase();
   return null;
-}
-
-function dedup(values: string[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const v of values) {
-    if (!v || seen.has(v)) continue;
-    seen.add(v);
-    out.push(v);
-  }
-  return out;
 }

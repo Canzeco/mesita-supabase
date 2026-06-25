@@ -215,13 +215,6 @@ export function messageLooksLikeBill(body: string): boolean {
   return /^(sin\s+propina|sin\s+tip)/i.test(body.trim());
 }
 
-function formatPesos(cents: number): string {
-  return `$${(cents / 100).toLocaleString("es-MX", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
 function moneyToCents(v: string): number | null {
   const n = Number(v);
   if (!Number.isFinite(n) || n < 0) return null;

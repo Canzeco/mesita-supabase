@@ -20,6 +20,7 @@ import {
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
+import { isLastOwnerOfVenue } from "../_shared/venue-ownership.ts";
 
 const KINDS = ["editor", "waiter", "editorInvite", "waiterInvite"] as const;
 type Kind = (typeof KINDS)[number];
@@ -56,12 +57,7 @@ Deno.serve(async (req) => {
   }
 
   if (kind === "editor" && target.targetIsOwner) {
-    const { count } = await admin
-      .from("venue_members")
-      .select("id", { count: "exact", head: true })
-      .eq("venue_id", target.venueId)
-      .eq("role", "owner");
-    if ((count ?? 0) <= 1) {
+    if (await isLastOwnerOfVenue(admin, target.venueId)) {
       return json(
         { ok: false, code: "last_owner", error: "Promote another owner first." },
         409,

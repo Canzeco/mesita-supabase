@@ -5,7 +5,7 @@
 // validator UI. Self-contained.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJson } from "../_shared/http.ts";
+import { clampIntRange, corsPreflight, json, readJson } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
@@ -32,10 +32,7 @@ Deno.serve(async (req) => {
   const body = bodyRes.body;
   const venueId = (body.venueId ?? "").toString().trim();
   if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
-  const limit = Math.max(
-    1,
-    Math.min(MAX_LIMIT, Math.trunc(Number(body.limit ?? DEFAULT_LIMIT))),
-  );
+  const limit = clampIntRange(Number(body.limit ?? DEFAULT_LIMIT), 1, MAX_LIMIT);
 
   const admin = adminClient(envRes.env);
   const memberRes = await requireMembership(admin, authRes.user, venueId);

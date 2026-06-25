@@ -101,15 +101,22 @@ export function rankByCosine<T extends { embedding: unknown }>(
   return scored.map((s) => s.row);
 }
 
-export async function embedSingle(text: string, apiKey: string): Promise<number[]> {
-  const r = await fetch("https://api.openai.com/v1/embeddings", {
+// Single point that constructs the OpenAI embeddings HTTP request. Centralised
+// so the URL, method, headers, and body shape live in exactly one place; every
+// caller keeps its own post-fetch validation / error handling.
+function callEmbeddings(input: string | string[], apiKey: string): Promise<Response> {
+  return fetch("https://api.openai.com/v1/embeddings", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ model: EMBEDDING_MODEL, input: text }),
+    body: JSON.stringify({ model: EMBEDDING_MODEL, input }),
   });
+}
+
+export async function embedSingle(text: string, apiKey: string): Promise<number[]> {
+  const r = await callEmbeddings(text, apiKey);
   if (!r.ok) throw new Error(`embed HTTP ${r.status}`);
   const data = (await r.json()) as { data?: { embedding: number[] }[] };
   const v = data.data?.[0]?.embedding;
@@ -118,11 +125,7 @@ export async function embedSingle(text: string, apiKey: string): Promise<number[
 }
 
 export async function embedBatch(texts: string[], apiKey: string): Promise<number[][]> {
-  const r = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: EMBEDDING_MODEL, input: texts }),
-  });
+  const r = await callEmbeddings(texts, apiKey);
   if (!r.ok) throw new Error(`embedBatch HTTP ${r.status}`);
   const data = (await r.json()) as { data?: { embedding: number[]; index: number }[] };
   const out: number[][] = new Array(texts.length);
@@ -145,17 +148,7 @@ export async function embedAndPersistVenues<T extends EmbeddableVenue>(
   }));
   const out = new Map<string, { embedding: number[]; hash: string }>();
   try {
-    const r = await fetch("https://api.openai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: EMBEDDING_MODEL,
-        input: inputs.map((i) => i.text),
-      }),
-    });
+    const r = await callEmbeddings(inputs.map((i) => i.text), apiKey);
     if (!r.ok) {
       console.error(`[${logPrefix}] batch-embed HTTP`, r.status, (await r.text()).slice(0, 240));
       return out;
