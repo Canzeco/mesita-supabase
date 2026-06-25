@@ -445,7 +445,6 @@ Deno.serve(async (req) => {
     opentable_url: channels.opentable_url,
     resy_url: channels.resy_url,
     uber_eats_url: channels.uber_eats_url,
-    rappi_url: channels.rappi_url,
     didi_food_url: channels.didi_food_url,
     tripadvisor_url: channels.tripadvisor_url,
     yelp_url: channels.yelp_url,

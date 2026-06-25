@@ -18,7 +18,6 @@ export type ChannelKey =
   | "opentable_url"
   | "resy_url"
   | "uber_eats_url"
-  | "rappi_url"
   | "didi_food_url"
   | "tripadvisor_url"
   | "yelp_url"
@@ -45,8 +44,6 @@ export function matchChannel(host: string): ChannelKey | null {
   if (h.startsWith("opentable.")) return "opentable_url";
   if (h === "resy.com" || h.endsWith(".resy.com")) return "resy_url";
   if (h === "ubereats.com" || h.endsWith(".ubereats.com")) return "uber_eats_url";
-  if (h === "rappi.com" || h.endsWith(".rappi.com")) return "rappi_url";
-  if (h.startsWith("rappi.com.")) return "rappi_url";
   if (h === "didi.com" || h.endsWith(".didi.com")) return "didi_food_url";
   if (h.startsWith("didifood.")) return "didi_food_url";
   if (h === "sindelantal.com.mx" || h.endsWith(".sindelantal.com.mx")) return "didi_food_url";
@@ -124,7 +121,6 @@ export function classifyLinks(input: (string | null | undefined)[]): Channels {
     opentable_url: pickShortest(buckets.opentable_url),
     resy_url: pickShortest(buckets.resy_url),
     uber_eats_url: pickShortest(buckets.uber_eats_url),
-    rappi_url: pickShortest(buckets.rappi_url),
     didi_food_url: pickShortest(buckets.didi_food_url),
     tripadvisor_url: pickShortest(buckets.tripadvisor_url),
     yelp_url: pickShortest(buckets.yelp_url),

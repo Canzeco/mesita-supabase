@@ -76,7 +76,6 @@ type UpdateBody = {
   opentable_url?: string | null;
   resy_url?: string | null;
   uber_eats_url?: string | null;
-  rappi_url?: string | null;
   x_url?: string | null;
   threads_url?: string | null;
   reddit_url?: string | null;
@@ -136,7 +135,6 @@ const URL_FIELDS = [
   "opentable_url",
   "resy_url",
   "uber_eats_url",
-  "rappi_url",
   "x_url",
   "threads_url",
   "reddit_url",

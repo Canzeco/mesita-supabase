@@ -46,7 +46,6 @@ const DELIVERY_CHANNELS_SCHEMA = {
   properties: {
     opentable_url: { type: ["string", "null"] },
     uber_eats_url: { type: ["string", "null"] },
-    rappi_url: { type: ["string", "null"] },
   },
 } as const;
 
@@ -83,7 +82,6 @@ type DiscoveryField =
   | "facebook"
   | "opentable"
   | "ubereats"
-  | "rappi"
   | "tiktok"
   | "tripadvisor"
   | "yelp";
@@ -116,8 +114,6 @@ const PRIMARY_PATH: Record<DiscoveryField, string> = {
   facebook: "website_footer/firecrawl->perplexity(citations)",
   opentable: "firecrawl->perplexity(citations)",
   ubereats: "firecrawl+perplexity(citations) hybrid",
-  // Rappi mirrors Uber Eats exactly — same hybrid Firecrawl+Perplexity path.
-  rappi: "firecrawl+perplexity(citations) hybrid",
   tiktok: "website_footer/firecrawl->perplexity(citations)",
   tripadvisor: "firecrawl->perplexity(citations)",
   yelp: "firecrawl->perplexity(citations)",
@@ -129,8 +125,6 @@ const PROVIDER_PRIOR: Record<DiscoveryField, Record<CandidateProvider, number>> 
   facebook: { google: 1.0, seed: 0.7, firecrawl: 0.75, perplexity: 0.35, website_footer: 1.0 },
   opentable: { google: 0.6, seed: 0.7, firecrawl: 0.9, perplexity: 0.55, website_footer: 0.9 },
   ubereats: { google: 0.55, seed: 0.7, firecrawl: 0.28, perplexity: 0.42, website_footer: 0.5 },
-  // Rappi mirrors Uber Eats (same delivery hybrid + scoring priors).
-  rappi: { google: 0.55, seed: 0.7, firecrawl: 0.28, perplexity: 0.42, website_footer: 0.5 },
   // Niche socials: handle-based (tiktok) leans on footer harvest like
   // instagram; listing-based (tripadvisor/yelp) lean on Firecrawl like opentable.
   tiktok: { google: 0.9, seed: 0.7, firecrawl: 0.8, perplexity: 0.35, website_footer: 1.1 },
@@ -147,8 +141,6 @@ const FIELD_THRESHOLD: Record<DiscoveryField, number> = {
   facebook: 0.58,
   opentable: 0.58,
   ubereats: 0.52,
-  // Rappi mirrors Uber Eats' threshold (delivery, host/shape-validated).
-  rappi: 0.52,
   // Niche socials are link-only with no downstream identity check, so keep the
   // bar moderate-to-strict — a wrong niche link is worse than a missing one.
   tiktok: 0.5,
@@ -164,7 +156,6 @@ const PRIMARY_PROVIDERS: Record<DiscoveryField, CandidateProvider[]> = {
   facebook: ["website_footer", "firecrawl", "google"],
   opentable: ["seed", "website_footer", "firecrawl"],
   ubereats: ["seed", "website_footer", "firecrawl"],
-  rappi: ["seed", "website_footer", "firecrawl"],
   tiktok: ["website_footer", "firecrawl", "google"],
   tripadvisor: ["seed", "website_footer", "firecrawl"],
   yelp: ["seed", "website_footer", "firecrawl"],
@@ -205,25 +196,6 @@ function urlPathSegments(url: string): string[] {
   } catch {
     return [];
   }
-}
-
-// A Rappi restaurant listing URL. Rappi Mexico restaurant pages look like
-// https://www.rappi.com.mx/restaurantes/<slug> — require the rappi host AND a
-// restaurant path segment (restaurantes / restaurants / restaurant) so a bare
-// rappi homepage or a city/category page is rejected. Mirrors the Uber Eats
-// /store/ path check (host + shape validated, no per-venue identity gate).
-function isRappiListing(url: string): boolean {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
-  } catch {
-    return false;
-  }
-  if (!(host === "rappi.com" || host.endsWith(".rappi.com") || host.startsWith("rappi.com."))) {
-    return false;
-  }
-  const segs = urlPathSegments(url);
-  return segs.some((s) => s === "restaurantes" || s === "restaurants" || s === "restaurant");
 }
 
 // A TikTok profile URL is exactly /@handle (reject /video/, /tag/, /discover…).
@@ -277,11 +249,6 @@ function normaliseCandidateForField(field: DiscoveryField, rawUrl: string): stri
       return null;
     }
     return hit;
-  }
-  if (field === "rappi") {
-    // Mirror Uber Eats: host-match via channels.ts, then a path-shape gate.
-    const hit = pickChannel([canon], "rappi_url");
-    return hit && isRappiListing(hit) ? hit : null;
   }
   if (field === "tiktok") {
     const hit = pickChannel([canon], "tiktok_url");
@@ -337,9 +304,6 @@ function scoreCandidate(field: DiscoveryField, c: DiscoveryCandidate, ctx: Disco
   }
   if (field === "instagram" && path.split("/").filter(Boolean).length > 1) score -= 0.2;
   if (field === "ubereats" && !path.includes("/store/")) score -= 1.5;
-  if (field === "rappi" && !/(^|\/)(restaurantes|restaurants|restaurant)(\/|$)/.test(path)) {
-    score -= 1.5;
-  }
   if (field === "opentable" && !path.startsWith("/r/")) score -= 1.5;
   for (const seg of path.split("/").filter(Boolean)) {
     if (GENERIC_PATH_SEGMENTS.has(seg)) score -= 0.35;
@@ -389,7 +353,7 @@ export function passesNameGate(
     return nameHits >= 1 || ctx.nameTokens.length === 0;
   }
   if (
-    field === "opentable" || field === "ubereats" || field === "rappi" ||
+    field === "opentable" || field === "ubereats" ||
     field === "tripadvisor" || field === "yelp"
   ) {
     // Listing slugs (and search-sourced links) must carry the venue name.
@@ -430,11 +394,11 @@ function selectPrimaryCandidate(
   return selectBestCandidate(field, candidates, ctx, PRIMARY_PROVIDERS[field]);
 }
 
-// Uber Eats + Rappi are hybrid delivery fields: Firecrawl and Perplexity each
-// propose a candidate and the winner is the higher-scoring one (small Firecrawl
-// tie-break bias). Same selection for both — parameterised on the field.
+// Uber Eats is a hybrid delivery field: Firecrawl and Perplexity each propose a
+// candidate and the winner is the higher-scoring one (small Firecrawl tie-break
+// bias).
 function selectHybridDelivery(
-  field: "ubereats" | "rappi",
+  field: "ubereats",
   candidates: DiscoveryCandidate[],
   ctx: DiscoveryContext,
 ): DiscoverySelection | null {
@@ -490,7 +454,7 @@ function isFallbackProvider(field: DiscoveryField, provider: CandidateProvider):
   if (field === "opentable" || field === "tripadvisor" || field === "yelp") {
     return !["seed", "google", "firecrawl", "website_footer"].includes(provider);
   }
-  // Delivery hybrids (ubereats / rappi): all four producers are first-class.
+  // Uber Eats delivery hybrid: all four producers are first-class.
   return !["seed", "firecrawl", "perplexity", "website_footer"].includes(provider);
 }
 
@@ -575,7 +539,6 @@ export async function resolveChannels(opts: {
     website: string | null;
     opentable: string | null;
     uberEats: string | null;
-    rappi?: string | null;
     tiktok?: string | null;
     tripadvisor?: string | null;
     yelp?: string | null;
@@ -584,7 +547,6 @@ export async function resolveChannels(opts: {
   Channels & {
     opentable_url: string | null;
     uber_eats_url: string | null;
-    rappi_url: string | null;
     tiktok_url: string | null;
     tripadvisor_url: string | null;
     yelp_url: string | null;
@@ -598,7 +560,6 @@ export async function resolveChannels(opts: {
   let website = opts.have.website;
   let opentable = opts.have.opentable;
   let uberEats = opts.have.uberEats;
-  let rappi = opts.have.rappi ?? null;
   let tiktok = opts.have.tiktok ?? null;
   let tripadvisor = opts.have.tripadvisor ?? null;
   let yelp = opts.have.yelp ?? null;
@@ -610,7 +571,6 @@ export async function resolveChannels(opts: {
   if (website) via.website = "google";
   if (opentable) via.opentable = "seed";
   if (uberEats) via.ubereats = "seed";
-  if (rappi) via.rappi = "seed";
   if (tiktok) via.tiktok = "seed";
   if (tripadvisor) via.tripadvisor = "seed";
   if (yelp) via.yelp = "seed";
@@ -621,7 +581,6 @@ export async function resolveChannels(opts: {
     facebook: [],
     opentable: [],
     ubereats: [],
-    rappi: [],
     tiktok: [],
     tripadvisor: [],
     yelp: [],
@@ -687,19 +646,6 @@ export async function resolveChannels(opts: {
       perplexity_candidate: null,
       primary_path: PRIMARY_PATH.ubereats,
     },
-    // Rappi mirrors Uber Eats — same seed-style delivery provenance shape.
-    rappi: {
-      url: rappi,
-      provider: rappi ? "seed" : null,
-      source: rappi ? "existing" : null,
-      score: rappi ? 0.8 : 0,
-      candidate_count: 0,
-      fallback_used: false,
-      eyebrow: false,
-      firecrawl_candidate: null,
-      perplexity_candidate: null,
-      primary_path: PRIMARY_PATH.rappi,
-    },
     tiktok: nicheProvenance(tiktok, PRIMARY_PATH.tiktok),
     tripadvisor: nicheProvenance(tripadvisor, PRIMARY_PATH.tripadvisor),
     yelp: nicheProvenance(yelp, PRIMARY_PATH.yelp),
@@ -712,7 +658,6 @@ export async function resolveChannels(opts: {
     if (field === "facebook" && !facebook) facebook = sel.url;
     if (field === "opentable" && !opentable) opentable = sel.url;
     if (field === "ubereats" && !uberEats) uberEats = sel.url;
-    if (field === "rappi" && !rappi) rappi = sel.url;
     if (field === "tiktok" && !tiktok) tiktok = sel.url;
     if (field === "tripadvisor" && !tripadvisor) tripadvisor = sel.url;
     if (field === "yelp" && !yelp) yelp = sel.url;
@@ -767,24 +712,21 @@ export async function resolveChannels(opts: {
       `${scope} ubereats`,
       `${opts.name} uber eats`,
     ];
-    const rpQueries = [`${scope} rappi`, `${opts.name} rappi restaurante`];
     const ttQueries = [`${scope} tiktok`, `${opts.name} tiktok`];
     const taQueries = [`${scope} tripadvisor`, `${opts.name} tripadvisor`];
     const ypQueries = [`${scope} yelp`, `${opts.name} yelp`];
     const needOpenTable = wantDelivery && !opentable;
     const needUberEats = wantDelivery && !uberEats;
-    const needRappi = wantDelivery && !rappi;
     const needTikTok = wantNiche && !tiktok;
     const needTripAdvisor = wantNiche && !tripadvisor;
     const needYelp = wantNiche && !yelp;
-    const [igHits, fbHits, webHits, otHits, ueHits, rpHits, ttHits, taHits, ypHits] =
+    const [igHits, fbHits, webHits, otHits, ueHits, ttHits, taHits, ypHits] =
       await Promise.all([
         instagram ? Promise.resolve<string[]>([]) : searchMany(igQueries),
         facebook ? Promise.resolve<string[]>([]) : searchMany(fbQueries),
         website ? Promise.resolve<string[]>([]) : searchMany(webQueries),
         needOpenTable ? searchMany(otQueries) : Promise.resolve<string[]>([]),
         needUberEats ? searchMany(ueQueries) : Promise.resolve<string[]>([]),
-        needRappi ? searchMany(rpQueries) : Promise.resolve<string[]>([]),
         needTikTok ? searchMany(ttQueries) : Promise.resolve<string[]>([]),
         needTripAdvisor ? searchMany(taQueries) : Promise.resolve<string[]>([]),
         needYelp ? searchMany(ypQueries) : Promise.resolve<string[]>([]),
@@ -794,7 +736,6 @@ export async function resolveChannels(opts: {
     addDiscoveryCandidates(pool, "website", webHits, "firecrawl", "search");
     if (needOpenTable) addDiscoveryCandidates(pool, "opentable", otHits, "firecrawl", "search");
     if (needUberEats) addDiscoveryCandidates(pool, "ubereats", ueHits, "firecrawl", "search");
-    if (needRappi) addDiscoveryCandidates(pool, "rappi", rpHits, "firecrawl", "search");
     if (needTikTok) addDiscoveryCandidates(pool, "tiktok", ttHits, "firecrawl", "search");
     if (needTripAdvisor) addDiscoveryCandidates(pool, "tripadvisor", taHits, "firecrawl", "search");
     if (needYelp) addDiscoveryCandidates(pool, "yelp", ypHits, "firecrawl", "search");
@@ -817,9 +758,6 @@ export async function resolveChannels(opts: {
         if (needUberEats && !uberEats) {
           addDiscoveryCandidates(pool, "ubereats", links, "website_footer", "website_footer");
         }
-        if (needRappi && !rappi) {
-          addDiscoveryCandidates(pool, "rappi", links, "website_footer", "website_footer");
-        }
         // Niche socials are very commonly linked from a venue's own footer.
         if (needTikTok && !tiktok) addDiscoveryCandidates(pool, "tiktok", links, "website_footer", "website_footer");
         if (needTripAdvisor && !tripadvisor) addDiscoveryCandidates(pool, "tripadvisor", links, "website_footer", "website_footer");
@@ -834,9 +772,6 @@ export async function resolveChannels(opts: {
     if (needUberEats && !uberEats) {
       applySelection("ubereats", selectPrimaryCandidate("ubereats", pool.ubereats, ctx));
     }
-    if (needRappi && !rappi) {
-      applySelection("rappi", selectPrimaryCandidate("rappi", pool.rappi, ctx));
-    }
     if (needTikTok && !tiktok) applySelection("tiktok", selectPrimaryCandidate("tiktok", pool.tiktok, ctx));
     if (needTripAdvisor && !tripadvisor) {
       applySelection("tripadvisor", selectPrimaryCandidate("tripadvisor", pool.tripadvisor, ctx));
@@ -850,7 +785,7 @@ export async function resolveChannels(opts: {
   // unlocked). The agent is handed the best Firecrawl candidate per field to
   // validate + fill, plus the Agent X SERP summary as soft grounding; its
   // candidate is recorded for cross-reference even when Firecrawl wins (the
-  // winner is still chosen by score in Phase 4). Uber Eats + Rappi are hybrid.
+  // winner is still chosen by score in Phase 4). Uber Eats is hybrid.
   const needPerplexitySocial = !!opts.perplexityKey;
   const needPerplexityDelivery =
     !!opts.perplexityKey && wantDelivery;
@@ -886,7 +821,6 @@ export async function resolveChannels(opts: {
             {
               opentable_url: hint("opentable", opentable),
               uber_eats_url: hint("ubereats", uberEats),
-              rappi_url: hint("rappi", rappi),
             },
             opts.serpContext,
           )
@@ -926,9 +860,6 @@ export async function resolveChannels(opts: {
       if (dd.uber_eats_url) {
         addDiscoveryCandidates(pool, "ubereats", [dd.uber_eats_url], "perplexity", "json_or_citations");
       }
-      if (dd.rappi_url) {
-        addDiscoveryCandidates(pool, "rappi", [dd.rappi_url], "perplexity", "json_or_citations");
-      }
     }
 
     if (nn) {
@@ -944,7 +875,7 @@ export async function resolveChannels(opts: {
     }
 
     // ── Phase 4: SELECTION — score-based picker per field (thresholds + priors
-    // unchanged). Uber Eats + Rappi go through the hybrid Firecrawl/Perplexity
+    // unchanged). Uber Eats goes through the hybrid Firecrawl/Perplexity
     // chooser; the rest pick the best Perplexity candidate now that both legs
     // have contributed to the pool.
     if (!website) {
@@ -974,9 +905,6 @@ export async function resolveChannels(opts: {
     if (wantDelivery && !uberEats) {
       applySelection("ubereats", selectHybridDelivery("ubereats", pool.ubereats, ctx));
     }
-    if (wantDelivery && !rappi) {
-      applySelection("rappi", selectHybridDelivery("rappi", pool.rappi, ctx));
-    }
     if (wantNiche && !tiktok) {
       applySelection("tiktok", selectBestCandidate("tiktok", pool.tiktok, ctx, ["perplexity"]));
     }
@@ -997,7 +925,6 @@ export async function resolveChannels(opts: {
       facebook: pp?.facebook_url ?? null,
       opentable: dd?.opentable_url ?? null,
       ubereats: dd?.uber_eats_url ?? null,
-      rappi: dd?.rappi_url ?? null,
       tiktok: nn?.tiktok_url ?? null,
       tripadvisor: nn?.tripadvisor_url ?? null,
       yelp: nn?.yelp_url ?? null,
@@ -1017,15 +944,14 @@ export async function resolveChannels(opts: {
       provenance[field].eyebrow = !!fc && !!pc && !sameChannelUrl(fc, pc);
     }
   } else if (wantDelivery && !uberEats) {
-    // No Perplexity key: delivery hybrids fall back to the Firecrawl-only pick.
+    // No Perplexity key: Uber Eats falls back to the Firecrawl-only pick.
     applySelection("ubereats", selectPrimaryCandidate("ubereats", pool.ubereats, ctx));
-    if (!rappi) applySelection("rappi", selectPrimaryCandidate("rappi", pool.rappi, ctx));
   }
 
   // ── Phase 5: FALSE-POSITIVE rejection — validate every non-seed selected link
   // truly belongs to THIS venue and drop the ones that fail, clearing their
   // provenance. Two verifiers: Firecrawl page-scrape for scrapeable pages
-  // (facebook / opentable / ubereats / rappi / tripadvisor / yelp) and a
+  // (facebook / opentable / ubereats / tripadvisor / yelp) and a
   // Perplexity check for instagram + tiktok handle pages, where scrape
   // verification is unreliable. (instagram is ALSO re-verified downstream by the
   // IG scrape; the Perplexity check here is a cheap extra guard.)
@@ -1062,15 +988,6 @@ export async function resolveChannels(opts: {
         uberEats = null;
         delete via.ubereats;
         rejectField("ubereats");
-      }
-    }
-    // Rappi mirrors Uber Eats — a scrapeable listing page; verify the venue name.
-    if (rappi && via.rappi !== "seed") {
-      const ok = await verifyPageMatchesVenue(opts.firecrawlKey, rappi, ctx, opts.name);
-      if (!ok) {
-        rappi = null;
-        delete via.rappi;
-        rejectField("rappi");
       }
     }
     // TripAdvisor + Yelp are scrapeable listing pages — verify the venue name
@@ -1160,7 +1077,7 @@ export async function resolveChannels(opts: {
   for (
     const field of [
       "website", "instagram", "facebook", "opentable", "ubereats",
-      "rappi", "tiktok", "tripadvisor", "yelp",
+      "tiktok", "tripadvisor", "yelp",
     ] as DiscoveryField[]
   ) {
     provenance[field].candidate_count = pool[field].length;
@@ -1183,7 +1100,6 @@ export async function resolveChannels(opts: {
     website_url: website,
     opentable_url: opentable,
     uber_eats_url: uberEats,
-    rappi_url: rappi,
     tiktok_url: tiktok,
     tripadvisor_url: tripadvisor,
     yelp_url: yelp,
@@ -1291,8 +1207,7 @@ export async function discoverChannelsPerplexity(
   return { instagram_url, facebook_url, website_url };
 }
 
-// Perplexity Agent (pro-search) directory discovery (OpenTable + Uber Eats +
-// Rappi). Rappi mirrors Uber Eats exactly — same hybrid delivery field.
+// Perplexity Agent (pro-search) directory discovery (OpenTable + Uber Eats).
 async function discoverDeliveryPerplexity(
   key: string,
   name: string,
@@ -1301,16 +1216,14 @@ async function discoverDeliveryPerplexity(
   hints: {
     opentable_url?: string | null;
     uber_eats_url?: string | null;
-    rappi_url?: string | null;
   } = {},
   serpContext?: string,
 ): Promise<
-  { opentable_url: string | null; uber_eats_url: string | null; rappi_url: string | null } | null
+  { opentable_url: string | null; uber_eats_url: string | null } | null
 > {
   const hintLines = [
     hints.opentable_url ? `- opentable (candidate): ${hints.opentable_url}` : "",
     hints.uber_eats_url ? `- uber eats (candidate): ${hints.uber_eats_url}` : "",
-    hints.rappi_url ? `- rappi (candidate): ${hints.rappi_url}` : "",
   ].filter(Boolean).join("\n");
   const prompt =
     `Resolve reservation and delivery links for "${name}"` +
@@ -1323,7 +1236,6 @@ async function discoverDeliveryPerplexity(
     `Return strict JSON with:\n` +
     `- opentable_url: the canonical OpenTable restaurant page (opentable.com or a country domain like opentable.com.mx). The specific location is best; the brand page is acceptable. null if the venue is genuinely not on OpenTable.\n` +
     `- uber_eats_url: the canonical Uber Eats store page (ubereats.com). The specific store is best; brand page acceptable. null if not on Uber Eats.\n` +
-    `- rappi_url: the canonical Rappi restaurant page (rappi.com or a country domain like rappi.com.mx, with a /restaurantes/ path). The specific store is best; brand page acceptable. null if not on Rappi.\n` +
     `Be conservative (low false positives). If unsure, use null. Never invent a URL.`;
   const res = await callPerplexityAgent(key, prompt, DELIVERY_CHANNELS_SCHEMA);
   if (!res) return null;
@@ -1334,18 +1246,8 @@ async function discoverDeliveryPerplexity(
   const uber_eats_url =
     pickChannel([String(answer.uber_eats_url ?? "")], "uber_eats_url") ??
     pickChannel(hitUrls, "uber_eats_url");
-  const rappiAnswer = pickChannel([String(answer.rappi_url ?? "")], "rappi_url");
-  const rappi_url =
-    (rappiAnswer && isRappiListing(rappiAnswer)) ? rappiAnswer
-      : (() => {
-        for (const u of hitUrls) {
-          const hit = pickChannel([u], "rappi_url");
-          if (hit && isRappiListing(hit)) return hit;
-        }
-        return null;
-      })();
-  if (!opentable_url && !uber_eats_url && !rappi_url) return null;
-  return { opentable_url, uber_eats_url, rappi_url };
+  if (!opentable_url && !uber_eats_url) return null;
+  return { opentable_url, uber_eats_url };
 }
 
 // Perplexity Agent (pro-search) niche-social discovery (TikTok / TripAdvisor /

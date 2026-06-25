@@ -70,7 +70,6 @@ const COLUMNS: readonly string[] = [
   "opentable_url",
   "resy_url",
   "uber_eats_url",
-  "rappi_url",
   "x_url",
   "threads_url",
   "reddit_url",

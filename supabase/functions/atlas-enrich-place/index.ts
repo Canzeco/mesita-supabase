@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
   const { data: row } = await admin
     .from("venues")
     .select(
-      "name, address, city, category, instagram_url, facebook_url, website_url, opentable_url, uber_eats_url, rappi_url, tiktok_url, tripadvisor_url, yelp_url, phone, email, google_place_id, google_stars_overall, google_review_count, editorial_summary, photos",
+      "name, address, city, category, instagram_url, facebook_url, website_url, opentable_url, uber_eats_url, tiktok_url, tripadvisor_url, yelp_url, phone, email, google_place_id, google_stars_overall, google_review_count, editorial_summary, photos",
     )
     .eq("id", venueId)
     .maybeSingle();
@@ -113,7 +113,6 @@ Deno.serve(async (req) => {
   let resolvedWebsite = strOrNull(row.website_url);
   let resolvedOpenTable = strOrNull(row.opentable_url);
   let resolvedUberEats = strOrNull(row.uber_eats_url);
-  let resolvedRappi = strOrNull(row.rappi_url);
   let resolvedTikTok = strOrNull(row.tiktok_url);
   let resolvedTripAdvisor = strOrNull(row.tripadvisor_url);
   let resolvedYelp = strOrNull(row.yelp_url);
@@ -134,7 +133,6 @@ Deno.serve(async (req) => {
       !resolvedWebsite ||
       !resolvedOpenTable ||
       !resolvedUberEats ||
-      !resolvedRappi ||
       !resolvedTikTok ||
       !resolvedTripAdvisor ||
       !resolvedYelp ||
@@ -196,7 +194,6 @@ Deno.serve(async (req) => {
         website: resolvedWebsite,
         opentable: resolvedOpenTable,
         uberEats: resolvedUberEats,
-        rappi: resolvedRappi,
         tiktok: resolvedTikTok,
         tripadvisor: resolvedTripAdvisor,
         yelp: resolvedYelp,
@@ -207,7 +204,6 @@ Deno.serve(async (req) => {
     if (!resolvedWebsite && found.website_url) resolvedWebsite = found.website_url;
     if (!resolvedOpenTable && found.opentable_url) resolvedOpenTable = found.opentable_url;
     if (!resolvedUberEats && found.uber_eats_url) resolvedUberEats = found.uber_eats_url;
-    if (!resolvedRappi && found.rappi_url) resolvedRappi = found.rappi_url;
     if (!resolvedTikTok && found.tiktok_url) resolvedTikTok = found.tiktok_url;
     if (!resolvedTripAdvisor && found.tripadvisor_url) resolvedTripAdvisor = found.tripadvisor_url;
     if (!resolvedYelp && found.yelp_url) resolvedYelp = found.yelp_url;
@@ -253,7 +249,6 @@ Deno.serve(async (req) => {
       website: !!resolvedWebsite,
       opentable: !!resolvedOpenTable,
       ubereats: !!resolvedUberEats,
-      rappi: !!resolvedRappi,
       tiktok: !!resolvedTikTok,
       tripadvisor: !!resolvedTripAdvisor,
       yelp: !!resolvedYelp,
@@ -269,12 +264,11 @@ Deno.serve(async (req) => {
   // named account, so it persists only AFTER the IG scrape verifies it (Tier 4).
   if (resolvedFacebook && resolvedFacebook !== row.facebook_url) update.facebook_url = resolvedFacebook;
   if (resolvedWebsite && resolvedWebsite !== row.website_url) update.website_url = resolvedWebsite;
-  // OpenTable/UberEats/Rappi + niche socials are host + shape-validated links (no
+  // OpenTable/Uber Eats + niche socials are host + shape-validated links (no
   // per-venue identity check the way Instagram needs), so they persist straight
-  // away. Rappi mirrors uber_eats exactly.
+  // away.
   if (resolvedOpenTable && resolvedOpenTable !== row.opentable_url) update.opentable_url = resolvedOpenTable;
   if (resolvedUberEats && resolvedUberEats !== row.uber_eats_url) update.uber_eats_url = resolvedUberEats;
-  if (resolvedRappi && resolvedRappi !== row.rappi_url) update.rappi_url = resolvedRappi;
   if (resolvedTikTok && resolvedTikTok !== row.tiktok_url) update.tiktok_url = resolvedTikTok;
   if (resolvedTripAdvisor && resolvedTripAdvisor !== row.tripadvisor_url) update.tripadvisor_url = resolvedTripAdvisor;
   if (resolvedYelp && resolvedYelp !== row.yelp_url) update.yelp_url = resolvedYelp;
