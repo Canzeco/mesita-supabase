@@ -344,6 +344,11 @@ verify_jwt = true
 [functions.admin-list-verifications]
 verify_jwt = true
 
+# Global Performance notifications feed for super-admins (derived,
+# non-realtime — the console pulls it on Refresh).
+[functions.admin-list-notifications]
+verify_jwt = true
+
 [functions.admin-decide-verification]
 verify_jwt = true
 
