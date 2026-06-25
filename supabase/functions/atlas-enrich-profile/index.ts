@@ -65,11 +65,6 @@ import {
   resolveChannels,
 } from "../_shared/atlas-channel-discovery.ts";
 
-const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
-// sonar-pro searches harder than base sonar (which returns null too often on
-// venues whose socials clearly exist). Perplexity is the FALLBACK candidate
-// source — Firecrawl Search runs first.
-const PERPLEXITY_MODEL = "sonar-pro";
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 // Vision + sort always run on the cheap multimodal model — image work doesn't
@@ -110,7 +105,7 @@ const COST = {
   instagramVerify: 0.04,
   facebook: 0.02, // Apify FB pages scraper
   firecrawl: 0.01, // Firecrawl scrape
-  perplexity: 0.01, // Perplexity sonar / Serper
+  perplexity: 0.01, // Perplexity Agent (pro-search) validate+fill
   synthesisEconomy: 0.005, // gpt-4o-mini synthesis
   synthesisStandard: 0.03, // gpt-4o synthesis
   visionPerImage: 0.002, // gpt-4o-mini vision, one image (detail:low)
@@ -236,7 +231,7 @@ Deno.serve(async (req) => {
   const { data: row } = await admin
     .from("venues")
     .select(
-      "name, address, city, category, instagram_url, facebook_url, website_url, google_place_id, google_stars_overall, google_review_count, editorial_summary, photos",
+      "name, address, city, category, instagram_url, facebook_url, website_url, opentable_url, uber_eats_url, google_place_id, google_stars_overall, google_review_count, editorial_summary, photos",
     )
     .eq("id", venueId)
     .maybeSingle();
@@ -247,23 +242,11 @@ Deno.serve(async (req) => {
   // callers don't pass overrides (the DB is the single source of truth).
   const { data: cfg } = await admin
     .from("app_settings")
+    // Single string LITERAL (not a joined array, not concatenation): supabase-js
+    // infers the row type only from a literal select argument — anything that
+    // widens to `string` falls back to GenericStringError and untypes cfg.atlas_*.
     .select(
-      [
-        "atlas_source_tier_ceiling",
-        "atlas_synthesis_quality",
-        "atlas_gather_google_images",
-        "atlas_gather_website_images",
-        "atlas_gather_instagram_posts",
-        "atlas_save_total_images",
-        "atlas_image_vision_enabled",
-        "atlas_analyze_google_images",
-        "atlas_analyze_website_images",
-        "atlas_analyze_instagram_images",
-        "atlas_image_analysis_prompt",
-        "atlas_image_sorting_prompt",
-        "atlas_per_run_cost_cap_usd",
-        "atlas_website_crawl_max_pages",
-      ].join(", "),
+      "atlas_source_tier_ceiling, atlas_synthesis_quality, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_per_run_cost_cap_usd, atlas_website_crawl_max_pages",
     )
     .eq("id", 1)
     .maybeSingle();

@@ -13,8 +13,13 @@ import {
 import { firecrawlScrape, firecrawlSearch } from "./firecrawl.ts";
 import { dedup, numOf, safeParseJson } from "./parse-utils.ts";
 
-const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
-const PERPLEXITY_MODEL = "sonar-pro";
+// Link-discovery fallback = "Firecrawl Search and Perplexity Agent" (ADEA):
+// Firecrawl Search surfaces candidate URLs, then the Perplexity Agent
+// (pro-search) validates them against the venue's own website and fills gaps.
+// 50-venue benchmark (2026-06): 82% recall / 76% precision, beating raw
+// Firecrawl (77/60) and an all-Perplexity-Search pipeline (75/69).
+const PERPLEXITY_AGENT_URL = "https://api.perplexity.ai/v1/agent";
+const PERPLEXITY_AGENT_PRESET = "pro-search";
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const VISION_MODEL = "gpt-4o-mini";
 
@@ -579,9 +584,10 @@ export async function resolveChannels(opts: {
     }
   }
 
-  // 3. Perplexity — fallback only (Atlas Notion policy). Never re-run when
-  // Firecrawl/website-footer already resolved a channel. Uber Eats is hybrid:
-  // always merge Perplexity citations, then pick the best validated candidate.
+  // 3. Perplexity Agent — fallback only (ADEA policy). Never re-run when
+  // Firecrawl/website-footer already resolved a channel. The agent is handed
+  // the best Firecrawl candidate per field to validate + fill. Uber Eats is
+  // hybrid: always run, then pick the best validated candidate.
   const needPerplexitySocial =
     !!opts.perplexityKey && (!instagram || !facebook || !website);
   const needPerplexityOpenTable =
@@ -590,6 +596,8 @@ export async function resolveChannels(opts: {
     !!opts.perplexityKey && wantDelivery;
 
   if (needPerplexitySocial || needPerplexityOpenTable || needPerplexityUberEats) {
+    const hint = (field: DiscoveryField, current: string | null): string | null =>
+      current ?? (pool[field][0]?.url ?? null);
     const [pp, dd] = await Promise.all([
       needPerplexitySocial
         ? discoverChannelsPerplexity(
@@ -597,6 +605,11 @@ export async function resolveChannels(opts: {
             opts.name,
             opts.locationLine,
             opts.category,
+            {
+              website_url: hint("website", website),
+              instagram_url: hint("instagram", instagram),
+              facebook_url: hint("facebook", facebook),
+            },
           )
         : Promise.resolve(null),
       (needPerplexityOpenTable || needPerplexityUberEats)
@@ -605,6 +618,10 @@ export async function resolveChannels(opts: {
             opts.name,
             opts.locationLine,
             opts.category,
+            {
+              opentable_url: hint("opentable", opentable),
+              uber_eats_url: hint("ubereats", uberEats),
+            },
           )
         : Promise.resolve(null),
     ]);
@@ -737,156 +754,136 @@ export async function resolveChannels(opts: {
 }
 
 
-// Perplexity fallback: resolve channel URLs from search. An LLM, so every URL
-// it returns is host-validated before we trust it. Facebook/website prefer
-// citation-mined URLs (Atlas Notion: do not trust prose-only claims).
-export async function discoverChannelsPerplexity(
+// ── Perplexity Agent (pro-search) discovery: validate + fill ────────────────
+// Calls the managed Agent runtime once and returns both the schema JSON answer
+// and the source URLs the agent actually cited (annotations). Host-locked:
+// callers must re-validate every URL before trusting it.
+async function callPerplexityAgent(
   key: string,
-  name: string,
-  locationLine: string,
-  category: string | null,
-): Promise<Channels | null> {
-  const prompt =
-    `Find these links for venue "${name}"` +
-    (locationLine ? ` in ${locationLine}` : "") +
-    (category ? ` (category: ${category})` : "") +
-    `. Return strict JSON with instagram_url, facebook_url, website_url.\n` +
-    `Confidence policy:\n` +
-    `- website_url and facebook_url: stricter (avoid false positives). If unsure, use null.\n` +
-    `- instagram_url: softer (avoid false negatives). Return best plausible official profile; null only if no good lead.\n` +
-    `Use simple web evidence and never invent URLs.`;
+  input: string,
+  schema: unknown,
+): Promise<{ answer: Record<string, unknown>; hitUrls: string[] } | null> {
   try {
-    const r = await fetch(PERPLEXITY_URL, {
+    const r = await fetch(PERPLEXITY_AGENT_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: PERPLEXITY_MODEL,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Resolve venue URLs from web search and output only JSON matching schema. Keep website/facebook conservative (prefer null when uncertain). For Instagram, return best plausible official profile to reduce misses. Brand-level account/site is acceptable for chains. Never fabricate URLs.",
-          },
-          { role: "user", content: prompt },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: { schema: CHANNELS_SCHEMA },
-        },
+        input,
+        preset: PERPLEXITY_AGENT_PRESET,
+        instructions:
+          "Resolve venue URLs by anchoring on the official website and trusting the links the site itself points to. Output only JSON matching the schema. Never fabricate URLs; prefer null when unsure.",
+        max_steps: 8,
+        response_format: { type: "json_schema", json_schema: { schema } },
       }),
     });
     if (!r.ok) return null;
-    const data = (await r.json()) as {
-      choices?: { message?: { content?: string } }[];
-      citations?: unknown[];
-      search_results?: { url?: unknown }[];
+    const d = (await r.json()) as {
+      output?: {
+        type?: string;
+        content?: { text?: string; annotations?: { url?: unknown }[] }[];
+      }[];
     };
-    // sonar-pro answers on two channels: the JSON content (its considered
-    // answer) and the raw web hits it actually consulted (citations +
-    // search_results). The model is conservative and frequently returns null
-    // for a social profile it nonetheless surfaced in its sources — so when the
-    // JSON is empty we mine those hit URLs. pickInstagram/pickFacebook are
-    // host-locked to instagram.com/facebook.com, and the hits are specific to
-    // THIS venue's query, so a social URL among them is almost certainly the
-    // venue's. (Website is left JSON-only: a citation could be any news/blog
-    // domain that pickWebsite can't tell apart from the real site.)
+    let text = "";
     const hitUrls: string[] = [];
-    for (const c of data.citations ?? []) {
-      if (typeof c === "string") hitUrls.push(c);
+    for (const it of d.output ?? []) {
+      if (it?.type === "message" && Array.isArray(it.content)) {
+        for (const c of it.content) {
+          if (typeof c?.text === "string") text += c.text;
+          for (const a of c?.annotations ?? []) {
+            if (a && typeof a.url === "string") hitUrls.push(a.url);
+          }
+        }
+      }
     }
-    for (const s of data.search_results ?? []) {
-      if (s && typeof s.url === "string") hitUrls.push(s.url);
-    }
-    const answer = (safeParseJson(data.choices?.[0]?.message?.content ?? "") as
-      | { instagram_url?: unknown; facebook_url?: unknown; website_url?: unknown }
-      | null) ?? {};
-    const instagram_url =
-      pickInstagram([String(answer.instagram_url ?? "")]) ??
-      validHost(answer.instagram_url, ["instagram.com"]) ??
-      pickInstagram(hitUrls);
-    // Facebook + website: citations only — reduces Perplexity false positives.
-    const facebook_url = pickFacebook(hitUrls);
-    const website_url = pickWebsite(hitUrls);
-    if (!instagram_url && !facebook_url && !website_url) return null;
-    return { instagram_url, facebook_url, website_url };
+    const answer = (safeParseJson(text) as Record<string, unknown> | null) ?? {};
+    return { answer, hitUrls };
   } catch {
     return null;
   }
 }
 
+// Perplexity Agent (pro-search) social/website discovery. `hints` carries the
+// best Firecrawl candidates so the agent verifies them (keep / fix / null)
+// rather than rediscovering from scratch. Trusts the website-anchored JSON
+// answer first, then falls back to mined citation URLs — both host-validated.
+export async function discoverChannelsPerplexity(
+  key: string,
+  name: string,
+  locationLine: string,
+  category: string | null,
+  hints: Partial<Channels> = {},
+): Promise<Channels | null> {
+  const hintLines = [
+    hints.website_url ? `- website (candidate): ${hints.website_url}` : "",
+    hints.instagram_url ? `- instagram (candidate): ${hints.instagram_url}` : "",
+    hints.facebook_url ? `- facebook (candidate): ${hints.facebook_url}` : "",
+  ].filter(Boolean).join("\n");
+  const prompt =
+    `Resolve official links for the venue "${name}"` +
+    (locationLine ? ` in ${locationLine}` : "") +
+    (category ? ` (category: ${category})` : "") + ".\n" +
+    (hintLines
+      ? `An automated search proposed these CANDIDATES — they may be wrong (a different venue, a news article, an aggregator, or a generic page). Verify each; do not trust them blindly:\n${hintLines}\n\n`
+      : "") +
+    `Find the official WEBSITE first and trust the Instagram/Facebook the site itself links to. ` +
+    `Return strict JSON with instagram_url, facebook_url, website_url.\n` +
+    `- website_url and facebook_url: strict — null if you cannot confirm it belongs to THIS venue.\n` +
+    `- instagram_url: return the best plausible official profile; null only if no good lead.\n` +
+    `Brand-level account/site is acceptable for chains. Never invent URLs.`;
+  const res = await callPerplexityAgent(key, prompt, CHANNELS_SCHEMA);
+  if (!res) return null;
+  const { answer, hitUrls } = res;
+  const instagram_url =
+    pickInstagram([String(answer.instagram_url ?? "")]) ??
+    validHost(answer.instagram_url, ["instagram.com"]) ??
+    pickInstagram(hitUrls);
+  // Agent answers are website-anchored evidence, so we trust the JSON for
+  // facebook/website first, then fall back to cited URLs.
+  const facebook_url =
+    pickFacebook([String(answer.facebook_url ?? "")]) ?? pickFacebook(hitUrls);
+  const website_url =
+    pickWebsite([String(answer.website_url ?? "")]) ?? pickWebsite(hitUrls);
+  if (!instagram_url && !facebook_url && !website_url) return null;
+  return { instagram_url, facebook_url, website_url };
+}
 
-// Perplexity fallback for the tier-3 directory links (OpenTable reservations +
-// UberEats delivery). Same host-locked discipline as the social fallback:
-// every candidate — whether from the JSON answer or the mined citations — must
-// resolve to the right host via pickChannel before we trust it.
+// Perplexity Agent (pro-search) directory discovery (OpenTable + Uber Eats).
 async function discoverDeliveryPerplexity(
   key: string,
   name: string,
   locationLine: string,
   category: string | null,
+  hints: { opentable_url?: string | null; uber_eats_url?: string | null } = {},
 ): Promise<{ opentable_url: string | null; uber_eats_url: string | null } | null> {
+  const hintLines = [
+    hints.opentable_url ? `- opentable (candidate): ${hints.opentable_url}` : "",
+    hints.uber_eats_url ? `- uber eats (candidate): ${hints.uber_eats_url}` : "",
+  ].filter(Boolean).join("\n");
   const prompt =
-    `Find reservation and delivery links for "${name}"` +
+    `Resolve reservation and delivery links for "${name}"` +
     (locationLine ? ` in ${locationLine}` : "") +
-    (category ? ` (category: ${category})` : "") +
-    `. takes reservations and delivery. Return strict JSON with:\n` +
-    `- opentable_url: the canonical OpenTable restaurant page (opentable.com or ` +
-    `a country domain like opentable.com.mx). For a chain, the specific ` +
-    `location's page is best, but the brand page is acceptable. null if none.\n` +
-    `- uber_eats_url: the canonical Uber Eats store page (ubereats.com). For a ` +
-    `chain, the specific store is best, the brand page acceptable. null if none.\n` +
-    `For both links be conservative (low false positives). If unsure, use null. Never invent a URL.`;
-  try {
-    const r = await fetch(PERPLEXITY_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: PERPLEXITY_MODEL,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Resolve OpenTable and Uber Eats URLs from web search. Output only schema JSON. Be conservative: if uncertain, use null. Specific location is best; brand-level acceptable. Never fabricate URLs.",
-          },
-          { role: "user", content: prompt },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: { schema: DELIVERY_CHANNELS_SCHEMA },
-        },
-      }),
-    });
-    if (!r.ok) return null;
-    const data = (await r.json()) as {
-      choices?: { message?: { content?: string } }[];
-      citations?: unknown[];
-      search_results?: { url?: unknown }[];
-    };
-    const hitUrls: string[] = [];
-    for (const c of data.citations ?? []) {
-      if (typeof c === "string") hitUrls.push(c);
-    }
-    for (const s of data.search_results ?? []) {
-      if (s && typeof s.url === "string") hitUrls.push(s.url);
-    }
-    const answer = (safeParseJson(data.choices?.[0]?.message?.content ?? "") as
-      | { opentable_url?: unknown; uber_eats_url?: unknown }
-      | null) ?? {};
-    const opentable_url = pickChannel(hitUrls, "opentable_url") ??
-      pickChannel([String(answer.opentable_url ?? "")], "opentable_url");
-    const uber_eats_url = pickChannel(hitUrls, "uber_eats_url") ??
-      pickChannel([String(answer.uber_eats_url ?? "")], "uber_eats_url");
-    if (!opentable_url && !uber_eats_url) return null;
-    return { opentable_url, uber_eats_url };
-  } catch {
-    return null;
-  }
+    (category ? ` (category: ${category})` : "") + ".\n" +
+    (hintLines
+      ? `An automated search proposed these CANDIDATES — verify each, they may be wrong or a different location:\n${hintLines}\n\n`
+      : "") +
+    `Return strict JSON with:\n` +
+    `- opentable_url: the canonical OpenTable restaurant page (opentable.com or a country domain like opentable.com.mx). The specific location is best; the brand page is acceptable. null if the venue is genuinely not on OpenTable.\n` +
+    `- uber_eats_url: the canonical Uber Eats store page (ubereats.com). The specific store is best; brand page acceptable. null if not on Uber Eats.\n` +
+    `Be conservative (low false positives). If unsure, use null. Never invent a URL.`;
+  const res = await callPerplexityAgent(key, prompt, DELIVERY_CHANNELS_SCHEMA);
+  if (!res) return null;
+  const { answer, hitUrls } = res;
+  const opentable_url =
+    pickChannel([String(answer.opentable_url ?? "")], "opentable_url") ??
+    pickChannel(hitUrls, "opentable_url");
+  const uber_eats_url =
+    pickChannel([String(answer.uber_eats_url ?? "")], "uber_eats_url") ??
+    pickChannel(hitUrls, "uber_eats_url");
+  if (!opentable_url && !uber_eats_url) return null;
+  return { opentable_url, uber_eats_url };
 }
 
 
