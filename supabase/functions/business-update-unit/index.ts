@@ -27,9 +27,8 @@ const MAX_PHOTOS = 30;
 const MAX_TAGS = 12;
 const MAX_TAG_LEN = 40;
 const MAX_PR_LINKS = 10;
-// Matches the business Place editor's textarea cap (EditVenueForm
-// DESCRIPTION_MAX). Atlas targets ~1000 words (~7000 chars).
-const MAX_DESCRIPTION_LEN = 7000;
+// Matches the business Place editor's About field cap (PLACE_DESCRIPTION_MAX).
+const MAX_DESCRIPTION_LEN = 2000;
 
 type UpdateBody = {
   id?: string;
