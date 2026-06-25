@@ -42,6 +42,7 @@ type Body = {
   imageAnalysisPrompt?: string;
   imageSortingPrompt?: string;
   synthesisQuality?: string;
+  visionQuality?: string;
   perRunCostCapUsd?: number;
 };
 
@@ -216,6 +217,19 @@ Deno.serve(async (req) => {
     patch.atlas_synthesis_quality = body.synthesisQuality;
   }
 
+  if (body.visionQuality !== undefined) {
+    if (
+      typeof body.visionQuality !== "string" ||
+      !QUALITY_VALUES.has(body.visionQuality)
+    ) {
+      return json(
+        { ok: false, error: "visionQuality must be economy, standard, or high" },
+        400,
+      );
+    }
+    patch.atlas_vision_quality = body.visionQuality;
+  }
+
   if (body.perRunCostCapUsd !== undefined) {
     if (typeof body.perRunCostCapUsd !== "number" || body.perRunCostCapUsd < 0) {
       return json(
@@ -237,7 +251,7 @@ Deno.serve(async (req) => {
     .update(patch)
     .eq("id", 1)
     .select(
-      "atlas_source_tier_ceiling, atlas_source_overrides, atlas_website_crawl_max_pages, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_per_run_cost_cap_usd, updated_at",
+      "atlas_source_tier_ceiling, atlas_source_overrides, atlas_website_crawl_max_pages, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, updated_at",
     )
     .single();
   if (error) {
@@ -263,6 +277,7 @@ Deno.serve(async (req) => {
     atlasImageAnalysisPrompt: data.atlas_image_analysis_prompt,
     atlasImageSortingPrompt: data.atlas_image_sorting_prompt,
     atlasSynthesisQuality: data.atlas_synthesis_quality,
+    atlasVisionQuality: data.atlas_vision_quality,
     atlasPerRunCostCapUsd: data.atlas_per_run_cost_cap_usd,
     updatedAt: data.updated_at,
   });
