@@ -1,9 +1,12 @@
 -- ADEA enrichment lifecycle (Phase 2a)
 --
--- A venue enters life as 'pending' (seeded by business-create-unit), Atlas
--- flips it 'running' → 'ready'/'failed' as atlas-enrich-place progresses, and
--- the public select RLS policy only exposes 'ready' venues to consumers.
--- Owners read via the service role, so they still see their own pending rows.
+-- A venue enters life seeded by business-create-unit (via atlas-seed-place),
+-- Atlas keeps it in-flight → 'ready'/'failed' as atlas-enrich-place progresses,
+-- and the public select RLS policy only exposes 'ready' venues to consumers.
+-- Owners read via the service role, so they still see their own in-flight rows.
+-- NOTE: this migration creates the enum as ('pending','running',...); a later
+-- migration renames 'pending'→'queued' and 'running'→'generating'. The literals
+-- below are the ORIGINAL names (this body must not be edited / re-run).
 
 -- Lifecycle states for the ADEA enrichment pipeline.
 create type public.adea_status as enum ('pending', 'running', 'ready', 'failed');
@@ -17,7 +20,7 @@ update public.venues set adea_status = 'ready';
 
 -- Tighten the PUBLIC select policy: reproduce venues_select_public_visible
 -- exactly (same name, roles, command, status gate) but also require the venue
--- to have finished enriching. Consumers therefore never see pending/running/
+-- to have finished enriching. Consumers therefore never see queued/generating/
 -- failed venues; owners read via the service role and bypass RLS entirely.
 drop policy if exists "venues_select_public_visible" on public.venues;
 create policy "venues_select_public_visible"

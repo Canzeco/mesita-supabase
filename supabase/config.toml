@@ -171,6 +171,15 @@ verify_jwt = false
 [functions.atlas-get-place]
 verify_jwt = false
 
+# Synchronous Pre-ADEA seed — fetches Google Places BASICS only (name, address,
+# geo, category, phone, hours, first photos) and inserts the venue row with
+# adea_status='generating'. NO Firecrawl/Perplexity/OpenAI/CSE — instant. The
+# INSERT itself is the 'place seeded' notification (admin feed derives it from
+# venues.created_at). Internal-only; invoked by the create paths (business-
+# create-unit) with the service-role bearer.
+[functions.atlas-seed-place]
+verify_jwt = false
+
 # Place enricher agent — runs the Atlas tier pipeline (Google contents → links →
 # source gather → image funnel → grounded synthesis) to complete the venue
 # profile (details{}, About, menus, popular times, photos). Internal-only;
