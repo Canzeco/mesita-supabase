@@ -72,7 +72,6 @@ const COLUMNS: readonly string[] = [
   "uber_eats_url",
   "rappi_url",
   "x_url",
-  "youtube_url",
   "threads_url",
   "reddit_url",
   "didi_food_url",

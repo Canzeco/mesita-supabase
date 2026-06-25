@@ -78,7 +78,6 @@ type UpdateBody = {
   uber_eats_url?: string | null;
   rappi_url?: string | null;
   x_url?: string | null;
-  youtube_url?: string | null;
   threads_url?: string | null;
   reddit_url?: string | null;
   didi_food_url?: string | null;
@@ -139,7 +138,6 @@ const URL_FIELDS = [
   "uber_eats_url",
   "rappi_url",
   "x_url",
-  "youtube_url",
   "threads_url",
   "reddit_url",
   "didi_food_url",
