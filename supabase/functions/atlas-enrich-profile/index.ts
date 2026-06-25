@@ -90,6 +90,12 @@ const SOCIAL_LAYER_TIER = 2;
 // the Atlas catalog, so it's gated by ceiling >= 3.
 const RESERVATION_DELIVERY_TIER = 3;
 
+// ADEA niche-social links (YouTube / TikTok / TripAdvisor / Yelp). Loyal to the
+// Notion ADEA field pages, which place these at T3 — so they share the tier-3
+// gate with reservation/delivery. (The 2026-06-25 re-tiering migration mentions
+// T4 for these; flip this to 4 if that supersedes the field-page spec.)
+const NICHE_SOCIAL_TIER = 3;
+
 // Hard ceiling on photos persisted to the venue, regardless of per-source caps.
 // Safety ceiling on the gathered candidate pool before save (the real,
 // source-independent save cap is atlas_save_total_images, applied at the end).
@@ -231,7 +237,7 @@ Deno.serve(async (req) => {
   const { data: row } = await admin
     .from("venues")
     .select(
-      "name, address, city, category, instagram_url, facebook_url, website_url, opentable_url, uber_eats_url, google_place_id, google_stars_overall, google_review_count, editorial_summary, photos",
+      "name, address, city, category, instagram_url, facebook_url, website_url, opentable_url, uber_eats_url, youtube_url, tiktok_url, tripadvisor_url, yelp_url, google_place_id, google_stars_overall, google_review_count, editorial_summary, photos",
     )
     .eq("id", venueId)
     .maybeSingle();
@@ -281,6 +287,8 @@ Deno.serve(async (req) => {
   const socialLayer = tierCeiling >= SOCIAL_LAYER_TIER;
   // OpenTable + UberEats link resolution runs only when the ceiling allows tier 3.
   const reservationDeliveryLayer = tierCeiling >= RESERVATION_DELIVERY_TIER;
+  // YouTube / TikTok / TripAdvisor / Yelp niche-social links (ADEA T3).
+  const nicheSocialLayer = tierCeiling >= NICHE_SOCIAL_TIER;
 
   const PERPLEXITY_KEY = Deno.env.get("PERPLEXITY_KEY");
   const OPENAI_KEY = Deno.env.get("OPENAI_KEY");
@@ -327,6 +335,14 @@ Deno.serve(async (req) => {
     typeof row.uber_eats_url === "string" && row.uber_eats_url
       ? row.uber_eats_url
       : null;
+  let resolvedYouTube =
+    typeof row.youtube_url === "string" && row.youtube_url ? row.youtube_url : null;
+  let resolvedTikTok =
+    typeof row.tiktok_url === "string" && row.tiktok_url ? row.tiktok_url : null;
+  let resolvedTripAdvisor =
+    typeof row.tripadvisor_url === "string" && row.tripadvisor_url ? row.tripadvisor_url : null;
+  let resolvedYelp =
+    typeof row.yelp_url === "string" && row.yelp_url ? row.yelp_url : null;
 
   // Synthesis is core — reserve it first so the profile always gets written.
   const synthCost =
@@ -342,7 +358,9 @@ Deno.serve(async (req) => {
     (!resolvedInstagram ||
       !resolvedFacebook ||
       !resolvedWebsite ||
-      (reservationDeliveryLayer && (!resolvedOpenTable || !resolvedUberEats)));
+      (reservationDeliveryLayer && (!resolvedOpenTable || !resolvedUberEats)) ||
+      (nicheSocialLayer &&
+        (!resolvedYouTube || !resolvedTikTok || !resolvedTripAdvisor || !resolvedYelp)));
   const runDiscovery = needsDiscovery && reserve("discovery", COST.perplexity);
 
   if (runDiscovery) {
@@ -358,12 +376,17 @@ Deno.serve(async (req) => {
       locationLine: [row.address, row.city].filter(Boolean).join(", "),
       category: (row.category as string | null) ?? null,
       resolveReservationDelivery: reservationDeliveryLayer,
+      resolveNicheSocial: nicheSocialLayer,
       have: {
         instagram: resolvedInstagram,
         facebook: resolvedFacebook,
         website: resolvedWebsite,
         opentable: resolvedOpenTable,
         uberEats: resolvedUberEats,
+        youtube: resolvedYouTube,
+        tiktok: resolvedTikTok,
+        tripadvisor: resolvedTripAdvisor,
+        yelp: resolvedYelp,
       },
     });
     if (!resolvedInstagram && found.instagram_url) resolvedInstagram = found.instagram_url;
@@ -372,6 +395,12 @@ Deno.serve(async (req) => {
     if (reservationDeliveryLayer) {
       if (!resolvedOpenTable && found.opentable_url) resolvedOpenTable = found.opentable_url;
       if (!resolvedUberEats && found.uber_eats_url) resolvedUberEats = found.uber_eats_url;
+    }
+    if (nicheSocialLayer) {
+      if (!resolvedYouTube && found.youtube_url) resolvedYouTube = found.youtube_url;
+      if (!resolvedTikTok && found.tiktok_url) resolvedTikTok = found.tiktok_url;
+      if (!resolvedTripAdvisor && found.tripadvisor_url) resolvedTripAdvisor = found.tripadvisor_url;
+      if (!resolvedYelp && found.yelp_url) resolvedYelp = found.yelp_url;
     }
     sources.discovery = {
       ok: true,
@@ -382,6 +411,10 @@ Deno.serve(async (req) => {
       website: !!resolvedWebsite,
       opentable: !!resolvedOpenTable,
       ubereats: !!resolvedUberEats,
+      youtube: !!resolvedYouTube,
+      tiktok: !!resolvedTikTok,
+      tripadvisor: !!resolvedTripAdvisor,
+      yelp: !!resolvedYelp,
     };
   }
 
@@ -403,6 +436,20 @@ Deno.serve(async (req) => {
   }
   if (resolvedUberEats && resolvedUberEats !== row.uber_eats_url) {
     update.uber_eats_url = resolvedUberEats;
+  }
+  // Niche socials are host + shape-validated listing/profile links (no per-venue
+  // identity check the way Instagram needs), so they persist straight away.
+  if (resolvedYouTube && resolvedYouTube !== row.youtube_url) {
+    update.youtube_url = resolvedYouTube;
+  }
+  if (resolvedTikTok && resolvedTikTok !== row.tiktok_url) {
+    update.tiktok_url = resolvedTikTok;
+  }
+  if (resolvedTripAdvisor && resolvedTripAdvisor !== row.tripadvisor_url) {
+    update.tripadvisor_url = resolvedTripAdvisor;
+  }
+  if (resolvedYelp && resolvedYelp !== row.yelp_url) {
+    update.yelp_url = resolvedYelp;
   }
 
   const igHandle = instagramHandleFromUrl(resolvedInstagram);

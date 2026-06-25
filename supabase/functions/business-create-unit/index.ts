@@ -439,6 +439,7 @@ Deno.serve(async (req) => {
     rappi_url: channels.rappi_url,
     didi_food_url: channels.didi_food_url,
     tripadvisor_url: channels.tripadvisor_url,
+    yelp_url: channels.yelp_url,
     google_maps_url: channels.google_maps_url,
     email,
     // Signal columns surfaced on the Place page's Signals tiles. The

@@ -22,6 +22,7 @@ export type ChannelKey =
   | "rappi_url"
   | "didi_food_url"
   | "tripadvisor_url"
+  | "yelp_url"
   | "google_maps_url";
 
 export type Channels = Record<ChannelKey, string | null>;
@@ -53,6 +54,7 @@ export function matchChannel(host: string): ChannelKey | null {
   if (h.startsWith("didifood.")) return "didi_food_url";
   if (h === "sindelantal.com.mx" || h.endsWith(".sindelantal.com.mx")) return "didi_food_url";
   if (h.startsWith("tripadvisor.")) return "tripadvisor_url";
+  if (h === "yelp.com" || h.endsWith(".yelp.com") || h.startsWith("yelp.")) return "yelp_url";
   if (h === "google.com/maps" || h === "maps.google.com" || h.endsWith(".google.com/maps"))
     return "google_maps_url";
   if (h === "maps.app.goo.gl" || h === "goo.gl") return "google_maps_url";
@@ -127,6 +129,7 @@ export function classifyLinks(input: (string | null | undefined)[]): Channels {
     rappi_url: pickShortest(buckets.rappi_url),
     didi_food_url: pickShortest(buckets.didi_food_url),
     tripadvisor_url: pickShortest(buckets.tripadvisor_url),
+    yelp_url: pickShortest(buckets.yelp_url),
     google_maps_url: pickShortest(buckets.google_maps_url),
   };
 }

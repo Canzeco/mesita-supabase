@@ -40,6 +40,18 @@ const DELIVERY_CHANNELS_SCHEMA = {
   },
 } as const;
 
+// ADEA niche-social Link fields (T3): YouTube / TikTok / TripAdvisor / Yelp.
+// Link-only, low-priority, same Firecrawl-Search + Perplexity-Agent chain.
+const NICHE_CHANNELS_SCHEMA = {
+  type: "object",
+  properties: {
+    youtube_url: { type: ["string", "null"] },
+    tiktok_url: { type: ["string", "null"] },
+    tripadvisor_url: { type: ["string", "null"] },
+    yelp_url: { type: ["string", "null"] },
+  },
+} as const;
+
 // ── Discovery + parsing helpers ─────────────────────────────────────────────
 
 type Channels = {
@@ -48,7 +60,16 @@ type Channels = {
   website_url: string | null;
 };
 
-type DiscoveryField = "website" | "instagram" | "facebook" | "opentable" | "ubereats";
+type DiscoveryField =
+  | "website"
+  | "instagram"
+  | "facebook"
+  | "opentable"
+  | "ubereats"
+  | "youtube"
+  | "tiktok"
+  | "tripadvisor"
+  | "yelp";
 type CandidateProvider = "google" | "seed" | "firecrawl" | "perplexity" | "website_footer";
 type CandidateSource = "existing" | "search" | "json_or_citations" | "website_footer";
 type DiscoveryCandidate = {
@@ -78,6 +99,10 @@ const PRIMARY_PATH: Record<DiscoveryField, string> = {
   facebook: "website_footer/firecrawl->perplexity(citations)",
   opentable: "firecrawl->perplexity(citations)",
   ubereats: "firecrawl+perplexity(citations) hybrid",
+  youtube: "website_footer/firecrawl->perplexity(citations)",
+  tiktok: "website_footer/firecrawl->perplexity(citations)",
+  tripadvisor: "firecrawl->perplexity(citations)",
+  yelp: "firecrawl->perplexity(citations)",
 };
 
 const PROVIDER_PRIOR: Record<DiscoveryField, Record<CandidateProvider, number>> = {
@@ -86,6 +111,12 @@ const PROVIDER_PRIOR: Record<DiscoveryField, Record<CandidateProvider, number>> 
   facebook: { google: 1.0, seed: 0.7, firecrawl: 0.75, perplexity: 0.35, website_footer: 1.0 },
   opentable: { google: 0.6, seed: 0.7, firecrawl: 0.9, perplexity: 0.55, website_footer: 0.9 },
   ubereats: { google: 0.55, seed: 0.7, firecrawl: 0.28, perplexity: 0.42, website_footer: 0.5 },
+  // Niche socials: handle-based (youtube/tiktok) lean on footer harvest like
+  // instagram; listing-based (tripadvisor/yelp) lean on Firecrawl like opentable.
+  youtube: { google: 0.9, seed: 0.7, firecrawl: 0.8, perplexity: 0.35, website_footer: 1.1 },
+  tiktok: { google: 0.9, seed: 0.7, firecrawl: 0.8, perplexity: 0.35, website_footer: 1.1 },
+  tripadvisor: { google: 0.8, seed: 0.7, firecrawl: 0.9, perplexity: 0.5, website_footer: 0.8 },
+  yelp: { google: 0.8, seed: 0.7, firecrawl: 0.9, perplexity: 0.5, website_footer: 0.8 },
 };
 
 const FIELD_THRESHOLD: Record<DiscoveryField, number> = {
@@ -97,6 +128,12 @@ const FIELD_THRESHOLD: Record<DiscoveryField, number> = {
   facebook: 0.58,
   opentable: 0.58,
   ubereats: 0.52,
+  // Niche socials are link-only with no downstream identity check, so keep the
+  // bar moderate-to-strict — a wrong niche link is worse than a missing one.
+  youtube: 0.5,
+  tiktok: 0.5,
+  tripadvisor: 0.55,
+  yelp: 0.55,
 };
 
 // Provider order per Atlas catalog — Firecrawl + website footer first;
@@ -107,6 +144,10 @@ const PRIMARY_PROVIDERS: Record<DiscoveryField, CandidateProvider[]> = {
   facebook: ["website_footer", "firecrawl", "google"],
   opentable: ["seed", "website_footer", "firecrawl"],
   ubereats: ["seed", "website_footer", "firecrawl"],
+  youtube: ["website_footer", "firecrawl", "google"],
+  tiktok: ["website_footer", "firecrawl", "google"],
+  tripadvisor: ["seed", "website_footer", "firecrawl"],
+  yelp: ["seed", "website_footer", "firecrawl"],
 };
 
 const GENERIC_PATH_SEGMENTS = new Set([
@@ -138,6 +179,61 @@ function buildDiscoveryContext(name: string, city: string | null, locationLine: 
   return { nameTokens, cityTokens };
 }
 
+function urlPathSegments(url: string): string[] {
+  try {
+    return new URL(url).pathname.toLowerCase().split("/").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// A YouTube CHANNEL/profile URL (not a video, playlist, short, or search).
+// Accepts /@handle, /channel/UC…, /c/Name, /user/Name, and legacy vanity /Name.
+function isYouTubeChannel(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+  if (host === "youtu.be") return false; // short video links, never a channel
+  const segs = urlPathSegments(url);
+  if (!segs.length) return false;
+  const first = segs[0];
+  const reserved = new Set([
+    "watch", "playlist", "shorts", "results", "feed", "hashtag", "embed",
+    "clip", "live", "gaming", "premium", "about", "playlists",
+  ]);
+  if (reserved.has(first)) return false;
+  if (first.startsWith("@")) return true;
+  if (first === "channel" || first === "c" || first === "user") return segs.length >= 2;
+  return segs.length === 1; // legacy vanity handle, e.g. youtube.com/Pujol
+}
+
+// A TikTok profile URL is exactly /@handle (reject /video/, /tag/, /discover…).
+function isTikTokProfile(url: string): boolean {
+  const segs = urlPathSegments(url);
+  return segs.length === 1 && segs[0].startsWith("@") && segs[0].length > 1;
+}
+
+// A TripAdvisor DETAIL listing (reject city/category/list pages). Detail pages
+// carry a -d<id> location id and/or a *_Review path segment.
+function isTripAdvisorListing(url: string): boolean {
+  let path: string;
+  try {
+    path = new URL(url).pathname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return /[-/]d\d{3,}/.test(path) || path.includes("review");
+}
+
+// A Yelp business listing is /biz/<slug> (reject /search, /c/<cat>, city pages).
+function isYelpListing(url: string): boolean {
+  const segs = urlPathSegments(url);
+  return segs[0] === "biz" && segs.length >= 2;
+}
+
 function normaliseCandidateForField(field: DiscoveryField, rawUrl: string): string | null {
   const canon = canonicaliseUrl(rawUrl);
   if (!canon) return null;
@@ -154,14 +250,31 @@ function normaliseCandidateForField(field: DiscoveryField, rawUrl: string): stri
     }
     return hit;
   }
-  const hit = pickChannel([canon], "uber_eats_url");
-  if (!hit) return null;
-  try {
-    if (!new URL(hit).pathname.toLowerCase().includes("/store/")) return null;
-  } catch {
-    return null;
+  if (field === "ubereats") {
+    const hit = pickChannel([canon], "uber_eats_url");
+    if (!hit) return null;
+    try {
+      if (!new URL(hit).pathname.toLowerCase().includes("/store/")) return null;
+    } catch {
+      return null;
+    }
+    return hit;
   }
-  return hit;
+  if (field === "youtube") {
+    const hit = pickChannel([canon], "youtube_url");
+    return hit && isYouTubeChannel(hit) ? hit : null;
+  }
+  if (field === "tiktok") {
+    const hit = pickChannel([canon], "tiktok_url");
+    return hit && isTikTokProfile(hit) ? hit : null;
+  }
+  if (field === "tripadvisor") {
+    const hit = pickChannel([canon], "tripadvisor_url");
+    return hit && isTripAdvisorListing(hit) ? hit : null;
+  }
+  // yelp
+  const hit = pickChannel([canon], "yelp_url");
+  return hit && isYelpListing(hit) ? hit : null;
 }
 
 function addDiscoveryCandidates(
@@ -210,7 +323,7 @@ function scoreCandidate(field: DiscoveryField, c: DiscoveryCandidate, ctx: Disco
     if (GENERIC_PATH_SEGMENTS.has(seg)) score -= 0.35;
   }
   if (
-    (field === "instagram" || field === "facebook" || field === "opentable" || field === "ubereats") &&
+    field !== "website" &&
     c.provider === "perplexity" &&
     !ctx.nameTokens.some((t) => hay.includes(t))
   ) {
@@ -245,11 +358,19 @@ export function passesNameGate(
   }
   const hay = foldText((u.hostname ?? "") + (u.pathname ?? ""));
   const nameHits = countNameTokensInHay(hay, ctx);
-  if (field === "instagram" || field === "facebook") {
+  if (
+    field === "instagram" || field === "facebook" ||
+    field === "youtube" || field === "tiktok"
+  ) {
+    // Handle-based: the brand handle carries the name. Perplexity stricter.
     if (c.provider === "perplexity") return nameHits >= 1;
     return nameHits >= 1 || ctx.nameTokens.length === 0;
   }
-  if (field === "opentable" || field === "ubereats") {
+  if (
+    field === "opentable" || field === "ubereats" ||
+    field === "tripadvisor" || field === "yelp"
+  ) {
+    // Listing slugs (and search-sourced links) must carry the venue name.
     return nameHits >= 1;
   }
   return true;
@@ -334,10 +455,15 @@ async function verifyPageMatchesVenue(
 
 function isFallbackProvider(field: DiscoveryField, provider: CandidateProvider): boolean {
   if (field === "website") return !["google", "firecrawl"].includes(provider);
-  if (field === "instagram" || field === "facebook") {
+  if (
+    field === "instagram" || field === "facebook" ||
+    field === "youtube" || field === "tiktok"
+  ) {
     return !["google", "firecrawl", "website_footer"].includes(provider);
   }
-  if (field === "opentable") return !["seed", "firecrawl", "website_footer"].includes(provider);
+  if (field === "opentable" || field === "tripadvisor" || field === "yelp") {
+    return !["seed", "google", "firecrawl", "website_footer"].includes(provider);
+  }
   return !["seed", "firecrawl", "perplexity", "website_footer"].includes(provider);
 }
 
@@ -367,6 +493,23 @@ function sameLink(a: string | null | undefined, b: string | null | undefined): b
   return !!ca && !!cb && ca === cb;
 }
 
+// Seed-style provenance for a niche-social field (present = came from the venue
+// row, source "existing"; absent = an empty slot to be filled by discovery).
+function nicheProvenance(seeded: string | null, primaryPath: string): FieldProvenance {
+  return {
+    url: seeded,
+    provider: seeded ? "seed" : null,
+    source: seeded ? "existing" : null,
+    score: seeded ? 0.8 : 0,
+    candidate_count: 0,
+    fallback_used: false,
+    eyebrow: false,
+    firecrawl_candidate: null,
+    perplexity_candidate: null,
+    primary_path: primaryPath,
+  };
+}
+
 // Resolve a venue's official channel URLs. Order (matches the Atlas catalog):
 //   1. whatever Google already gave us (passed in via `have`)
 //   2. Firecrawl Search on "<name> <city> <network>" — the strongest signal for
@@ -384,17 +527,27 @@ export async function resolveChannels(opts: {
   // Tier-3 OpenTable + UberEats resolution is opt-in: the caller only flips
   // this on when the venue's source-tier ceiling reaches 3.
   resolveReservationDelivery?: boolean;
+  // Tier-3 niche socials (YouTube / TikTok / TripAdvisor / Yelp), same gate.
+  resolveNicheSocial?: boolean;
   have: {
     instagram: string | null;
     facebook: string | null;
     website: string | null;
     opentable: string | null;
     uberEats: string | null;
+    youtube?: string | null;
+    tiktok?: string | null;
+    tripadvisor?: string | null;
+    yelp?: string | null;
   };
 }): Promise<
   Channels & {
     opentable_url: string | null;
     uber_eats_url: string | null;
+    youtube_url: string | null;
+    tiktok_url: string | null;
+    tripadvisor_url: string | null;
+    yelp_url: string | null;
     via: Record<string, string>;
     provenance: Record<DiscoveryField, FieldProvenance>;
   }
@@ -404,13 +557,22 @@ export async function resolveChannels(opts: {
   let website = opts.have.website;
   let opentable = opts.have.opentable;
   let uberEats = opts.have.uberEats;
+  let youtube = opts.have.youtube ?? null;
+  let tiktok = opts.have.tiktok ?? null;
+  let tripadvisor = opts.have.tripadvisor ?? null;
+  let yelp = opts.have.yelp ?? null;
   const wantDelivery = opts.resolveReservationDelivery === true;
+  const wantNiche = opts.resolveNicheSocial === true;
   const via: Record<string, string> = {};
   if (instagram) via.instagram = "google";
   if (facebook) via.facebook = "google";
   if (website) via.website = "google";
   if (opentable) via.opentable = "seed";
   if (uberEats) via.ubereats = "seed";
+  if (youtube) via.youtube = "seed";
+  if (tiktok) via.tiktok = "seed";
+  if (tripadvisor) via.tripadvisor = "seed";
+  if (yelp) via.yelp = "seed";
   const ctx = buildDiscoveryContext(opts.name, opts.city, opts.locationLine);
   const pool: Record<DiscoveryField, DiscoveryCandidate[]> = {
     website: [],
@@ -418,6 +580,10 @@ export async function resolveChannels(opts: {
     facebook: [],
     opentable: [],
     ubereats: [],
+    youtube: [],
+    tiktok: [],
+    tripadvisor: [],
+    yelp: [],
   };
   const provenance: Record<DiscoveryField, FieldProvenance> = {
     website: {
@@ -480,6 +646,10 @@ export async function resolveChannels(opts: {
       perplexity_candidate: null,
       primary_path: PRIMARY_PATH.ubereats,
     },
+    youtube: nicheProvenance(youtube, PRIMARY_PATH.youtube),
+    tiktok: nicheProvenance(tiktok, PRIMARY_PATH.tiktok),
+    tripadvisor: nicheProvenance(tripadvisor, PRIMARY_PATH.tripadvisor),
+    yelp: nicheProvenance(yelp, PRIMARY_PATH.yelp),
   };
   const applySelection = (field: DiscoveryField, sel: DiscoverySelection | null): void => {
     provenance[field].candidate_count = pool[field].length;
@@ -489,6 +659,10 @@ export async function resolveChannels(opts: {
     if (field === "facebook" && !facebook) facebook = sel.url;
     if (field === "opentable" && !opentable) opentable = sel.url;
     if (field === "ubereats" && !uberEats) uberEats = sel.url;
+    if (field === "youtube" && !youtube) youtube = sel.url;
+    if (field === "tiktok" && !tiktok) tiktok = sel.url;
+    if (field === "tripadvisor" && !tripadvisor) tripadvisor = sel.url;
+    if (field === "yelp" && !yelp) yelp = sel.url;
     const viaKey = field === "ubereats" ? "ubereats" : field;
     via[viaKey] = sel.provider;
     provenance[field] = {
@@ -539,20 +713,37 @@ export async function resolveChannels(opts: {
       `${scope} ubereats`,
       `${opts.name} uber eats`,
     ];
+    const ytQueries = [`${scope} youtube`, `${opts.name} youtube channel`];
+    const ttQueries = [`${scope} tiktok`, `${opts.name} tiktok`];
+    const taQueries = [`${scope} tripadvisor`, `${opts.name} tripadvisor`];
+    const ypQueries = [`${scope} yelp`, `${opts.name} yelp`];
     const needOpenTable = wantDelivery && !opentable;
     const needUberEats = wantDelivery && !uberEats;
-    const [igHits, fbHits, webHits, otHits, ueHits] = await Promise.all([
-      instagram ? Promise.resolve<string[]>([]) : searchMany(igQueries),
-      facebook ? Promise.resolve<string[]>([]) : searchMany(fbQueries),
-      website ? Promise.resolve<string[]>([]) : searchMany(webQueries),
-      needOpenTable ? searchMany(otQueries) : Promise.resolve<string[]>([]),
-      needUberEats ? searchMany(ueQueries) : Promise.resolve<string[]>([]),
-    ]);
+    const needYouTube = wantNiche && !youtube;
+    const needTikTok = wantNiche && !tiktok;
+    const needTripAdvisor = wantNiche && !tripadvisor;
+    const needYelp = wantNiche && !yelp;
+    const [igHits, fbHits, webHits, otHits, ueHits, ytHits, ttHits, taHits, ypHits] =
+      await Promise.all([
+        instagram ? Promise.resolve<string[]>([]) : searchMany(igQueries),
+        facebook ? Promise.resolve<string[]>([]) : searchMany(fbQueries),
+        website ? Promise.resolve<string[]>([]) : searchMany(webQueries),
+        needOpenTable ? searchMany(otQueries) : Promise.resolve<string[]>([]),
+        needUberEats ? searchMany(ueQueries) : Promise.resolve<string[]>([]),
+        needYouTube ? searchMany(ytQueries) : Promise.resolve<string[]>([]),
+        needTikTok ? searchMany(ttQueries) : Promise.resolve<string[]>([]),
+        needTripAdvisor ? searchMany(taQueries) : Promise.resolve<string[]>([]),
+        needYelp ? searchMany(ypQueries) : Promise.resolve<string[]>([]),
+      ]);
     addDiscoveryCandidates(pool, "instagram", igHits, "firecrawl", "search");
     addDiscoveryCandidates(pool, "facebook", fbHits, "firecrawl", "search");
     addDiscoveryCandidates(pool, "website", webHits, "firecrawl", "search");
     if (needOpenTable) addDiscoveryCandidates(pool, "opentable", otHits, "firecrawl", "search");
     if (needUberEats) addDiscoveryCandidates(pool, "ubereats", ueHits, "firecrawl", "search");
+    if (needYouTube) addDiscoveryCandidates(pool, "youtube", ytHits, "firecrawl", "search");
+    if (needTikTok) addDiscoveryCandidates(pool, "tiktok", ttHits, "firecrawl", "search");
+    if (needTripAdvisor) addDiscoveryCandidates(pool, "tripadvisor", taHits, "firecrawl", "search");
+    if (needYelp) addDiscoveryCandidates(pool, "yelp", ypHits, "firecrawl", "search");
     if (!website) applySelection("website", selectPrimaryCandidate("website", pool.website, ctx));
 
     // Website footer links are strong social/reservation/delivery signals.
@@ -572,6 +763,11 @@ export async function resolveChannels(opts: {
         if (needUberEats && !uberEats) {
           addDiscoveryCandidates(pool, "ubereats", links, "website_footer", "website_footer");
         }
+        // Niche socials are very commonly linked from a venue's own footer.
+        if (needYouTube && !youtube) addDiscoveryCandidates(pool, "youtube", links, "website_footer", "website_footer");
+        if (needTikTok && !tiktok) addDiscoveryCandidates(pool, "tiktok", links, "website_footer", "website_footer");
+        if (needTripAdvisor && !tripadvisor) addDiscoveryCandidates(pool, "tripadvisor", links, "website_footer", "website_footer");
+        if (needYelp && !yelp) addDiscoveryCandidates(pool, "yelp", links, "website_footer", "website_footer");
       }
     }
     if (!instagram) applySelection("instagram", selectPrimaryCandidate("instagram", pool.instagram, ctx));
@@ -582,6 +778,12 @@ export async function resolveChannels(opts: {
     if (needUberEats && !uberEats) {
       applySelection("ubereats", selectPrimaryCandidate("ubereats", pool.ubereats, ctx));
     }
+    if (needYouTube && !youtube) applySelection("youtube", selectPrimaryCandidate("youtube", pool.youtube, ctx));
+    if (needTikTok && !tiktok) applySelection("tiktok", selectPrimaryCandidate("tiktok", pool.tiktok, ctx));
+    if (needTripAdvisor && !tripadvisor) {
+      applySelection("tripadvisor", selectPrimaryCandidate("tripadvisor", pool.tripadvisor, ctx));
+    }
+    if (needYelp && !yelp) applySelection("yelp", selectPrimaryCandidate("yelp", pool.yelp, ctx));
   }
 
   // 3. Perplexity Agent — fallback only (ADEA policy). Never re-run when
@@ -594,11 +796,17 @@ export async function resolveChannels(opts: {
     !!opts.perplexityKey && wantDelivery && !opentable;
   const needPerplexityUberEats =
     !!opts.perplexityKey && wantDelivery;
+  const needPerplexityNiche =
+    !!opts.perplexityKey && wantNiche &&
+    (!youtube || !tiktok || !tripadvisor || !yelp);
 
-  if (needPerplexitySocial || needPerplexityOpenTable || needPerplexityUberEats) {
+  if (
+    needPerplexitySocial || needPerplexityOpenTable ||
+    needPerplexityUberEats || needPerplexityNiche
+  ) {
     const hint = (field: DiscoveryField, current: string | null): string | null =>
       current ?? (pool[field][0]?.url ?? null);
-    const [pp, dd] = await Promise.all([
+    const [pp, dd, nn] = await Promise.all([
       needPerplexitySocial
         ? discoverChannelsPerplexity(
             opts.perplexityKey!,
@@ -624,6 +832,20 @@ export async function resolveChannels(opts: {
             },
           )
         : Promise.resolve(null),
+      needPerplexityNiche
+        ? discoverNichePerplexity(
+            opts.perplexityKey!,
+            opts.name,
+            opts.locationLine,
+            opts.category,
+            {
+              youtube_url: hint("youtube", youtube),
+              tiktok_url: hint("tiktok", tiktok),
+              tripadvisor_url: hint("tripadvisor", tripadvisor),
+              yelp_url: hint("yelp", yelp),
+            },
+          )
+        : Promise.resolve(null),
     ]);
 
     if (pp) {
@@ -644,6 +866,21 @@ export async function resolveChannels(opts: {
       }
       if (dd.uber_eats_url) {
         addDiscoveryCandidates(pool, "ubereats", [dd.uber_eats_url], "perplexity", "json_or_citations");
+      }
+    }
+
+    if (nn) {
+      if (!youtube && nn.youtube_url) {
+        addDiscoveryCandidates(pool, "youtube", [nn.youtube_url], "perplexity", "json_or_citations");
+      }
+      if (!tiktok && nn.tiktok_url) {
+        addDiscoveryCandidates(pool, "tiktok", [nn.tiktok_url], "perplexity", "json_or_citations");
+      }
+      if (!tripadvisor && nn.tripadvisor_url) {
+        addDiscoveryCandidates(pool, "tripadvisor", [nn.tripadvisor_url], "perplexity", "json_or_citations");
+      }
+      if (!yelp && nn.yelp_url) {
+        addDiscoveryCandidates(pool, "yelp", [nn.yelp_url], "perplexity", "json_or_citations");
       }
     }
 
@@ -673,6 +910,18 @@ export async function resolveChannels(opts: {
     }
     if (wantDelivery && !uberEats) {
       applySelection("ubereats", selectHybridUberEats(pool.ubereats, ctx));
+    }
+    if (wantNiche && !youtube) {
+      applySelection("youtube", selectBestCandidate("youtube", pool.youtube, ctx, ["perplexity"]));
+    }
+    if (wantNiche && !tiktok) {
+      applySelection("tiktok", selectBestCandidate("tiktok", pool.tiktok, ctx, ["perplexity"]));
+    }
+    if (wantNiche && !tripadvisor) {
+      applySelection("tripadvisor", selectBestCandidate("tripadvisor", pool.tripadvisor, ctx, ["perplexity"]));
+    }
+    if (wantNiche && !yelp) {
+      applySelection("yelp", selectBestCandidate("yelp", pool.yelp, ctx, ["perplexity"]));
     }
   } else if (wantDelivery && !uberEats) {
     applySelection("ubereats", selectPrimaryCandidate("ubereats", pool.ubereats, ctx));
@@ -725,9 +974,47 @@ export async function resolveChannels(opts: {
         };
       }
     }
+    // TripAdvisor + Yelp are scrapeable listing pages — verify the venue name
+    // appears, same as OpenTable. (YouTube/TikTok are handle pages where scrape
+    // verification is unreliable, so they rely on the URL-shape validators.)
+    if (tripadvisor && via.tripadvisor !== "seed") {
+      const ok = await verifyPageMatchesVenue(opts.firecrawlKey, tripadvisor, ctx, opts.name);
+      if (!ok) {
+        tripadvisor = null;
+        delete via.tripadvisor;
+        provenance.tripadvisor = {
+          ...provenance.tripadvisor,
+          url: null,
+          provider: null,
+          source: null,
+          score: 0,
+          fallback_used: false,
+        };
+      }
+    }
+    if (yelp && via.yelp !== "seed") {
+      const ok = await verifyPageMatchesVenue(opts.firecrawlKey, yelp, ctx, opts.name);
+      if (!ok) {
+        yelp = null;
+        delete via.yelp;
+        provenance.yelp = {
+          ...provenance.yelp,
+          url: null,
+          provider: null,
+          source: null,
+          score: 0,
+          fallback_used: false,
+        };
+      }
+    }
   }
 
-  for (const field of ["website", "instagram", "facebook", "opentable", "ubereats"] as DiscoveryField[]) {
+  for (
+    const field of [
+      "website", "instagram", "facebook", "opentable", "ubereats",
+      "youtube", "tiktok", "tripadvisor", "yelp",
+    ] as DiscoveryField[]
+  ) {
     provenance[field].candidate_count = pool[field].length;
     const firecrawlTop = bestCandidateFromProvider(field, pool[field], "firecrawl", ctx);
     const perplexityTop = bestCandidateFromProvider(field, pool[field], "perplexity", ctx);
@@ -748,6 +1035,10 @@ export async function resolveChannels(opts: {
     website_url: website,
     opentable_url: opentable,
     uber_eats_url: uberEats,
+    youtube_url: youtube,
+    tiktok_url: tiktok,
+    tripadvisor_url: tripadvisor,
+    yelp_url: yelp,
     via,
     provenance,
   };
@@ -884,6 +1175,73 @@ async function discoverDeliveryPerplexity(
     pickChannel(hitUrls, "uber_eats_url");
   if (!opentable_url && !uber_eats_url) return null;
   return { opentable_url, uber_eats_url };
+}
+
+// Perplexity Agent (pro-search) niche-social discovery (YouTube / TikTok /
+// TripAdvisor / Yelp). Same host-locked discipline as the other agent paths:
+// every returned URL is re-validated to the right host AND a profile/listing
+// shape (channel page, @handle, detail listing, /biz/ slug) before it is
+// trusted — the agent's prose/citations are never used raw.
+async function discoverNichePerplexity(
+  key: string,
+  name: string,
+  locationLine: string,
+  category: string | null,
+  hints: {
+    youtube_url?: string | null;
+    tiktok_url?: string | null;
+    tripadvisor_url?: string | null;
+    yelp_url?: string | null;
+  } = {},
+): Promise<
+  {
+    youtube_url: string | null;
+    tiktok_url: string | null;
+    tripadvisor_url: string | null;
+    yelp_url: string | null;
+  } | null
+> {
+  const hintLines = [
+    hints.youtube_url ? `- youtube (candidate): ${hints.youtube_url}` : "",
+    hints.tiktok_url ? `- tiktok (candidate): ${hints.tiktok_url}` : "",
+    hints.tripadvisor_url ? `- tripadvisor (candidate): ${hints.tripadvisor_url}` : "",
+    hints.yelp_url ? `- yelp (candidate): ${hints.yelp_url}` : "",
+  ].filter(Boolean).join("\n");
+  const prompt =
+    `Resolve niche profile/listing links for the venue "${name}"` +
+    (locationLine ? ` in ${locationLine}` : "") +
+    (category ? ` (category: ${category})` : "") + ".\n" +
+    (hintLines
+      ? `An automated search proposed these CANDIDATES — verify each, they may be wrong or a different venue:\n${hintLines}\n\n`
+      : "") +
+    `Return strict JSON with:\n` +
+    `- youtube_url: the venue's YouTube CHANNEL page (youtube.com/@handle, /channel/…, /c/…, or /user/…). Never a video or playlist. null if none.\n` +
+    `- tiktok_url: the venue's TikTok profile (tiktok.com/@handle). Never a single video. null if none.\n` +
+    `- tripadvisor_url: the venue's TripAdvisor detail/listing page (a Restaurant_Review / -d… page, not a city or category list). null if none.\n` +
+    `- yelp_url: the venue's Yelp business page (yelp.com/biz/<slug>). null if none.\n` +
+    `Be conservative (low false positives). These channels are rare for many venues — prefer null over a guess. Never invent a URL.`;
+  const res = await callPerplexityAgent(key, prompt, NICHE_CHANNELS_SCHEMA);
+  if (!res) return null;
+  const { answer, hitUrls } = res;
+  const pickNiche = (
+    raw: unknown,
+    channel: "youtube_url" | "tiktok_url" | "tripadvisor_url" | "yelp_url",
+    shape: (u: string) => boolean,
+  ): string | null => {
+    const fromAnswer = pickChannel([String(raw ?? "")], channel);
+    if (fromAnswer && shape(fromAnswer)) return fromAnswer;
+    for (const u of hitUrls) {
+      const hit = pickChannel([u], channel);
+      if (hit && shape(hit)) return hit;
+    }
+    return null;
+  };
+  const youtube_url = pickNiche(answer.youtube_url, "youtube_url", isYouTubeChannel);
+  const tiktok_url = pickNiche(answer.tiktok_url, "tiktok_url", isTikTokProfile);
+  const tripadvisor_url = pickNiche(answer.tripadvisor_url, "tripadvisor_url", isTripAdvisorListing);
+  const yelp_url = pickNiche(answer.yelp_url, "yelp_url", isYelpListing);
+  if (!youtube_url && !tiktok_url && !tripadvisor_url && !yelp_url) return null;
+  return { youtube_url, tiktok_url, tripadvisor_url, yelp_url };
 }
 
 
