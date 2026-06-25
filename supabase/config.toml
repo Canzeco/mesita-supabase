@@ -365,6 +365,18 @@ verify_jwt = true
 [functions.admin-reset-database]
 verify_jwt = true
 
+# Super-admin allowlist management (public.super_admins). Each re-checks
+# super_admins on the caller. Powers the Admin Configuration
+# "Add/remove admins" card.
+[functions.admin-list-admins]
+verify_jwt = true
+
+[functions.admin-grant-admin]
+verify_jwt = true
+
+[functions.admin-revoke-admin]
+verify_jwt = true
+
 # Atlas configuration — venue research/enrichment knobs on app_settings,
 # owned by admins.
 [functions.admin-get-settings]
