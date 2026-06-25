@@ -171,11 +171,11 @@ verify_jwt = false
 [functions.atlas-get-venue]
 verify_jwt = false
 
-# Profile enricher agent — synthesizes the qualitative venue profile
-# (details{}, summary, menus, popular times, signals) via Perplexity to
-# complete the Google spine. Internal-only; invoked by business-create-unit
-# and admin-enrich-venue with the service-role bearer.
-[functions.atlas-enrich-profile]
+# Place enricher agent — runs the Atlas tier pipeline (Google contents → links →
+# source gather → image funnel → grounded synthesis) to complete the venue
+# profile (details{}, About, menus, popular times, photos). Internal-only;
+# invoked by business-create-unit and admin-enrich-venue with the service-role bearer.
+[functions.atlas-enrich-place]
 verify_jwt = false
 
 # Async media persistence worker — stores source metadata immediately and mirrors

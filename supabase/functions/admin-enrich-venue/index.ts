@@ -2,7 +2,7 @@
 //
 // Super-admin tool to (re)run the qualitative profile enricher on an existing
 // venue. New venues are enriched automatically at create time by
-// business-create-unit → atlas-enrich-profile; this is the manual lever to
+// business-create-unit → atlas-enrich-place; this is the manual lever to
 // re-synthesize a venue's details/summary/menus/popular-times after the fact
 // (e.g. a bad first pass, or new source coverage). Both paths call the same
 // agent, so profiles stay consistent.
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
   const enrichRes = await invokeArtificialCaller(
     envRes.env,
     "admin-enrich-venue",
-    "atlas-enrich-profile",
+    "atlas-enrich-place",
     { venue_id: venueId },
   );
   if (!enrichRes.ok) {

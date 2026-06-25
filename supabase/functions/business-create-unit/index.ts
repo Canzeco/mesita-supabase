@@ -294,7 +294,7 @@ Deno.serve(async (req) => {
   // ── Step 3: OpenAI synthesis (catalog row) ──
   // synthesiseVenue writes the catalog fields (name, vibe, pitch, story).
   // Photo VISION RANKING is intentionally NOT done here: Atlas owns the image
-  // funnel (atlas-enrich-profile gathers Google/website/Instagram, vision-
+  // funnel (atlas-enrich-place gathers Google/website/Instagram, vision-
   // analyzes, then sorts by the experience rubric). Create just SEEDS the raw
   // candidate photos in source-priority order so the venue has a gallery the
   // instant it's created, even if the async enrich is slow or fails.
@@ -449,7 +449,7 @@ Deno.serve(async (req) => {
     google_review_count: details.userRatingCount ?? null,
     // Real reviews straight from Google Place Details (up to 5). Qualitative
   // profile fields (details{}, summary, products, popular_times) are filled
-    // separately by the atlas-enrich-profile agent after insert.
+    // separately by the atlas-enrich-place agent after insert.
     google_reviews: mapGoogleReviews(details.reviews),
     editorial_summary: details.editorialSummary?.text ?? null,
     instagram_followers_count: instagramFollowers,
@@ -538,7 +538,7 @@ Deno.serve(async (req) => {
   // zone/city, established_year, executive_chef) land before we return.
   // Best-effort — the venue already exists; a failed/timed-out enrich just
   // leaves those nullable fields empty (admin-enrich-venue can re-run).
-  // atlas-enrich-profile reads only `venue_id` from the body and re-loads
+  // atlas-enrich-place reads only `venue_id` from the body and re-loads
   // everything else from the freshly-inserted row — don't ship fields it
   // ignores.
   let profileEnrichError: string | null = null;
@@ -546,7 +546,7 @@ Deno.serve(async (req) => {
     const enrichRes = await invokeArtificialCaller(
       env,
       "business-create-unit",
-      "atlas-enrich-profile",
+      "atlas-enrich-place",
       { venue_id: venue.id },
     );
     if (!enrichRes.ok) profileEnrichError = enrichRes.error;
@@ -566,7 +566,7 @@ Deno.serve(async (req) => {
         // vision-ranks asynchronously, so this is the pre-enrich seed count.
         photoCount: photoUrls.length,
         photoCandidates: candidateUrls.length,
-        // Photo vision ranking is owned by Atlas (atlas-enrich-profile) now.
+        // Photo vision ranking is owned by Atlas (atlas-enrich-place) now.
         photoRanked: false,
         firecrawl: !!firecrawl?.markdown,
         perplexity: !!perplexity?.brief,

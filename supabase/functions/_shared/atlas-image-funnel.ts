@@ -1,6 +1,8 @@
-// Atlas venue image funnel: HTML extraction, page picking, vision + text sort.
+// Atlas venue image funnel: HTML extraction, page picking, vision + text sort,
+// and the gather→analyze→sort→save orchestration (runImageFunnel).
 
-import { safeParseJson } from "./parse-utils.ts";
+import { dedup, safeParseJson } from "./parse-utils.ts";
+import type { Img } from "./atlas-config.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const VISION_MODEL = "gpt-4o-mini";
@@ -263,4 +265,128 @@ export async function textSortImages(
   } catch {
     return null;
   }
+}
+
+export type ImageFunnelResult = {
+  // The gathered, de-duped, source-tagged pool (drives media-asset persistence).
+  saved: Img[];
+  // The ordered top-N URLs to persist as venue.photos.
+  finalPhotos: string[];
+  // url → vision description (for the analyzed subset).
+  imageAnalysisByUrl: Map<string, string>;
+  diag: Record<string, unknown>;
+};
+
+// Image funnel: build the gathered pool (each source contributes its gather-
+// capped, metadata-sorted bucket), then ANALYZE (vision describes the per-source
+// analyze-capped top of each bucket) → SORT (text model ranks the descriptions
+// by the experience rubric) → SAVE the best N overall (source-independent).
+// business-create-unit may have seeded Places photos into existingPhotos — fold
+// those into the Google bucket so they're never lost, capped at the Google cap.
+export async function runImageFunnel(opts: {
+  googleImages: string[];
+  websiteImages: string[];
+  instagramImages: string[];
+  existingPhotos: string[];
+  gatherGoogleImages: number;
+  saveTotalImages: number;
+  photoCeiling: number;
+  runVision: boolean;
+  openaiKey: string | undefined;
+  analyze: { google: number; website: number; instagram: number };
+  imageAnalysisPrompt: string;
+  imageSortingPrompt: string;
+}): Promise<ImageFunnelResult> {
+  const {
+    googleImages,
+    websiteImages,
+    instagramImages,
+    existingPhotos,
+    gatherGoogleImages,
+    saveTotalImages,
+    photoCeiling,
+    runVision,
+    openaiKey,
+    analyze,
+    imageAnalysisPrompt,
+    imageSortingPrompt,
+  } = opts;
+
+  const googleBucket = dedup([...googleImages, ...existingPhotos]).slice(0, gatherGoogleImages);
+  const saved: Img[] = [];
+  const imageAnalysisByUrl = new Map<string, string>();
+  const savedSeen = new Set<string>();
+  const pushImg = (url: string, source: Img["source"]) => {
+    if (!url || savedSeen.has(url) || saved.length >= photoCeiling) return;
+    savedSeen.add(url);
+    saved.push({ url, source });
+  };
+  for (const u of googleBucket) pushImg(u, "google");
+  for (const u of websiteImages) pushImg(u, "website");
+  for (const u of instagramImages) pushImg(u, "instagram");
+
+  let finalPhotos = saved.map((s) => s.url).slice(0, saveTotalImages);
+  let diag: Record<string, unknown> = {
+    gathered: saved.length,
+    by_source: {
+      google: saved.filter((s) => s.source === "google").length,
+      website: saved.filter((s) => s.source === "website").length,
+      instagram: saved.filter((s) => s.source === "instagram").length,
+    },
+    save_cap: saveTotalImages,
+    vision: false,
+  };
+
+  if (runVision && openaiKey && saved.length > 1) {
+    const caps: Record<Img["source"], number> = {
+      google: analyze.google,
+      website: analyze.website,
+      instagram: analyze.instagram,
+    };
+    const used: Record<Img["source"], number> = { google: 0, website: 0, instagram: 0 };
+    const toAnalyze: Img[] = [];
+    for (const img of saved) {
+      if (used[img.source] < caps[img.source]) {
+        toAnalyze.push(img);
+        used[img.source] += 1;
+      }
+    }
+    if (toAnalyze.length > 0) {
+      const descriptions = await visionDescribe(
+        openaiKey,
+        toAnalyze.map((i) => i.url),
+        imageAnalysisPrompt,
+      );
+      let order: number[] | null = null;
+      if (descriptions) {
+        for (let i = 0; i < descriptions.length; i += 1) {
+          const desc = descriptions[i];
+          if (desc && toAnalyze[i]?.url) imageAnalysisByUrl.set(toAnalyze[i].url, desc);
+        }
+        order = await textSortImages(openaiKey, descriptions, imageSortingPrompt);
+      }
+      if (order && order.length > 0) {
+        const ranked = order
+          .filter((i) => i >= 0 && i < toAnalyze.length)
+          .map((i) => toAnalyze[i].url);
+        const analyzedSet = new Set(toAnalyze.map((i) => i.url));
+        const rest = saved.map((s) => s.url).filter((u) => !analyzedSet.has(u));
+        // Rubric-ranked images lead; un-analyzed gathered images follow in
+        // metadata order. Then keep only the top N overall (source-independent).
+        finalPhotos = dedup([...ranked, ...rest]).slice(0, saveTotalImages);
+        diag = {
+          ...diag,
+          vision: true,
+          analyzed: toAnalyze.length,
+          described: !!descriptions,
+          sorted: true,
+          saved: finalPhotos.length,
+        };
+      } else {
+        diag = { ...diag, vision: true, analyzed: toAnalyze.length, sorted: false };
+      }
+    }
+  }
+
+  return { saved, finalPhotos, imageAnalysisByUrl, diag };
 }
