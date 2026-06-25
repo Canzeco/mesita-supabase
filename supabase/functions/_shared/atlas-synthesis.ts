@@ -105,14 +105,23 @@ export async function synthesizeProfile(input: {
   igBio: string;
   googleReviewsText: string;
   siteMarkdown: string;
+  // Agent X (SERP) web-grounded editorial color — SOFT context only, never
+  // authoritative. Labelled as such in the grounding block so synthesis treats
+  // it as background, not as a source of facts/ratings/prices.
+  serpSummary?: string | null;
 }): Promise<{ parsed: ProfileResult | null; diag: Record<string, unknown> }> {
-  const { openaiKey, model, name, locationLine, category, igBio, googleReviewsText, siteMarkdown } =
-    input;
+  const {
+    openaiKey, model, name, locationLine, category, igBio, googleReviewsText,
+    siteMarkdown, serpSummary,
+  } = input;
 
   const grounding = [
     igBio ? `Instagram bio: ${igBio}` : "",
     googleReviewsText ? `Google reviews (sample):\n${googleReviewsText}` : "",
     siteMarkdown ? `Website content (excerpt):\n${siteMarkdown}` : "",
+    serpSummary
+      ? `Web editorial color (SOFT context — background only, NOT authoritative; do not treat as a source of facts, ratings, or prices):\n${serpSummary}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");

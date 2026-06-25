@@ -1,4 +1,6 @@
-// Atlas channel URL discovery: Firecrawl search + Perplexity (both run), IG verify.
+// Atlas channel URL discovery (Agent Y). Firecrawl Search + Perplexity Agent
+// run in PARALLEL for every missing channel, then the resolved set is put
+// through a false-positive rejection pass and a false-negative recovery pass.
 
 import {
   canonicaliseUrl,
@@ -13,10 +15,16 @@ import {
 import { firecrawlScrape, firecrawlSearch } from "./firecrawl.ts";
 import { dedup, numOf, safeParseJson } from "./parse-utils.ts";
 
-// Link-discovery = "Firecrawl Search and Perplexity Agent" (ADEA), both run in
-// parallel: Firecrawl Search surfaces candidate URLs and the Perplexity Agent
-// (pro-search) independently validates against the venue's own website + fills
-// gaps. Perplexity is NOT a fallback.
+// Link-discovery = Agent Y, "Firecrawl Search + Perplexity Agent" (ADEA). For
+// every channel NOT already supplied by Mesita input or Google data, both
+// providers run in PARALLEL: Firecrawl Search surfaces candidate URLs and the
+// Perplexity Agent (pro-search) independently validates against the venue's
+// own website + fills gaps. Perplexity is NOT a fallback. The selected set is
+// then run through two passes: a FALSE-POSITIVE rejection (Firecrawl page-scrape
+// verification + a Perplexity handle-page check for instagram/tiktok where
+// scrape verification is unreliable) and a FALSE-NEGATIVE recovery (one more
+// Perplexity re-search for still-null fields, grounded by the Agent X SERP
+// summary + the sibling channels already resolved).
 // 50-venue benchmark (2026-06): 82% recall / 76% precision, beating raw
 // Firecrawl (77/60) and an all-Perplexity-Search pipeline (75/69).
 const PERPLEXITY_AGENT_URL = "https://api.perplexity.ai/v1/agent";
@@ -38,20 +46,28 @@ const DELIVERY_CHANNELS_SCHEMA = {
   properties: {
     opentable_url: { type: ["string", "null"] },
     uber_eats_url: { type: ["string", "null"] },
+    rappi_url: { type: ["string", "null"] },
   },
 } as const;
 
-// ADEA niche-social Link fields (T3): YouTube / TikTok / TripAdvisor / Yelp.
-// Link-only, low-priority, same Firecrawl-Search + Perplexity-Agent chain.
+// ADEA niche-social Link fields (T3): TikTok / TripAdvisor / Yelp. Link-only,
+// low-priority, same Firecrawl-Search + Perplexity-Agent chain.
 const NICHE_CHANNELS_SCHEMA = {
   type: "object",
   properties: {
-    youtube_url: { type: ["string", "null"] },
     tiktok_url: { type: ["string", "null"] },
     tripadvisor_url: { type: ["string", "null"] },
     yelp_url: { type: ["string", "null"] },
   },
 } as const;
+
+// Agent X SERP summary fed into the Perplexity prompts as extra grounding,
+// trimmed so it never dominates the prompt budget.
+function serpGroundingLine(serpContext?: string): string {
+  const s = (serpContext ?? "").trim();
+  if (!s) return "";
+  return `Background on the venue (web-grounded, soft context — do not treat as the source of any URL):\n${s.slice(0, 600)}\n\n`;
+}
 
 // ── Discovery + parsing helpers ─────────────────────────────────────────────
 
@@ -67,7 +83,7 @@ type DiscoveryField =
   | "facebook"
   | "opentable"
   | "ubereats"
-  | "youtube"
+  | "rappi"
   | "tiktok"
   | "tripadvisor"
   | "yelp";
@@ -100,7 +116,8 @@ const PRIMARY_PATH: Record<DiscoveryField, string> = {
   facebook: "website_footer/firecrawl->perplexity(citations)",
   opentable: "firecrawl->perplexity(citations)",
   ubereats: "firecrawl+perplexity(citations) hybrid",
-  youtube: "website_footer/firecrawl->perplexity(citations)",
+  // Rappi mirrors Uber Eats exactly — same hybrid Firecrawl+Perplexity path.
+  rappi: "firecrawl+perplexity(citations) hybrid",
   tiktok: "website_footer/firecrawl->perplexity(citations)",
   tripadvisor: "firecrawl->perplexity(citations)",
   yelp: "firecrawl->perplexity(citations)",
@@ -112,9 +129,10 @@ const PROVIDER_PRIOR: Record<DiscoveryField, Record<CandidateProvider, number>> 
   facebook: { google: 1.0, seed: 0.7, firecrawl: 0.75, perplexity: 0.35, website_footer: 1.0 },
   opentable: { google: 0.6, seed: 0.7, firecrawl: 0.9, perplexity: 0.55, website_footer: 0.9 },
   ubereats: { google: 0.55, seed: 0.7, firecrawl: 0.28, perplexity: 0.42, website_footer: 0.5 },
-  // Niche socials: handle-based (youtube/tiktok) lean on footer harvest like
+  // Rappi mirrors Uber Eats (same delivery hybrid + scoring priors).
+  rappi: { google: 0.55, seed: 0.7, firecrawl: 0.28, perplexity: 0.42, website_footer: 0.5 },
+  // Niche socials: handle-based (tiktok) leans on footer harvest like
   // instagram; listing-based (tripadvisor/yelp) lean on Firecrawl like opentable.
-  youtube: { google: 0.9, seed: 0.7, firecrawl: 0.8, perplexity: 0.35, website_footer: 1.1 },
   tiktok: { google: 0.9, seed: 0.7, firecrawl: 0.8, perplexity: 0.35, website_footer: 1.1 },
   tripadvisor: { google: 0.8, seed: 0.7, firecrawl: 0.9, perplexity: 0.5, website_footer: 0.8 },
   yelp: { google: 0.8, seed: 0.7, firecrawl: 0.9, perplexity: 0.5, website_footer: 0.8 },
@@ -129,9 +147,10 @@ const FIELD_THRESHOLD: Record<DiscoveryField, number> = {
   facebook: 0.58,
   opentable: 0.58,
   ubereats: 0.52,
+  // Rappi mirrors Uber Eats' threshold (delivery, host/shape-validated).
+  rappi: 0.52,
   // Niche socials are link-only with no downstream identity check, so keep the
   // bar moderate-to-strict — a wrong niche link is worse than a missing one.
-  youtube: 0.5,
   tiktok: 0.5,
   tripadvisor: 0.55,
   yelp: 0.55,
@@ -145,7 +164,7 @@ const PRIMARY_PROVIDERS: Record<DiscoveryField, CandidateProvider[]> = {
   facebook: ["website_footer", "firecrawl", "google"],
   opentable: ["seed", "website_footer", "firecrawl"],
   ubereats: ["seed", "website_footer", "firecrawl"],
-  youtube: ["website_footer", "firecrawl", "google"],
+  rappi: ["seed", "website_footer", "firecrawl"],
   tiktok: ["website_footer", "firecrawl", "google"],
   tripadvisor: ["seed", "website_footer", "firecrawl"],
   yelp: ["seed", "website_footer", "firecrawl"],
@@ -188,26 +207,23 @@ function urlPathSegments(url: string): string[] {
   }
 }
 
-// A YouTube CHANNEL/profile URL (not a video, playlist, short, or search).
-// Accepts /@handle, /channel/UC…, /c/Name, /user/Name, and legacy vanity /Name.
-function isYouTubeChannel(url: string): boolean {
+// A Rappi restaurant listing URL. Rappi Mexico restaurant pages look like
+// https://www.rappi.com.mx/restaurantes/<slug> — require the rappi host AND a
+// restaurant path segment (restaurantes / restaurants / restaurant) so a bare
+// rappi homepage or a city/category page is rejected. Mirrors the Uber Eats
+// /store/ path check (host + shape validated, no per-venue identity gate).
+function isRappiListing(url: string): boolean {
   let host: string;
   try {
     host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
   } catch {
     return false;
   }
-  if (host === "youtu.be") return false; // short video links, never a channel
+  if (!(host === "rappi.com" || host.endsWith(".rappi.com") || host.startsWith("rappi.com."))) {
+    return false;
+  }
   const segs = urlPathSegments(url);
-  if (!segs.length) return false;
-  const first = segs[0];
-  // Only the four canonical CHANNEL forms (ADEA spec: @handle, /channel/UC…,
-  // /c/Name, /user/Name). Bare vanity (/Name) is deliberately rejected — YouTube
-  // deprecated it, and accepting any single segment would let system paths
-  // (/music, /account, /tv, /upload, /kids, …) through as false channels.
-  if (first.startsWith("@") && first.length > 1) return true;
-  if (first === "channel" || first === "c" || first === "user") return segs.length >= 2;
-  return false;
+  return segs.some((s) => s === "restaurantes" || s === "restaurants" || s === "restaurant");
 }
 
 // A TikTok profile URL is exactly /@handle (reject /video/, /tag/, /discover…).
@@ -262,9 +278,10 @@ function normaliseCandidateForField(field: DiscoveryField, rawUrl: string): stri
     }
     return hit;
   }
-  if (field === "youtube") {
-    const hit = pickChannel([canon], "youtube_url");
-    return hit && isYouTubeChannel(hit) ? hit : null;
+  if (field === "rappi") {
+    // Mirror Uber Eats: host-match via channels.ts, then a path-shape gate.
+    const hit = pickChannel([canon], "rappi_url");
+    return hit && isRappiListing(hit) ? hit : null;
   }
   if (field === "tiktok") {
     const hit = pickChannel([canon], "tiktok_url");
@@ -320,6 +337,9 @@ function scoreCandidate(field: DiscoveryField, c: DiscoveryCandidate, ctx: Disco
   }
   if (field === "instagram" && path.split("/").filter(Boolean).length > 1) score -= 0.2;
   if (field === "ubereats" && !path.includes("/store/")) score -= 1.5;
+  if (field === "rappi" && !/(^|\/)(restaurantes|restaurants|restaurant)(\/|$)/.test(path)) {
+    score -= 1.5;
+  }
   if (field === "opentable" && !path.startsWith("/r/")) score -= 1.5;
   for (const seg of path.split("/").filter(Boolean)) {
     if (GENERIC_PATH_SEGMENTS.has(seg)) score -= 0.35;
@@ -362,14 +382,14 @@ export function passesNameGate(
   const nameHits = countNameTokensInHay(hay, ctx);
   if (
     field === "instagram" || field === "facebook" ||
-    field === "youtube" || field === "tiktok"
+    field === "tiktok"
   ) {
     // Handle-based: the brand handle carries the name. Perplexity stricter.
     if (c.provider === "perplexity") return nameHits >= 1;
     return nameHits >= 1 || ctx.nameTokens.length === 0;
   }
   if (
-    field === "opentable" || field === "ubereats" ||
+    field === "opentable" || field === "ubereats" || field === "rappi" ||
     field === "tripadvisor" || field === "yelp"
   ) {
     // Listing slugs (and search-sourced links) must carry the venue name.
@@ -410,20 +430,24 @@ function selectPrimaryCandidate(
   return selectBestCandidate(field, candidates, ctx, PRIMARY_PROVIDERS[field]);
 }
 
-function selectHybridUberEats(
+// Uber Eats + Rappi are hybrid delivery fields: Firecrawl and Perplexity each
+// propose a candidate and the winner is the higher-scoring one (small Firecrawl
+// tie-break bias). Same selection for both — parameterised on the field.
+function selectHybridDelivery(
+  field: "ubereats" | "rappi",
   candidates: DiscoveryCandidate[],
   ctx: DiscoveryContext,
 ): DiscoverySelection | null {
   const fc = selectBestCandidate(
-    "ubereats",
+    field,
     candidates,
     ctx,
     ["seed", "website_footer", "firecrawl"],
   );
-  const pp = selectBestCandidate("ubereats", candidates, ctx, ["perplexity"]);
+  const pp = selectBestCandidate(field, candidates, ctx, ["perplexity"]);
   if (fc && pp) {
     if (fc.score >= pp.score - 0.05) return fc;
-    return pp.score >= FIELD_THRESHOLD.ubereats ? pp : fc;
+    return pp.score >= FIELD_THRESHOLD[field] ? pp : fc;
   }
   return fc ?? pp;
 }
@@ -459,13 +483,14 @@ function isFallbackProvider(field: DiscoveryField, provider: CandidateProvider):
   if (field === "website") return !["google", "firecrawl"].includes(provider);
   if (
     field === "instagram" || field === "facebook" ||
-    field === "youtube" || field === "tiktok"
+    field === "tiktok"
   ) {
     return !["google", "firecrawl", "website_footer"].includes(provider);
   }
   if (field === "opentable" || field === "tripadvisor" || field === "yelp") {
     return !["seed", "google", "firecrawl", "website_footer"].includes(provider);
   }
+  // Delivery hybrids (ubereats / rappi): all four producers are first-class.
   return !["seed", "firecrawl", "perplexity", "website_footer"].includes(provider);
 }
 
@@ -512,15 +537,23 @@ function nicheProvenance(seeded: string | null, primaryPath: string): FieldProve
   };
 }
 
-// Resolve a venue's official channel URLs. Order (matches the Atlas catalog):
-//   1. whatever Google already gave us (passed in via `have`)
-//   2. Firecrawl Search on "<name> <city> <network>" — the strongest signal for
-//      socials, since the canonical profile is almost always the top result
-//   3. Perplexity Agent — runs in PARALLEL with Firecrawl (NOT a fallback);
-//      both providers' candidates are scored and the Perplexity pick is recorded
-//      for cross-reference even when Firecrawl wins.
-// Every candidate is normalised to the canonical profile URL + host-validated
-// before we trust it.
+// Resolve a venue's official channel URLs (Agent Y). Phases, in order:
+//   1. SEED — skip every channel already provided by Mesita input / Google data.
+//   2. CANDIDATE GENERATION — for each MISSING field, Firecrawl Search and the
+//      Perplexity Agent BOTH run in PARALLEL (Perplexity is NOT a fallback). The
+//      Agent X SERP summary (`serpContext`) is threaded into the Perplexity
+//      prompts as soft grounding.
+//   3. MERGE — every candidate is normalised to its canonical URL + host/shape
+//      validated, then pooled per field.
+//   4. SELECTION — the existing benchmark-tuned score-based picker chooses the
+//      best candidate per field (thresholds + priors unchanged).
+//   5. FALSE-POSITIVE rejection — each non-seed pick is re-validated to THIS
+//      venue: Firecrawl page-scrape for scrapeable pages, a Perplexity check for
+//      instagram/tiktok handle pages where scraping is unreliable. Failures are
+//      dropped and their provenance cleared.
+//   6. FALSE-NEGATIVE recovery — for fields STILL null, ONE more Perplexity
+//      re-search with enriched context (SERP summary + sibling channels already
+//      resolved) → new candidates, re-select.
 export async function resolveChannels(opts: {
   firecrawlKey?: string;
   perplexityKey?: string;
@@ -528,10 +561,13 @@ export async function resolveChannels(opts: {
   city: string | null;
   locationLine: string;
   category: string | null;
+  // Agent X SERP summary — soft web-grounded context, threaded into the
+  // Perplexity discovery prompts (never the source of a URL).
+  serpContext?: string;
   // Tier-2 Link Discovery resolves every channel URL in one agent pass when
   // the caller's source-tier ceiling reaches 2 (all links unlock together).
   resolveReservationDelivery?: boolean;
-  // Same gate — YouTube / TikTok / TripAdvisor / Yelp ride the same agent call.
+  // Same gate — TikTok / TripAdvisor / Yelp ride the same agent call.
   resolveNicheSocial?: boolean;
   have: {
     instagram: string | null;
@@ -539,7 +575,7 @@ export async function resolveChannels(opts: {
     website: string | null;
     opentable: string | null;
     uberEats: string | null;
-    youtube?: string | null;
+    rappi?: string | null;
     tiktok?: string | null;
     tripadvisor?: string | null;
     yelp?: string | null;
@@ -548,7 +584,7 @@ export async function resolveChannels(opts: {
   Channels & {
     opentable_url: string | null;
     uber_eats_url: string | null;
-    youtube_url: string | null;
+    rappi_url: string | null;
     tiktok_url: string | null;
     tripadvisor_url: string | null;
     yelp_url: string | null;
@@ -556,12 +592,13 @@ export async function resolveChannels(opts: {
     provenance: Record<DiscoveryField, FieldProvenance>;
   }
 > {
+  // ── Phase 1: SEED — anything already supplied is kept as-is, never re-resolved.
   let instagram = opts.have.instagram;
   let facebook = opts.have.facebook;
   let website = opts.have.website;
   let opentable = opts.have.opentable;
   let uberEats = opts.have.uberEats;
-  let youtube = opts.have.youtube ?? null;
+  let rappi = opts.have.rappi ?? null;
   let tiktok = opts.have.tiktok ?? null;
   let tripadvisor = opts.have.tripadvisor ?? null;
   let yelp = opts.have.yelp ?? null;
@@ -573,7 +610,7 @@ export async function resolveChannels(opts: {
   if (website) via.website = "google";
   if (opentable) via.opentable = "seed";
   if (uberEats) via.ubereats = "seed";
-  if (youtube) via.youtube = "seed";
+  if (rappi) via.rappi = "seed";
   if (tiktok) via.tiktok = "seed";
   if (tripadvisor) via.tripadvisor = "seed";
   if (yelp) via.yelp = "seed";
@@ -584,7 +621,7 @@ export async function resolveChannels(opts: {
     facebook: [],
     opentable: [],
     ubereats: [],
-    youtube: [],
+    rappi: [],
     tiktok: [],
     tripadvisor: [],
     yelp: [],
@@ -650,7 +687,19 @@ export async function resolveChannels(opts: {
       perplexity_candidate: null,
       primary_path: PRIMARY_PATH.ubereats,
     },
-    youtube: nicheProvenance(youtube, PRIMARY_PATH.youtube),
+    // Rappi mirrors Uber Eats — same seed-style delivery provenance shape.
+    rappi: {
+      url: rappi,
+      provider: rappi ? "seed" : null,
+      source: rappi ? "existing" : null,
+      score: rappi ? 0.8 : 0,
+      candidate_count: 0,
+      fallback_used: false,
+      eyebrow: false,
+      firecrawl_candidate: null,
+      perplexity_candidate: null,
+      primary_path: PRIMARY_PATH.rappi,
+    },
     tiktok: nicheProvenance(tiktok, PRIMARY_PATH.tiktok),
     tripadvisor: nicheProvenance(tripadvisor, PRIMARY_PATH.tripadvisor),
     yelp: nicheProvenance(yelp, PRIMARY_PATH.yelp),
@@ -663,7 +712,7 @@ export async function resolveChannels(opts: {
     if (field === "facebook" && !facebook) facebook = sel.url;
     if (field === "opentable" && !opentable) opentable = sel.url;
     if (field === "ubereats" && !uberEats) uberEats = sel.url;
-    if (field === "youtube" && !youtube) youtube = sel.url;
+    if (field === "rappi" && !rappi) rappi = sel.url;
     if (field === "tiktok" && !tiktok) tiktok = sel.url;
     if (field === "tripadvisor" && !tripadvisor) tripadvisor = sel.url;
     if (field === "yelp" && !yelp) yelp = sel.url;
@@ -688,8 +737,9 @@ export async function resolveChannels(opts: {
     .filter(Boolean)
     .join(" ");
 
-  // 2. Firecrawl Search — intentionally simple queries:
-  // "<venue name> <city> <channel>" (no heavy address stuffing).
+  // ── Phase 2 (Firecrawl leg) — candidate generation via Firecrawl Search.
+  // Intentionally simple queries: "<venue name> <city> <channel>" (no heavy
+  // address stuffing). Runs in parallel with the Perplexity leg below.
   if (opts.firecrawlKey) {
     const key = opts.firecrawlKey;
     const searchMany = async (queries: string[]) => {
@@ -717,24 +767,24 @@ export async function resolveChannels(opts: {
       `${scope} ubereats`,
       `${opts.name} uber eats`,
     ];
-    const ytQueries = [`${scope} youtube`, `${opts.name} youtube channel`];
+    const rpQueries = [`${scope} rappi`, `${opts.name} rappi restaurante`];
     const ttQueries = [`${scope} tiktok`, `${opts.name} tiktok`];
     const taQueries = [`${scope} tripadvisor`, `${opts.name} tripadvisor`];
     const ypQueries = [`${scope} yelp`, `${opts.name} yelp`];
     const needOpenTable = wantDelivery && !opentable;
     const needUberEats = wantDelivery && !uberEats;
-    const needYouTube = wantNiche && !youtube;
+    const needRappi = wantDelivery && !rappi;
     const needTikTok = wantNiche && !tiktok;
     const needTripAdvisor = wantNiche && !tripadvisor;
     const needYelp = wantNiche && !yelp;
-    const [igHits, fbHits, webHits, otHits, ueHits, ytHits, ttHits, taHits, ypHits] =
+    const [igHits, fbHits, webHits, otHits, ueHits, rpHits, ttHits, taHits, ypHits] =
       await Promise.all([
         instagram ? Promise.resolve<string[]>([]) : searchMany(igQueries),
         facebook ? Promise.resolve<string[]>([]) : searchMany(fbQueries),
         website ? Promise.resolve<string[]>([]) : searchMany(webQueries),
         needOpenTable ? searchMany(otQueries) : Promise.resolve<string[]>([]),
         needUberEats ? searchMany(ueQueries) : Promise.resolve<string[]>([]),
-        needYouTube ? searchMany(ytQueries) : Promise.resolve<string[]>([]),
+        needRappi ? searchMany(rpQueries) : Promise.resolve<string[]>([]),
         needTikTok ? searchMany(ttQueries) : Promise.resolve<string[]>([]),
         needTripAdvisor ? searchMany(taQueries) : Promise.resolve<string[]>([]),
         needYelp ? searchMany(ypQueries) : Promise.resolve<string[]>([]),
@@ -744,7 +794,7 @@ export async function resolveChannels(opts: {
     addDiscoveryCandidates(pool, "website", webHits, "firecrawl", "search");
     if (needOpenTable) addDiscoveryCandidates(pool, "opentable", otHits, "firecrawl", "search");
     if (needUberEats) addDiscoveryCandidates(pool, "ubereats", ueHits, "firecrawl", "search");
-    if (needYouTube) addDiscoveryCandidates(pool, "youtube", ytHits, "firecrawl", "search");
+    if (needRappi) addDiscoveryCandidates(pool, "rappi", rpHits, "firecrawl", "search");
     if (needTikTok) addDiscoveryCandidates(pool, "tiktok", ttHits, "firecrawl", "search");
     if (needTripAdvisor) addDiscoveryCandidates(pool, "tripadvisor", taHits, "firecrawl", "search");
     if (needYelp) addDiscoveryCandidates(pool, "yelp", ypHits, "firecrawl", "search");
@@ -767,8 +817,10 @@ export async function resolveChannels(opts: {
         if (needUberEats && !uberEats) {
           addDiscoveryCandidates(pool, "ubereats", links, "website_footer", "website_footer");
         }
+        if (needRappi && !rappi) {
+          addDiscoveryCandidates(pool, "rappi", links, "website_footer", "website_footer");
+        }
         // Niche socials are very commonly linked from a venue's own footer.
-        if (needYouTube && !youtube) addDiscoveryCandidates(pool, "youtube", links, "website_footer", "website_footer");
         if (needTikTok && !tiktok) addDiscoveryCandidates(pool, "tiktok", links, "website_footer", "website_footer");
         if (needTripAdvisor && !tripadvisor) addDiscoveryCandidates(pool, "tripadvisor", links, "website_footer", "website_footer");
         if (needYelp && !yelp) addDiscoveryCandidates(pool, "yelp", links, "website_footer", "website_footer");
@@ -782,7 +834,9 @@ export async function resolveChannels(opts: {
     if (needUberEats && !uberEats) {
       applySelection("ubereats", selectPrimaryCandidate("ubereats", pool.ubereats, ctx));
     }
-    if (needYouTube && !youtube) applySelection("youtube", selectPrimaryCandidate("youtube", pool.youtube, ctx));
+    if (needRappi && !rappi) {
+      applySelection("rappi", selectPrimaryCandidate("rappi", pool.rappi, ctx));
+    }
     if (needTikTok && !tiktok) applySelection("tiktok", selectPrimaryCandidate("tiktok", pool.tiktok, ctx));
     if (needTripAdvisor && !tripadvisor) {
       applySelection("tripadvisor", selectPrimaryCandidate("tripadvisor", pool.tripadvisor, ctx));
@@ -790,22 +844,21 @@ export async function resolveChannels(opts: {
     if (needYelp && !yelp) applySelection("yelp", selectPrimaryCandidate("yelp", pool.yelp, ctx));
   }
 
-  // 3. Perplexity Agent — runs in PARALLEL with Firecrawl, NOT a fallback (ADEA
-  // policy: both providers always run when the key is present and the tier is
+  // ── Phase 2 (Perplexity leg) — candidate generation via the Perplexity Agent,
+  // running in PARALLEL with the Firecrawl leg above (NOT a fallback; ADEA
+  // policy is both providers always run when the key is present and the tier is
   // unlocked). The agent is handed the best Firecrawl candidate per field to
-  // validate + fill; its candidate is recorded for cross-reference even when
-  // Firecrawl wins (the winner is still chosen by score). Uber Eats is hybrid.
+  // validate + fill, plus the Agent X SERP summary as soft grounding; its
+  // candidate is recorded for cross-reference even when Firecrawl wins (the
+  // winner is still chosen by score in Phase 4). Uber Eats + Rappi are hybrid.
   const needPerplexitySocial = !!opts.perplexityKey;
-  const needPerplexityOpenTable =
-    !!opts.perplexityKey && wantDelivery;
-  const needPerplexityUberEats =
+  const needPerplexityDelivery =
     !!opts.perplexityKey && wantDelivery;
   const needPerplexityNiche =
     !!opts.perplexityKey && wantNiche;
 
   if (
-    needPerplexitySocial || needPerplexityOpenTable ||
-    needPerplexityUberEats || needPerplexityNiche
+    needPerplexitySocial || needPerplexityDelivery || needPerplexityNiche
   ) {
     const hint = (field: DiscoveryField, current: string | null): string | null =>
       current ?? (pool[field][0]?.url ?? null);
@@ -821,9 +874,10 @@ export async function resolveChannels(opts: {
               instagram_url: hint("instagram", instagram),
               facebook_url: hint("facebook", facebook),
             },
+            opts.serpContext,
           )
         : Promise.resolve(null),
-      (needPerplexityOpenTable || needPerplexityUberEats)
+      needPerplexityDelivery
         ? discoverDeliveryPerplexity(
             opts.perplexityKey!,
             opts.name,
@@ -832,7 +886,9 @@ export async function resolveChannels(opts: {
             {
               opentable_url: hint("opentable", opentable),
               uber_eats_url: hint("ubereats", uberEats),
+              rappi_url: hint("rappi", rappi),
             },
+            opts.serpContext,
           )
         : Promise.resolve(null),
       needPerplexityNiche
@@ -842,11 +898,11 @@ export async function resolveChannels(opts: {
             opts.locationLine,
             opts.category,
             {
-              youtube_url: hint("youtube", youtube),
               tiktok_url: hint("tiktok", tiktok),
               tripadvisor_url: hint("tripadvisor", tripadvisor),
               yelp_url: hint("yelp", yelp),
             },
+            opts.serpContext,
           )
         : Promise.resolve(null),
     ]);
@@ -870,12 +926,12 @@ export async function resolveChannels(opts: {
       if (dd.uber_eats_url) {
         addDiscoveryCandidates(pool, "ubereats", [dd.uber_eats_url], "perplexity", "json_or_citations");
       }
+      if (dd.rappi_url) {
+        addDiscoveryCandidates(pool, "rappi", [dd.rappi_url], "perplexity", "json_or_citations");
+      }
     }
 
     if (nn) {
-      if (!youtube && nn.youtube_url) {
-        addDiscoveryCandidates(pool, "youtube", [nn.youtube_url], "perplexity", "json_or_citations");
-      }
       if (!tiktok && nn.tiktok_url) {
         addDiscoveryCandidates(pool, "tiktok", [nn.tiktok_url], "perplexity", "json_or_citations");
       }
@@ -887,6 +943,10 @@ export async function resolveChannels(opts: {
       }
     }
 
+    // ── Phase 4: SELECTION — score-based picker per field (thresholds + priors
+    // unchanged). Uber Eats + Rappi go through the hybrid Firecrawl/Perplexity
+    // chooser; the rest pick the best Perplexity candidate now that both legs
+    // have contributed to the pool.
     if (!website) {
       applySelection(
         "website",
@@ -912,10 +972,10 @@ export async function resolveChannels(opts: {
       );
     }
     if (wantDelivery && !uberEats) {
-      applySelection("ubereats", selectHybridUberEats(pool.ubereats, ctx));
+      applySelection("ubereats", selectHybridDelivery("ubereats", pool.ubereats, ctx));
     }
-    if (wantNiche && !youtube) {
-      applySelection("youtube", selectBestCandidate("youtube", pool.youtube, ctx, ["perplexity"]));
+    if (wantDelivery && !rappi) {
+      applySelection("rappi", selectHybridDelivery("rappi", pool.rappi, ctx));
     }
     if (wantNiche && !tiktok) {
       applySelection("tiktok", selectBestCandidate("tiktok", pool.tiktok, ctx, ["perplexity"]));
@@ -930,14 +990,14 @@ export async function resolveChannels(opts: {
     // Cross-reference: record each provider's candidate per field and flag a
     // disagreement (eyebrow) — even when Firecrawl already won the selection.
     // This never changes the winner; it only annotates provenance for the
-    // false-positive / false-negative review passes.
+    // false-positive / false-negative review passes below.
     const ppByField: Partial<Record<DiscoveryField, string | null>> = {
       website: pp?.website_url ?? null,
       instagram: pp?.instagram_url ?? null,
       facebook: pp?.facebook_url ?? null,
       opentable: dd?.opentable_url ?? null,
       ubereats: dd?.uber_eats_url ?? null,
-      youtube: nn?.youtube_url ?? null,
+      rappi: dd?.rappi_url ?? null,
       tiktok: nn?.tiktok_url ?? null,
       tripadvisor: nn?.tripadvisor_url ?? null,
       yelp: nn?.yelp_url ?? null,
@@ -957,24 +1017,35 @@ export async function resolveChannels(opts: {
       provenance[field].eyebrow = !!fc && !!pc && !sameChannelUrl(fc, pc);
     }
   } else if (wantDelivery && !uberEats) {
+    // No Perplexity key: delivery hybrids fall back to the Firecrawl-only pick.
     applySelection("ubereats", selectPrimaryCandidate("ubereats", pool.ubereats, ctx));
+    if (!rappi) applySelection("rappi", selectPrimaryCandidate("rappi", pool.rappi, ctx));
   }
 
-  // 4. Firecrawl page verification for links that persist without Apify gating.
+  // ── Phase 5: FALSE-POSITIVE rejection — validate every non-seed selected link
+  // truly belongs to THIS venue and drop the ones that fail, clearing their
+  // provenance. Two verifiers: Firecrawl page-scrape for scrapeable pages
+  // (facebook / opentable / ubereats / rappi / tripadvisor / yelp) and a
+  // Perplexity check for instagram + tiktok handle pages, where scrape
+  // verification is unreliable. (instagram is ALSO re-verified downstream by the
+  // IG scrape; the Perplexity check here is a cheap extra guard.)
+  const rejectField = (field: DiscoveryField): void => {
+    provenance[field] = {
+      ...provenance[field],
+      url: null,
+      provider: null,
+      source: null,
+      score: 0,
+      fallback_used: false,
+    };
+  };
   if (opts.firecrawlKey) {
     if (facebook && via.facebook !== "google") {
       const ok = await verifyPageMatchesVenue(opts.firecrawlKey, facebook, ctx, opts.name);
       if (!ok) {
         facebook = null;
         delete via.facebook;
-        provenance.facebook = {
-          ...provenance.facebook,
-          url: null,
-          provider: null,
-          source: null,
-          score: 0,
-          fallback_used: false,
-        };
+        rejectField("facebook");
       }
     }
     if (opentable && via.opentable !== "seed") {
@@ -982,14 +1053,7 @@ export async function resolveChannels(opts: {
       if (!ok) {
         opentable = null;
         delete via.opentable;
-        provenance.opentable = {
-          ...provenance.opentable,
-          url: null,
-          provider: null,
-          source: null,
-          score: 0,
-          fallback_used: false,
-        };
+        rejectField("opentable");
       }
     }
     if (uberEats && via.ubereats !== "seed") {
@@ -997,32 +1061,26 @@ export async function resolveChannels(opts: {
       if (!ok) {
         uberEats = null;
         delete via.ubereats;
-        provenance.ubereats = {
-          ...provenance.ubereats,
-          url: null,
-          provider: null,
-          source: null,
-          score: 0,
-          fallback_used: false,
-        };
+        rejectField("ubereats");
+      }
+    }
+    // Rappi mirrors Uber Eats — a scrapeable listing page; verify the venue name.
+    if (rappi && via.rappi !== "seed") {
+      const ok = await verifyPageMatchesVenue(opts.firecrawlKey, rappi, ctx, opts.name);
+      if (!ok) {
+        rappi = null;
+        delete via.rappi;
+        rejectField("rappi");
       }
     }
     // TripAdvisor + Yelp are scrapeable listing pages — verify the venue name
-    // appears, same as OpenTable. (YouTube/TikTok are handle pages where scrape
-    // verification is unreliable, so they rely on the URL-shape validators.)
+    // appears, same as OpenTable.
     if (tripadvisor && via.tripadvisor !== "seed") {
       const ok = await verifyPageMatchesVenue(opts.firecrawlKey, tripadvisor, ctx, opts.name);
       if (!ok) {
         tripadvisor = null;
         delete via.tripadvisor;
-        provenance.tripadvisor = {
-          ...provenance.tripadvisor,
-          url: null,
-          provider: null,
-          source: null,
-          score: 0,
-          fallback_used: false,
-        };
+        rejectField("tripadvisor");
       }
     }
     if (yelp && via.yelp !== "seed") {
@@ -1030,14 +1088,71 @@ export async function resolveChannels(opts: {
       if (!ok) {
         yelp = null;
         delete via.yelp;
-        provenance.yelp = {
-          ...provenance.yelp,
-          url: null,
-          provider: null,
-          source: null,
-          score: 0,
-          fallback_used: false,
-        };
+        rejectField("yelp");
+      }
+    }
+  }
+
+  // Perplexity false-positive check for handle pages (instagram / tiktok), where
+  // a Firecrawl scrape often can't see enough to confirm the account. The agent
+  // gets the venue + sibling channels and answers keep/reject per non-seed pick.
+  if (opts.perplexityKey) {
+    if (instagram && via.instagram !== "google") {
+      const ok = await verifyHandlePerplexity(
+        opts.perplexityKey, opts.name, opts.locationLine, opts.category,
+        instagram, { website, facebook }, opts.serpContext,
+      );
+      if (!ok) {
+        instagram = null;
+        delete via.instagram;
+        rejectField("instagram");
+      }
+    }
+    if (tiktok && via.tiktok !== "seed") {
+      const ok = await verifyHandlePerplexity(
+        opts.perplexityKey, opts.name, opts.locationLine, opts.category,
+        tiktok, { website, instagram }, opts.serpContext,
+      );
+      if (!ok) {
+        tiktok = null;
+        delete via.tiktok;
+        rejectField("tiktok");
+      }
+    }
+  }
+
+  // ── Phase 6: FALSE-NEGATIVE recovery — for fields STILL null after Phase 5, do
+  // ONE more Perplexity re-search with enriched context (the Agent X SERP
+  // summary + the sibling channels already resolved, e.g. "their website is X
+  // and instagram is Y — find their TikTok") and re-select. Only runs when at
+  // least one resolvable field is missing AND we have something to ground on.
+  if (opts.perplexityKey) {
+    const siblings = { website, instagram, facebook };
+    const missingSocial = (!instagram || !facebook || !website);
+    const missingTikTok = wantNiche && !tiktok;
+    if ((missingSocial || missingTikTok) && (website || instagram || facebook)) {
+      const recovered = await recoverChannelsPerplexity(
+        opts.perplexityKey, opts.name, opts.locationLine, opts.category,
+        { wantWebsite: !website, wantInstagram: !instagram, wantFacebook: !facebook, wantTikTok: missingTikTok },
+        siblings, opts.serpContext,
+      );
+      if (recovered) {
+        if (!website && recovered.website_url) {
+          addDiscoveryCandidates(pool, "website", [recovered.website_url], "perplexity", "json_or_citations");
+          applySelection("website", selectBestCandidate("website", pool.website, ctx, ["perplexity"]));
+        }
+        if (!instagram && recovered.instagram_url) {
+          addDiscoveryCandidates(pool, "instagram", [recovered.instagram_url], "perplexity", "json_or_citations");
+          applySelection("instagram", selectBestCandidate("instagram", pool.instagram, ctx, ["perplexity"]));
+        }
+        if (!facebook && recovered.facebook_url) {
+          addDiscoveryCandidates(pool, "facebook", [recovered.facebook_url], "perplexity", "json_or_citations");
+          applySelection("facebook", selectBestCandidate("facebook", pool.facebook, ctx, ["perplexity"]));
+        }
+        if (missingTikTok && recovered.tiktok_url) {
+          addDiscoveryCandidates(pool, "tiktok", [recovered.tiktok_url], "perplexity", "json_or_citations");
+          applySelection("tiktok", selectBestCandidate("tiktok", pool.tiktok, ctx, ["perplexity"]));
+        }
       }
     }
   }
@@ -1045,7 +1160,7 @@ export async function resolveChannels(opts: {
   for (
     const field of [
       "website", "instagram", "facebook", "opentable", "ubereats",
-      "youtube", "tiktok", "tripadvisor", "yelp",
+      "rappi", "tiktok", "tripadvisor", "yelp",
     ] as DiscoveryField[]
   ) {
     provenance[field].candidate_count = pool[field].length;
@@ -1068,7 +1183,7 @@ export async function resolveChannels(opts: {
     website_url: website,
     opentable_url: opentable,
     uber_eats_url: uberEats,
-    youtube_url: youtube,
+    rappi_url: rappi,
     tiktok_url: tiktok,
     tripadvisor_url: tripadvisor,
     yelp_url: yelp,
@@ -1139,6 +1254,7 @@ export async function discoverChannelsPerplexity(
   locationLine: string,
   category: string | null,
   hints: Partial<Channels> = {},
+  serpContext?: string,
 ): Promise<Channels | null> {
   const hintLines = [
     hints.website_url ? `- website (candidate): ${hints.website_url}` : "",
@@ -1149,6 +1265,7 @@ export async function discoverChannelsPerplexity(
     `Resolve official links for the venue "${name}"` +
     (locationLine ? ` in ${locationLine}` : "") +
     (category ? ` (category: ${category})` : "") + ".\n" +
+    serpGroundingLine(serpContext) +
     (hintLines
       ? `An automated search proposed these CANDIDATES — they may be wrong (a different venue, a news article, an aggregator, or a generic page). Verify each; do not trust them blindly:\n${hintLines}\n\n`
       : "") +
@@ -1174,28 +1291,39 @@ export async function discoverChannelsPerplexity(
   return { instagram_url, facebook_url, website_url };
 }
 
-// Perplexity Agent (pro-search) directory discovery (OpenTable + Uber Eats).
+// Perplexity Agent (pro-search) directory discovery (OpenTable + Uber Eats +
+// Rappi). Rappi mirrors Uber Eats exactly — same hybrid delivery field.
 async function discoverDeliveryPerplexity(
   key: string,
   name: string,
   locationLine: string,
   category: string | null,
-  hints: { opentable_url?: string | null; uber_eats_url?: string | null } = {},
-): Promise<{ opentable_url: string | null; uber_eats_url: string | null } | null> {
+  hints: {
+    opentable_url?: string | null;
+    uber_eats_url?: string | null;
+    rappi_url?: string | null;
+  } = {},
+  serpContext?: string,
+): Promise<
+  { opentable_url: string | null; uber_eats_url: string | null; rappi_url: string | null } | null
+> {
   const hintLines = [
     hints.opentable_url ? `- opentable (candidate): ${hints.opentable_url}` : "",
     hints.uber_eats_url ? `- uber eats (candidate): ${hints.uber_eats_url}` : "",
+    hints.rappi_url ? `- rappi (candidate): ${hints.rappi_url}` : "",
   ].filter(Boolean).join("\n");
   const prompt =
     `Resolve reservation and delivery links for "${name}"` +
     (locationLine ? ` in ${locationLine}` : "") +
     (category ? ` (category: ${category})` : "") + ".\n" +
+    serpGroundingLine(serpContext) +
     (hintLines
       ? `An automated search proposed these CANDIDATES — verify each, they may be wrong or a different location:\n${hintLines}\n\n`
       : "") +
     `Return strict JSON with:\n` +
     `- opentable_url: the canonical OpenTable restaurant page (opentable.com or a country domain like opentable.com.mx). The specific location is best; the brand page is acceptable. null if the venue is genuinely not on OpenTable.\n` +
     `- uber_eats_url: the canonical Uber Eats store page (ubereats.com). The specific store is best; brand page acceptable. null if not on Uber Eats.\n` +
+    `- rappi_url: the canonical Rappi restaurant page (rappi.com or a country domain like rappi.com.mx, with a /restaurantes/ path). The specific store is best; brand page acceptable. null if not on Rappi.\n` +
     `Be conservative (low false positives). If unsure, use null. Never invent a URL.`;
   const res = await callPerplexityAgent(key, prompt, DELIVERY_CHANNELS_SCHEMA);
   if (!res) return null;
@@ -1206,36 +1334,44 @@ async function discoverDeliveryPerplexity(
   const uber_eats_url =
     pickChannel([String(answer.uber_eats_url ?? "")], "uber_eats_url") ??
     pickChannel(hitUrls, "uber_eats_url");
-  if (!opentable_url && !uber_eats_url) return null;
-  return { opentable_url, uber_eats_url };
+  const rappiAnswer = pickChannel([String(answer.rappi_url ?? "")], "rappi_url");
+  const rappi_url =
+    (rappiAnswer && isRappiListing(rappiAnswer)) ? rappiAnswer
+      : (() => {
+        for (const u of hitUrls) {
+          const hit = pickChannel([u], "rappi_url");
+          if (hit && isRappiListing(hit)) return hit;
+        }
+        return null;
+      })();
+  if (!opentable_url && !uber_eats_url && !rappi_url) return null;
+  return { opentable_url, uber_eats_url, rappi_url };
 }
 
-// Perplexity Agent (pro-search) niche-social discovery (YouTube / TikTok /
-// TripAdvisor / Yelp). Same host-locked discipline as the other agent paths:
-// every returned URL is re-validated to the right host AND a profile/listing
-// shape (channel page, @handle, detail listing, /biz/ slug) before it is
-// trusted — the agent's prose/citations are never used raw.
+// Perplexity Agent (pro-search) niche-social discovery (TikTok / TripAdvisor /
+// Yelp). Same host-locked discipline as the other agent paths: every returned
+// URL is re-validated to the right host AND a profile/listing shape (@handle,
+// detail listing, /biz/ slug) before it is trusted — the agent's prose/citations
+// are never used raw.
 async function discoverNichePerplexity(
   key: string,
   name: string,
   locationLine: string,
   category: string | null,
   hints: {
-    youtube_url?: string | null;
     tiktok_url?: string | null;
     tripadvisor_url?: string | null;
     yelp_url?: string | null;
   } = {},
+  serpContext?: string,
 ): Promise<
   {
-    youtube_url: string | null;
     tiktok_url: string | null;
     tripadvisor_url: string | null;
     yelp_url: string | null;
   } | null
 > {
   const hintLines = [
-    hints.youtube_url ? `- youtube (candidate): ${hints.youtube_url}` : "",
     hints.tiktok_url ? `- tiktok (candidate): ${hints.tiktok_url}` : "",
     hints.tripadvisor_url ? `- tripadvisor (candidate): ${hints.tripadvisor_url}` : "",
     hints.yelp_url ? `- yelp (candidate): ${hints.yelp_url}` : "",
@@ -1244,11 +1380,11 @@ async function discoverNichePerplexity(
     `Resolve niche profile/listing links for the venue "${name}"` +
     (locationLine ? ` in ${locationLine}` : "") +
     (category ? ` (category: ${category})` : "") + ".\n" +
+    serpGroundingLine(serpContext) +
     (hintLines
       ? `An automated search proposed these CANDIDATES — verify each, they may be wrong or a different venue:\n${hintLines}\n\n`
       : "") +
     `Return strict JSON with:\n` +
-    `- youtube_url: the venue's YouTube CHANNEL page (youtube.com/@handle, /channel/…, /c/…, or /user/…). Never a video or playlist. null if none.\n` +
     `- tiktok_url: the venue's TikTok profile (tiktok.com/@handle). Never a single video. null if none.\n` +
     `- tripadvisor_url: the venue's TripAdvisor detail/listing page (a Restaurant_Review / -d… page, not a city or category list). null if none.\n` +
     `- yelp_url: the venue's Yelp business page (yelp.com/biz/<slug>). null if none.\n` +
@@ -1258,7 +1394,7 @@ async function discoverNichePerplexity(
   const { answer, hitUrls } = res;
   const pickNiche = (
     raw: unknown,
-    channel: "youtube_url" | "tiktok_url" | "tripadvisor_url" | "yelp_url",
+    channel: "tiktok_url" | "tripadvisor_url" | "yelp_url",
     shape: (u: string) => boolean,
   ): string | null => {
     const fromAnswer = pickChannel([String(raw ?? "")], channel);
@@ -1269,12 +1405,173 @@ async function discoverNichePerplexity(
     }
     return null;
   };
-  const youtube_url = pickNiche(answer.youtube_url, "youtube_url", isYouTubeChannel);
   const tiktok_url = pickNiche(answer.tiktok_url, "tiktok_url", isTikTokProfile);
   const tripadvisor_url = pickNiche(answer.tripadvisor_url, "tripadvisor_url", isTripAdvisorListing);
   const yelp_url = pickNiche(answer.yelp_url, "yelp_url", isYelpListing);
-  if (!youtube_url && !tiktok_url && !tripadvisor_url && !yelp_url) return null;
-  return { youtube_url, tiktok_url, tripadvisor_url, yelp_url };
+  if (!tiktok_url && !tripadvisor_url && !yelp_url) return null;
+  return { tiktok_url, tripadvisor_url, yelp_url };
+}
+
+// ── Phase 5 helper: Perplexity false-positive check for a handle page ────────
+// Instagram + TikTok profiles can't be reliably confirmed by a Firecrawl scrape
+// (login walls / JS), so we ask the agent whether `url` is THIS venue's (or its
+// brand's) official handle. Lenient like the IG identity judge — accept a
+// brand/franchise main account; reject only a clearly different business. The
+// answer is the only thing trusted (no URL is read from it). Fails OPEN on any
+// agent error (missing a handle is worse than keeping a plausible one).
+async function verifyHandlePerplexity(
+  key: string,
+  name: string,
+  locationLine: string,
+  category: string | null,
+  url: string,
+  siblings: { website?: string | null; facebook?: string | null; instagram?: string | null },
+  serpContext?: string,
+): Promise<boolean> {
+  const sibLines = [
+    siblings.website ? `- website: ${siblings.website}` : "",
+    siblings.facebook ? `- facebook: ${siblings.facebook}` : "",
+    siblings.instagram ? `- instagram: ${siblings.instagram}` : "",
+  ].filter(Boolean).join("\n");
+  const prompt =
+    `Does this social profile belong to the venue "${name}"` +
+    (locationLine ? ` in ${locationLine}` : "") +
+    (category ? ` (category: ${category})` : "") + `, OR to the brand/chain it is ` +
+    `part of? Profile: ${url}\n` +
+    serpGroundingLine(serpContext) +
+    (sibLines ? `Known official channels of this venue:\n${sibLines}\n\n` : "") +
+    `A franchise / multi-location brand's MAIN account counts as a match even ` +
+    `when it isn't specific to this location. Answer false ONLY when the profile ` +
+    `is clearly a DIFFERENT, unrelated business.\n` +
+    `Return strict JSON: {"match": true} or {"match": false}.`;
+  const res = await callPerplexityAgent(key, prompt, {
+    type: "object",
+    properties: { match: { type: "boolean" } },
+  });
+  if (!res) return true; // fail open
+  return res.answer.match !== false;
+}
+
+// ── Phase 6 helper: Perplexity false-negative recovery ───────────────────────
+// One more targeted pass for the fields STILL null after FP, grounded by the
+// sibling channels we DID resolve + the Agent X SERP summary. Only the requested
+// fields are asked for. Host/shape-validated like every other agent leg.
+async function recoverChannelsPerplexity(
+  key: string,
+  name: string,
+  locationLine: string,
+  category: string | null,
+  want: { wantWebsite: boolean; wantInstagram: boolean; wantFacebook: boolean; wantTikTok: boolean },
+  siblings: { website?: string | null; instagram?: string | null; facebook?: string | null },
+  serpContext?: string,
+): Promise<
+  {
+    website_url: string | null;
+    instagram_url: string | null;
+    facebook_url: string | null;
+    tiktok_url: string | null;
+  } | null
+> {
+  const sibLines = [
+    siblings.website ? `- website: ${siblings.website}` : "",
+    siblings.instagram ? `- instagram: ${siblings.instagram}` : "",
+    siblings.facebook ? `- facebook: ${siblings.facebook}` : "",
+  ].filter(Boolean).join("\n");
+  const askLines = [
+    want.wantWebsite ? `- website_url: the venue's official website. null if none.` : "",
+    want.wantInstagram ? `- instagram_url: the venue's Instagram profile (instagram.com/<handle>). Brand account acceptable. null if none.` : "",
+    want.wantFacebook ? `- facebook_url: the venue's official Facebook page. null if none.` : "",
+    want.wantTikTok ? `- tiktok_url: the venue's TikTok profile (tiktok.com/@handle). null if none.` : "",
+  ].filter(Boolean).join("\n");
+  if (!askLines) return null;
+  const prompt =
+    `Find the MISSING official links for the venue "${name}"` +
+    (locationLine ? ` in ${locationLine}` : "") +
+    (category ? ` (category: ${category})` : "") + ".\n" +
+    serpGroundingLine(serpContext) +
+    (sibLines
+      ? `We already know these official channels — use them to anchor the search (the missing channels almost always share the same brand handle / link from these):\n${sibLines}\n\n`
+      : "") +
+    `Return strict JSON with ONLY these keys (null any you cannot confirm):\n${askLines}\n` +
+    `Never invent a URL. Prefer null over a guess.`;
+  const res = await callPerplexityAgent(key, prompt, {
+    type: "object",
+    properties: {
+      website_url: { type: ["string", "null"] },
+      instagram_url: { type: ["string", "null"] },
+      facebook_url: { type: ["string", "null"] },
+      tiktok_url: { type: ["string", "null"] },
+    },
+  });
+  if (!res) return null;
+  const { answer, hitUrls } = res;
+  const website_url = want.wantWebsite
+    ? (pickWebsite([String(answer.website_url ?? "")]) ?? pickWebsite(hitUrls))
+    : null;
+  const instagram_url = want.wantInstagram
+    ? (pickInstagram([String(answer.instagram_url ?? "")]) ?? pickInstagram(hitUrls))
+    : null;
+  const facebook_url = want.wantFacebook
+    ? (pickFacebook([String(answer.facebook_url ?? "")]) ?? pickFacebook(hitUrls))
+    : null;
+  let tiktok_url: string | null = null;
+  if (want.wantTikTok) {
+    const fromAnswer = pickChannel([String(answer.tiktok_url ?? "")], "tiktok_url");
+    if (fromAnswer && isTikTokProfile(fromAnswer)) {
+      tiktok_url = fromAnswer;
+    } else {
+      for (const u of hitUrls) {
+        const hit = pickChannel([u], "tiktok_url");
+        if (hit && isTikTokProfile(hit)) {
+          tiktok_url = hit;
+          break;
+        }
+      }
+    }
+  }
+  if (!website_url && !instagram_url && !facebook_url && !tiktok_url) return null;
+  return { website_url, instagram_url, facebook_url, tiktok_url };
+}
+
+// Normalise a phone candidate to E.164-ish digits (a leading + plus 7–15 digits)
+// or null. Strips spaces/punctuation; assumes the agent returns the country code.
+function normalisePhone(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const hasPlus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 7 || digits.length > 15) return null;
+  return hasPlus ? `+${digits}` : digits;
+}
+
+// ── Agent Y last-resort PHONE leg ────────────────────────────────────────────
+// Phone is NOT a URL, so it lives outside the channel pool. This is the final
+// fallback used only when the Mesita seed + Google data gave us no phone: a
+// single Perplexity Agent lookup for the venue's official public phone, grounded
+// by its website + the Agent X SERP summary. Returns a normalised number or null
+// (null on anything uncertain — a wrong number is worse than a missing one).
+export async function discoverPhonePerplexity(
+  key: string,
+  name: string,
+  locationLine: string,
+  category: string | null,
+  hints: { website?: string | null; serpContext?: string } = {},
+): Promise<string | null> {
+  const prompt =
+    `Find the official public phone number for the venue "${name}"` +
+    (locationLine ? ` in ${locationLine}` : "") +
+    (category ? ` (category: ${category})` : "") + ".\n" +
+    serpGroundingLine(hints.serpContext) +
+    (hints.website ? `Its official website is ${hints.website} — trust the number it lists.\n\n` : "") +
+    `Return strict JSON {"phone": "<number in international format, e.g. +52...>"} ` +
+    `or {"phone": null} if you cannot confirm it. Never invent a number.`;
+  const res = await callPerplexityAgent(key, prompt, {
+    type: "object",
+    properties: { phone: { type: ["string", "null"] } },
+  });
+  if (!res) return null;
+  return normalisePhone(res.answer.phone);
 }
 
 

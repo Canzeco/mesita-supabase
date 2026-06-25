@@ -90,6 +90,10 @@ export type AtlasConfig = {
   imageSortingPrompt: string;
   // Derived execution-tier gates.
   googleLayer: boolean;
+  // Tier-2 SERP synthesis (Agent X) — fast Perplexity web-grounded editorial
+  // color. SOFT signal that feeds Agent Y context + the final synthesis. Rides
+  // the link-discovery tier (T2): present whenever links are unlocked.
+  serpLayer: boolean;
   linkDiscoveryLayer: boolean;
   sourceGatherLayer: boolean;
   perceptionLayer: boolean;
@@ -135,6 +139,7 @@ export async function loadAtlasConfig(admin: SupabaseClient): Promise<AtlasConfi
     imageSortingPrompt:
       (cfg?.atlas_image_sorting_prompt as string | undefined)?.trim() || DEFAULT_SORTING_PROMPT,
     googleLayer: tierCeiling >= EXEC_GOOGLE_TIER,
+    serpLayer: tierCeiling >= EXEC_LINKS_TIER,
     linkDiscoveryLayer: tierCeiling >= EXEC_LINKS_TIER,
     sourceGatherLayer: tierCeiling >= EXEC_GATHER_TIER,
     perceptionLayer: tierCeiling >= EXEC_PERCEPTION_TIER,
