@@ -1,4 +1,4 @@
-// Atlas channel URL discovery: Firecrawl search, Perplexity fallback, IG verify.
+// Atlas channel URL discovery: Firecrawl search + Perplexity (both run), IG verify.
 
 import {
   canonicaliseUrl,
@@ -13,9 +13,10 @@ import {
 import { firecrawlScrape, firecrawlSearch } from "./firecrawl.ts";
 import { dedup, numOf, safeParseJson } from "./parse-utils.ts";
 
-// Link-discovery fallback = "Firecrawl Search and Perplexity Agent" (ADEA):
-// Firecrawl Search surfaces candidate URLs, then the Perplexity Agent
-// (pro-search) validates them against the venue's own website and fills gaps.
+// Link-discovery = "Firecrawl Search and Perplexity Agent" (ADEA), both run in
+// parallel: Firecrawl Search surfaces candidate URLs and the Perplexity Agent
+// (pro-search) independently validates against the venue's own website + fills
+// gaps. Perplexity is NOT a fallback.
 // 50-venue benchmark (2026-06): 82% recall / 76% precision, beating raw
 // Firecrawl (77/60) and an all-Perplexity-Search pipeline (75/69).
 const PERPLEXITY_AGENT_URL = "https://api.perplexity.ai/v1/agent";
@@ -137,7 +138,7 @@ const FIELD_THRESHOLD: Record<DiscoveryField, number> = {
 };
 
 // Provider order per Atlas catalog — Firecrawl + website footer first;
-// Perplexity is fallback-only except Uber Eats (hybrid).
+// Perplexity runs in parallel (NOT fallback) and is scored alongside them.
 const PRIMARY_PROVIDERS: Record<DiscoveryField, CandidateProvider[]> = {
   website: ["google", "website_footer", "firecrawl"],
   instagram: ["website_footer", "firecrawl", "google"],
@@ -515,9 +516,11 @@ function nicheProvenance(seeded: string | null, primaryPath: string): FieldProve
 //   1. whatever Google already gave us (passed in via `have`)
 //   2. Firecrawl Search on "<name> <city> <network>" — the strongest signal for
 //      socials, since the canonical profile is almost always the top result
-//   3. Perplexity — last-resort fallback for anything still missing
-// Only missing channels are searched, and every candidate is normalised to the
-// canonical profile URL + host-validated before we trust it.
+//   3. Perplexity Agent — runs in PARALLEL with Firecrawl (NOT a fallback);
+//      both providers' candidates are scored and the Perplexity pick is recorded
+//      for cross-reference even when Firecrawl wins.
+// Every candidate is normalised to the canonical profile URL + host-validated
+// before we trust it.
 export async function resolveChannels(opts: {
   firecrawlKey?: string;
   perplexityKey?: string;
@@ -787,19 +790,18 @@ export async function resolveChannels(opts: {
     if (needYelp && !yelp) applySelection("yelp", selectPrimaryCandidate("yelp", pool.yelp, ctx));
   }
 
-  // 3. Perplexity Agent — fallback only (ADEA policy). Never re-run when
-  // Firecrawl/website-footer already resolved a channel. The agent is handed
-  // the best Firecrawl candidate per field to validate + fill. Uber Eats is
-  // hybrid: always run, then pick the best validated candidate.
-  const needPerplexitySocial =
-    !!opts.perplexityKey && (!instagram || !facebook || !website);
+  // 3. Perplexity Agent — runs in PARALLEL with Firecrawl, NOT a fallback (ADEA
+  // policy: both providers always run when the key is present and the tier is
+  // unlocked). The agent is handed the best Firecrawl candidate per field to
+  // validate + fill; its candidate is recorded for cross-reference even when
+  // Firecrawl wins (the winner is still chosen by score). Uber Eats is hybrid.
+  const needPerplexitySocial = !!opts.perplexityKey;
   const needPerplexityOpenTable =
-    !!opts.perplexityKey && wantDelivery && !opentable;
+    !!opts.perplexityKey && wantDelivery;
   const needPerplexityUberEats =
     !!opts.perplexityKey && wantDelivery;
   const needPerplexityNiche =
-    !!opts.perplexityKey && wantNiche &&
-    (!youtube || !tiktok || !tripadvisor || !yelp);
+    !!opts.perplexityKey && wantNiche;
 
   if (
     needPerplexitySocial || needPerplexityOpenTable ||
@@ -923,6 +925,36 @@ export async function resolveChannels(opts: {
     }
     if (wantNiche && !yelp) {
       applySelection("yelp", selectBestCandidate("yelp", pool.yelp, ctx, ["perplexity"]));
+    }
+
+    // Cross-reference: record each provider's candidate per field and flag a
+    // disagreement (eyebrow) — even when Firecrawl already won the selection.
+    // This never changes the winner; it only annotates provenance for the
+    // false-positive / false-negative review passes.
+    const ppByField: Partial<Record<DiscoveryField, string | null>> = {
+      website: pp?.website_url ?? null,
+      instagram: pp?.instagram_url ?? null,
+      facebook: pp?.facebook_url ?? null,
+      opentable: dd?.opentable_url ?? null,
+      ubereats: dd?.uber_eats_url ?? null,
+      youtube: nn?.youtube_url ?? null,
+      tiktok: nn?.tiktok_url ?? null,
+      tripadvisor: nn?.tripadvisor_url ?? null,
+      yelp: nn?.yelp_url ?? null,
+    };
+    const sameChannelUrl = (a: string | null, b: string | null): boolean => {
+      if (!a || !b) return false;
+      const norm = (u: string) =>
+        u.trim().toLowerCase()
+          .replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+      return norm(a) === norm(b);
+    };
+    for (const field of Object.keys(pool) as DiscoveryField[]) {
+      const fc = pool[field].find((c) => c.provider === "firecrawl")?.url ?? null;
+      const pc = ppByField[field] ?? null;
+      provenance[field].firecrawl_candidate = fc;
+      provenance[field].perplexity_candidate = pc;
+      provenance[field].eyebrow = !!fc && !!pc && !sameChannelUrl(fc, pc);
     }
   } else if (wantDelivery && !uberEats) {
     applySelection("ubereats", selectPrimaryCandidate("ubereats", pool.ubereats, ctx));
