@@ -474,6 +474,20 @@ Deno.serve(async (req) => {
     venue = retry.data;
     venueError = retry.error;
   }
+  // yelp_url is the newest venue column (migration 20260625140000). A project
+  // that hasn't applied it yet — or whose PostgREST schema cache hasn't reloaded
+  // — would otherwise fail the WHOLE insert on the unknown column. Strip it and
+  // retry so venue creation degrades gracefully until the migration lands.
+  if (venueError && isMissingYelpUrlColumnError(venueError)) {
+    const { yelp_url: _ignored, ...legacyInsertRow } = insertRow;
+    const retry = await admin
+      .from("venues")
+      .insert(legacyInsertRow)
+      .select("id, slug, name, status")
+      .single();
+    venue = retry.data;
+    venueError = retry.error;
+  }
   if (venueError) {
     // Unique-violation on google_place_id → already onboarded by someone.
     if (venueError.code === "23505" && /google_place_id/.test(venueError.message)) {
@@ -592,6 +606,14 @@ function isMissingCategoryLabelColumnError(err: { message?: string } | null): bo
   if (!err?.message) return false;
   return (
     err.message.includes("category_label") &&
+    (err.message.includes("schema cache") || err.message.includes("column"))
+  );
+}
+
+function isMissingYelpUrlColumnError(err: { message?: string } | null): boolean {
+  if (!err?.message) return false;
+  return (
+    err.message.includes("yelp_url") &&
     (err.message.includes("schema cache") || err.message.includes("column"))
   );
 }

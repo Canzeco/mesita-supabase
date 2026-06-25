@@ -200,14 +200,13 @@ function isYouTubeChannel(url: string): boolean {
   const segs = urlPathSegments(url);
   if (!segs.length) return false;
   const first = segs[0];
-  const reserved = new Set([
-    "watch", "playlist", "shorts", "results", "feed", "hashtag", "embed",
-    "clip", "live", "gaming", "premium", "about", "playlists",
-  ]);
-  if (reserved.has(first)) return false;
-  if (first.startsWith("@")) return true;
+  // Only the four canonical CHANNEL forms (ADEA spec: @handle, /channel/UC…,
+  // /c/Name, /user/Name). Bare vanity (/Name) is deliberately rejected — YouTube
+  // deprecated it, and accepting any single segment would let system paths
+  // (/music, /account, /tv, /upload, /kids, …) through as false channels.
+  if (first.startsWith("@") && first.length > 1) return true;
   if (first === "channel" || first === "c" || first === "user") return segs.length >= 2;
-  return segs.length === 1; // legacy vanity handle, e.g. youtube.com/Pujol
+  return false;
 }
 
 // A TikTok profile URL is exactly /@handle (reject /video/, /tag/, /discover…).
@@ -217,7 +216,9 @@ function isTikTokProfile(url: string): boolean {
 }
 
 // A TripAdvisor DETAIL listing (reject city/category/list pages). Detail pages
-// carry a -d<id> location id and/or a *_Review path segment.
+// carry a -d<id> location id and/or a *_Review path token (Restaurant_Review /
+// Hotel_Review / Attraction_Review). A bare "review" substring is too loose — it
+// would accept ShowUserReviews / -reviews.html aggregator pages — so anchor it.
 function isTripAdvisorListing(url: string): boolean {
   let path: string;
   try {
@@ -225,7 +226,7 @@ function isTripAdvisorListing(url: string): boolean {
   } catch {
     return false;
   }
-  return /[-/]d\d{3,}/.test(path) || path.includes("review");
+  return /[-/]d\d{3,}/.test(path) || /_review[-/]/.test(path);
 }
 
 // A Yelp business listing is /biz/<slug> (reject /search, /c/<cat>, city pages).
