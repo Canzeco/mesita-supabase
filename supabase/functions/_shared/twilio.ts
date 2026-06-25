@@ -1,6 +1,8 @@
 // Twilio helpers for WhatsApp (and future SMS) from Edge Functions.
 // Webhook security: HMAC-SHA1 per Twilio docs (no SDK required).
 
+import { timingSafeEqual } from "./timing-safe-equal.ts";
+
 export type TwilioEnv = {
   accountSid: string;
   authToken: string;
@@ -88,13 +90,6 @@ export async function validateTwilioRequest(
   );
   const expected = btoa(String.fromCharCode(...new Uint8Array(mac)));
   return timingSafeEqual(expected, signature);
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
 }
 
 export function emptyMessagingTwiml(): Response {

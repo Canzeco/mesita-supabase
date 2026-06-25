@@ -15,9 +15,7 @@ import {
   readEFEnv,
   requireMembership,
 } from "../_shared/auth.ts";
-
-const RESERVATION_SELECT =
-  "id, reserved_at, party_size, status, notes, confirmed_at, completed_at, cancelled_at, created_at, consumer:consumers(id, code, full_name, tier_key, tier_origin)";
+import { RESERVATION_SELECT } from "../_shared/reservation-columns.ts";
 
 type Decision = "confirm" | "decline";
 type Body = { venueId?: string; reservationId?: string; decision?: Decision };

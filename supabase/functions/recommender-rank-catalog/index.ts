@@ -36,7 +36,13 @@ import {
   rankByCosine,
   shouldEmbed,
 } from "../_shared/embeddings.ts";
-import { fetchCandidatePool } from "../_shared/recommender-pool.ts";
+import {
+  clampPositive,
+  type ConsumerProfile,
+  fetchCandidatePool,
+  stripInternal,
+  type VenueRow,
+} from "../_shared/recommender-pool.ts";
 
 const CANDIDATE_POOL = 300;
 const DEFAULT_RADIUS_KM = 25;
@@ -48,14 +54,6 @@ const MAX_VENUE_REUSE = 2;
 
 const CATEGORY_MODEL = "gpt-4o-mini";
 
-type ConsumerProfile = {
-  full_name: string | null;
-  country: string | null;
-  birthday: string | null;
-  sex: string | null;
-  tier?: string | null;
-};
-
 type Body = {
   lat?: number | null;
   lng?: number | null;
@@ -63,30 +61,6 @@ type Body = {
   maxCategories?: number;
   perCategory?: number;
   profile?: ConsumerProfile | null;
-};
-
-type VenueRow = {
-  id: string;
-  slug: string;
-  name: string;
-  category: string | null;
-  vibe: string | null;
-  price_level: number | null;
-  listing_type: "partner" | "web";
-  status: string;
-  fiscal_type: string | null;
-  plan: string | null;
-  lat: number | null;
-  lng: number | null;
-  address: string | null;
-  closes_at: string | null;
-  phone: string | null;
-  pitch: string | null;
-  story: string | null;
-  photos: string[] | null;
-  [key: string]: unknown;
-  embedding: unknown | null;
-  embedding_source_hash: string | null;
 };
 
 type ProposedCategory = {
@@ -379,20 +353,8 @@ function pickEmoji(raw: unknown): string {
   return first.done ? "✨" : (first.value as string);
 }
 
-function clampPositive(v: unknown, def: number, max: number): number {
-  const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n) || n <= 0) return def;
-  return Math.min(n, max);
-}
-
 function clampInt(v: unknown, def: number, lo: number, hi: number): number {
   const n = typeof v === "number" ? v : Number(v);
   if (!Number.isFinite(n)) return def;
   return Math.max(lo, Math.min(hi, Math.trunc(n)));
-}
-
-function stripInternal(v: VenueRow): Omit<VenueRow, "embedding" | "embedding_source_hash"> {
-  const { embedding: _e, embedding_source_hash: _h, ...rest } = v;
-  void _e; void _h;
-  return rest;
 }

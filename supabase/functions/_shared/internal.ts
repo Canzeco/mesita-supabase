@@ -23,18 +23,10 @@
 
 import type { EFEnv } from "./auth.ts";
 import { json } from "./http.ts";
-
 // Constant-time bearer comparison so an attacker probing the header can't
 // extract bytes via timing analysis. The keys are short and the EF is
 // rate-limited at the gateway, but the helper costs nothing.
-function bearerMatches(provided: string, expected: string): boolean {
-  if (provided.length !== expected.length) return false;
-  let acc = 0;
-  for (let i = 0; i < provided.length; i += 1) {
-    acc |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
-  }
-  return acc === 0;
-}
+import { timingSafeEqual } from "./timing-safe-equal.ts";
 
 // Verifies that a request was made by another EF with the service-role key.
 // Use this at the top of every artificial-caller EF.
@@ -52,7 +44,7 @@ export function requireInternalCaller(
     };
   }
   const token = authHeader.slice("Bearer ".length).trim();
-  if (!bearerMatches(token, env.serviceKey)) {
+  if (!timingSafeEqual(token, env.serviceKey)) {
     return {
       ok: false,
       response: json({ ok: false, error: "Internal call rejected" }, 403),

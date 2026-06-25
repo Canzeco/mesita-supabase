@@ -1,6 +1,7 @@
 // Staff phone → identity resolution for WhatsApp inbound.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { phoneDigits } from "./phone.ts";
 import type {
   StaffAccess,
   StaffIdentity,
@@ -35,7 +36,7 @@ export async function resolveStaffAccess(
   admin: SupabaseClient,
   phoneE164: string,
 ): Promise<StaffAccess> {
-  const digits = phoneE164.replace(/\D/g, "");
+  const digits = phoneDigits(phoneE164);
   const userIdRes = await admin.rpc("find_user_id_by_phone", {
     phone_digits: digits,
   });

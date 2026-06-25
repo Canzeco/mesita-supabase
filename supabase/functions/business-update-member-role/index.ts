@@ -14,6 +14,7 @@ import {
   requireOwner,
 } from "../_shared/auth.ts";
 import { isMemberRole, type MemberRole } from "../_shared/roles.ts";
+import { isLastOwnerOfVenue } from "../_shared/venue-ownership.ts";
 
 type Body = {
   memberId?: string;
@@ -60,12 +61,7 @@ Deno.serve(async (req) => {
   if (!owner.ok) return owner.response;
 
   if (target.data.role === "owner" && role !== "owner") {
-    const { count } = await admin
-      .from("venue_members")
-      .select("id", { count: "exact", head: true })
-      .eq("venue_id", target.data.venue_id)
-      .eq("role", "owner");
-    if ((count ?? 0) <= 1) {
+    if (await isLastOwnerOfVenue(admin, target.data.venue_id)) {
       return json(
         { ok: false, code: "last_owner", error: "Promote another owner first." },
         409,

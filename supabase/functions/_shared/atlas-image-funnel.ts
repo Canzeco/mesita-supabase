@@ -3,9 +3,7 @@
 
 import { dedup, safeParseJson } from "./parse-utils.ts";
 import type { Img } from "./atlas-config.ts";
-
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const VISION_MODEL = "gpt-4o-mini";
+import { OPENAI_URL, VISION_MODEL } from "./atlas-config.ts";
 
 export type WebImage = {
   url: string;
