@@ -85,11 +85,11 @@ Deno.serve(async (req) => {
     .maybeSingle();
   if (!row) return json({ ok: false, error: "Venue not found" }, 404);
 
-  // ADEA lifecycle: flip to 'running' the moment we accept the work, so a
+  // ADEA lifecycle: flip to 'generating' the moment we accept the work, so a
   // concurrent consumer read (RLS-gated on 'ready') and the owner both see the
   // in-flight state. 'ready' lands atomically in the final update below; the
   // caller marks 'failed' if this invocation errors.
-  await admin.from("venues").update({ adea_status: "running" }).eq("id", venueId);
+  await admin.from("venues").update({ adea_status: "generating" }).eq("id", venueId);
 
   // Admin config (app_settings) — read at run time; callers don't pass overrides.
   const cfg = await loadAtlasConfig(admin);
