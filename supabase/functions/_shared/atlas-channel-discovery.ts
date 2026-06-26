@@ -42,15 +42,17 @@ export type ChannelField =
 type ChannelMap = Record<ChannelField, string | null>;
 type ChannelSource = "seed" | "website" | "search" | "perplexity";
 
+// Channels the discovery pass actively searches for (footer harvest, Perplexity
+// fill, Firecrawl fill all iterate this list). Yelp / TikTok / TripAdvisor are
+// TEMPORARILY disabled — we don't discover them for the moment, so their columns
+// stay null. To re-enable, just add the three "*_url" entries back here; the
+// field hints / pickChannel cases / query map below are left in place for that.
 const CHANNEL_FIELDS: ChannelField[] = [
   "website_url",
   "instagram_url",
   "facebook_url",
   "opentable_url",
   "uber_eats_url",
-  "tiktok_url",
-  "tripadvisor_url",
-  "yelp_url",
 ];
 
 export type ResolvedChannels = ChannelMap & {
