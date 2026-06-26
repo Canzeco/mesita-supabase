@@ -176,6 +176,13 @@ verify_jwt = false
 [functions.atlas-get-enriched-place]
 verify_jwt = false
 
+# Persist half of the create pipeline — writes the enriched profile as places +
+# units rows (shared PK, status='active' / adea_status='ready'), idempotent on
+# google_place_id. Internal-only; the create/schedule callers invoke it with the
+# service-role bearer right after atlas-get-enriched-place.
+[functions.atlas-save-unit-data]
+verify_jwt = false
+
 # Synchronous Pre-ADEA seed — fetches Google Places BASICS only (name, address,
 # geo, category, phone, hours, first photos) and inserts the venue row with
 # adea_status='generating'. NO Firecrawl/Perplexity/OpenAI/CSE — instant. The
