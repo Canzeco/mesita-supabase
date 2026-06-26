@@ -9,7 +9,8 @@
 // Twin of atlas-save-unit-data, but:
 //   • UPDATEs `places` by id (the unit/place shared PK) instead of inserting
 //   • requires the row to already exist (404 unit_not_found if not)
-//   • flips units.adea_status → 'ready' (enrichment complete)
+//   • flips units.adea_status → 'ready' (default) or a caller-supplied terminal
+//     state ('failed', so a failed Enricher run doesn't strand at 'generating')
 //   • never touches id / slug / created_at — identity is owned by the create step
 //
 // The enriched `place` from atlas-get-enriched-place is the authoritative full
@@ -35,7 +36,7 @@ type PlacePayload = Record<string, unknown> & {
   google_place_id?: string;
   name?: string;
 };
-type Body = { venue_id?: string; place?: PlacePayload };
+type Body = { venue_id?: string; place?: PlacePayload; adea_status?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -57,6 +58,13 @@ Deno.serve(async (req) => {
   }
   const name = (place.name ?? "").toString().trim();
   if (!name) return json({ ok: false, error: "place.name is required" }, 400);
+
+  // adea_status is caller-controlled: a successful Enricher run lands 'ready'
+  // (default); a failed run can pass 'failed' so the unit doesn't strand at
+  // 'generating'. Whitelisted; invalid → 'ready'.
+  const ADEA_STATUSES = new Set(["queued", "generating", "ready", "failed"]);
+  const adeaRaw = (bodyRes.body.adea_status ?? "ready").toString().trim();
+  const adeaStatus = ADEA_STATUSES.has(adeaRaw) ? adeaRaw : "ready";
 
   const admin = adminClient(envRes.env);
 
@@ -85,10 +93,11 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `place_update: ${placeErr.message}`, code: placeErr.code ?? null }, 400);
   }
 
-  // ── 2) units — enrichment complete → adea_status 'ready' ──
+  // ── 2) units — enrichment terminal state (default 'ready'; 'failed' on a
+  // failed Enricher run so the unit doesn't strand at 'generating') ──
   const { data: unitRow, error: unitErr } = await admin
     .from("units")
-    .update({ adea_status: "ready" })
+    .update({ adea_status: adeaStatus })
     .eq("id", venueId)
     .select("id, slug, status")
     .single();
@@ -104,7 +113,7 @@ Deno.serve(async (req) => {
       slug: unitRow.slug,
       name,
       status: unitRow.status,
-      adea_status: "ready",
+      adea_status: adeaStatus,
       caller: callerRes.callerName,
     },
     200,

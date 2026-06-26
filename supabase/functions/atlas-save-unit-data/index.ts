@@ -5,8 +5,8 @@
 //   • places — the full Atlas profile (Google identity, geo, channels, signals,
 //     synthesis, photos)
 //   • units  — the owned Mesita entity (shared PK with the place), landing
-//     status='active', listing_type='web', adea_status='ready' immediately —
-//     the create flow is synchronous now, so there is no 'generating' window.
+//     status='active', listing_type='web', and a caller-supplied adea_status
+//     (the async create path passes 'generating'; defaults to 'ready').
 //
 // Idempotent on google_place_id (409 venue_already_exists). Slug is made unique
 // against the live catalog. Inserts are sequenced places→units (shared id); a
@@ -116,7 +116,8 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `place_insert: ${placeErr?.message ?? "no row"}`, code: placeErr?.code ?? null }, 400);
   }
 
-  // ── 2) units (entity, shared PK). Create-time is synchronous → adea 'ready'. ──
+  // ── 2) units (entity, shared PK). adea_status is caller-supplied (async create
+  // → 'generating'; default 'ready'). ──
   const { data: unitRow, error: unitErr } = await admin
     .from("units")
     .insert({

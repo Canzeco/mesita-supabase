@@ -1,18 +1,15 @@
 // Supabase Edge Function — business-create-unit (LIVE business create path)
 //
-// The signed-in business passes a Google Places `placeId`. SYNCHRONOUS create —
-// the venue is fully enriched and 'ready' by the time this returns:
+// The signed-in business passes a Google Places `placeId`. ASYNC create — a
+// MINIMAL 'generating' venue is returned immediately and deep enrichment runs in
+// the n8n Enricher:
 //   1. authenticate the business + EARLY-dedupe on google_place_id (a cheap 409
-//      BEFORE any enrichment spend — the old seed gated cheaply, the new
-//      read-only pipeline is expensive so the caller must gate first),
+//      BEFORE any enrichment spend),
 //   2. upsert the businesses row (ownership scaffolding),
-//   3. await atlas-get-enriched-place — read-only, builds the full profile JSON,
-//   4. await atlas-save-unit-data — writes the places + units rows,
-//   5. await atlas-save-place-media — mirrors photos (best-effort; a media
-//      failure never fails a created venue).
-//
-// The old seed → async-enrich (EdgeRuntime.waitUntil) flow is gone: there is no
-// 'generating' window anymore, enrichment completes inline.
+//   3. fetchGoogleBasics — the Google identity spine (category='undefined'),
+//   4. atlas-save-unit-data — writes places + units (adea_status='generating'),
+//   5. triggerEnrichPlace — hands deep enrichment to the n8n Enricher
+//      (fire-and-forget; the Enricher flips adea_status→'ready' when done).
 //
 // Intentionally NO venue_members insert — the caller becomes owner only when
 // admin-decide-verification approves the ownership claim; until then the venue
@@ -26,22 +23,9 @@ import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
 import { invokeArtificialCaller } from "../_shared/internal.ts";
 import { triggerEnrichPlace } from "../_shared/n8n.ts";
+import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
 
 type Body = { placeId?: string };
-
-// atlas-get-enriched-place response — the read-only profile compute.
-type EnrichedResult = {
-  place: Record<string, unknown> & {
-    name?: string;
-    photos?: unknown;
-    google_stars_overall?: number | null;
-    google_review_count?: number | null;
-    instagram_followers_count?: number | null;
-  };
-  media_assets?: unknown[];
-  preferred_photo_urls?: string[];
-  sources?: Record<string, unknown>;
-};
 
 // atlas-save-unit-data response.
 type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
@@ -105,18 +89,25 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `business_upsert: ${businessError.message}` }, 500);
   }
 
-  // ── 1) Minimal enrich — Google basics + category only (Default process). Deep
-  // enrichment is handed to the n8n Enricher in step 3 (async). ──
-  const enrichedRes = await invokeArtificialCaller<EnrichedResult>(
-    env,
-    "business-create-unit",
-    "atlas-get-enriched-place",
-    { placeId, minimal: true },
-  );
-  if (!enrichedRes.ok) {
-    return json({ ok: false, error: enrichedRes.error }, enrichedRes.status || 502);
+  // ── 1) Minimal seed — Google basics only (Default process). fetchGoogleBasics
+  // builds the identity spine directly (no EF hop); category is left 'undefined'
+  // for the n8n Enricher to infer at S5. NO Apify/Firecrawl/Perplexity/OpenAI
+  // here — deep enrichment is async (step 3). ──
+  const GOOGLE_KEY = Deno.env.get("GMP_KEY") ?? Deno.env.get("SUPA_GMP_KEY");
+  if (!GOOGLE_KEY) {
+    return json({ ok: false, error: "Server misconfigured (missing core secrets)" }, 500);
   }
-  const enriched = enrichedRes.data;
+  const basicsRes = await fetchGoogleBasics(placeId, GOOGLE_KEY);
+  if (!basicsRes.ok) {
+    return json({ ok: false, code: basicsRes.code, error: basicsRes.error }, basicsRes.status || 502);
+  }
+  // category 'undefined' until the Enricher resolves it; the category-label
+  // trigger fills category_label from the 'undefined' catalog row.
+  const place: Record<string, unknown> = {
+    ...basicsRes.basics,
+    category: "undefined",
+    category_label: null,
+  };
 
   // ── 2) Persist the minimal row — lands adea_status='generating' until the
   // Enricher flips it to 'ready' via atlas-update-unit-data. ──
@@ -124,7 +115,7 @@ Deno.serve(async (req) => {
     env,
     "business-create-unit",
     "atlas-save-unit-data",
-    { place: enriched.place, adea_status: "generating" },
+    { place, adea_status: "generating" },
   );
   if (!saveRes.ok) {
     return json({ ok: false, error: saveRes.error }, saveRes.status || 502);
@@ -139,7 +130,6 @@ Deno.serve(async (req) => {
 
   // ── Respond — minimal row created; deep enrichment in flight. enrichment.* kept
   // for business-web response-contract compatibility (now async). ──
-  const place = enriched.place ?? {};
   const channelCount = CHANNEL_KEYS.filter((k) => !!place[k]).length;
 
   return json(
