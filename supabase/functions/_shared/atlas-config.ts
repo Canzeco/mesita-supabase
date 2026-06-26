@@ -21,17 +21,10 @@ export const QUALITY_MODEL: Record<string, string> = {
   high: "gpt-4o",
 };
 
-// Admin "source step ceiling" (1–5): how deep ADEA runs. Each level unlocks the
-// next source group, in order. The S0 spine (Mesita + Google identity + the
-// Cognition brain) is always on and never gated; the Final synthesis (S5) always
-// runs too. Ceiling levels (Notion 🌐 Atlas catalog):
-//   1 Google data (S1) · 2 SERP + all links (S2–S3) · 3 source gather (S4) ·
-//   4 image perception (S5) · 5 heavy scrapes (optional).
-export const EXEC_GOOGLE_STEP = 1;
-export const EXEC_LINKS_STEP = 2;
-export const EXEC_GATHER_STEP = 3;
-export const EXEC_PERCEPTION_STEP = 4;
-export const EXEC_HEAVY_STEP = 5;
+// ADEA runs ALL steps S0–S6 on every enrichment. There is no admin "source step
+// ceiling" any more — each step fires whenever its real prerequisites hold (the
+// relevant API key is present AND its required input exists, e.g. a website to
+// scrape). The only remaining feature toggle is `visionEnabled` (image vision).
 
 // Hard ceiling on photos persisted to the venue, regardless of per-source caps.
 // Safety bound on the candidate pool before save (the real, source-independent
@@ -74,7 +67,6 @@ export type MediaAssetPayload = {
 };
 
 export type AtlasConfig = {
-  stepCeiling: number;
   synthesisQuality: string;
   // GATHER caps — how many to PULL per source before anything else.
   gatherGoogleImages: number;
@@ -90,16 +82,6 @@ export type AtlasConfig = {
   analyzeInstagramImages: number;
   imageAnalysisPrompt: string;
   imageSortingPrompt: string;
-  // Derived execution-step gates.
-  googleLayer: boolean;
-  // SERP synthesis (Agent X, step S2) — fast Perplexity web-grounded editorial
-  // color. SOFT signal that feeds Agent Y context + the final synthesis. Rides
-  // the link-discovery ceiling (level 2): present whenever links are unlocked.
-  serpLayer: boolean;
-  linkDiscoveryLayer: boolean;
-  sourceGatherLayer: boolean;
-  perceptionLayer: boolean;
-  heavyScrapeLayer: boolean;
 };
 
 const DEFAULT_ANALYSIS_PROMPT =
@@ -115,19 +97,15 @@ export async function loadAtlasConfig(admin: SupabaseClient): Promise<AtlasConfi
   const { data: cfg } = await admin
     .from("app_settings")
     .select(
-      "atlas_source_tier_ceiling, atlas_synthesis_quality, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_website_crawl_max_pages",
+      "atlas_synthesis_quality, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_website_crawl_max_pages",
     )
     .eq("id", 1)
     .maybeSingle();
 
   const num = (v: unknown, d: number) =>
     typeof v === "number" && Number.isFinite(v) ? v : d;
-  // DB column keeps its legacy 'tier' name (atlas_source_tier_ceiling); renaming
-  // it needs a coordinated migration + admin-frontend change + lockstep deploy.
-  const stepCeiling = num(cfg?.atlas_source_tier_ceiling, 3);
 
   return {
-    stepCeiling,
     synthesisQuality: (cfg?.atlas_synthesis_quality as string | undefined) ?? "economy",
     gatherGoogleImages: num(cfg?.atlas_gather_google_images, 10),
     gatherWebsiteImages: num(cfg?.atlas_gather_website_images, 10),
@@ -142,11 +120,5 @@ export async function loadAtlasConfig(admin: SupabaseClient): Promise<AtlasConfi
       (cfg?.atlas_image_analysis_prompt as string | undefined)?.trim() || DEFAULT_ANALYSIS_PROMPT,
     imageSortingPrompt:
       (cfg?.atlas_image_sorting_prompt as string | undefined)?.trim() || DEFAULT_SORTING_PROMPT,
-    googleLayer: stepCeiling >= EXEC_GOOGLE_STEP,
-    serpLayer: stepCeiling >= EXEC_LINKS_STEP,
-    linkDiscoveryLayer: stepCeiling >= EXEC_LINKS_STEP,
-    sourceGatherLayer: stepCeiling >= EXEC_GATHER_STEP,
-    perceptionLayer: stepCeiling >= EXEC_PERCEPTION_STEP,
-    heavyScrapeLayer: stepCeiling >= EXEC_HEAVY_STEP,
   };
 }
