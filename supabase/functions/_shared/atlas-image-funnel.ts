@@ -275,6 +275,40 @@ export type ImageFunnelResult = {
   diag: Record<string, unknown>;
 };
 
+// Pick the final photo set with a SOURCE-DIVERSITY floor: reserve up to
+// reservePerSource of each non-Google source's best (in `ordered` order), then
+// fill the remaining slots by overall order, capped at `cap`. Guarantees website
+// + Instagram representation whenever those sources contributed images — the
+// vision rubric otherwise tends to rank Google Places photos highest and crowd
+// the others out (which is why venues looked "Google-only").
+function selectWithDiversity(
+  ordered: string[],
+  srcOf: Map<string, Img["source"]>,
+  cap: number,
+): string[] {
+  const reservePerSource = Math.min(3, Math.max(1, Math.floor(cap / 4)));
+  const picked: string[] = [];
+  const seen = new Set<string>();
+  const take = (u: string) => {
+    if (u && !seen.has(u) && picked.length < cap) {
+      seen.add(u);
+      picked.push(u);
+    }
+  };
+  for (const src of ["instagram", "website"] as const) {
+    let n = 0;
+    for (const u of ordered) {
+      if (n >= reservePerSource) break;
+      if (srcOf.get(u) === src && !seen.has(u)) {
+        take(u);
+        n += 1;
+      }
+    }
+  }
+  for (const u of ordered) take(u);
+  return picked;
+}
+
 // Image funnel: build the gathered pool (each source contributes its gather-
 // capped, metadata-sorted bucket), then ANALYZE (vision describes the per-source
 // analyze-capped top of each bucket) → SORT (text model ranks the descriptions
@@ -323,7 +357,8 @@ export async function runImageFunnel(opts: {
   for (const u of websiteImages) pushImg(u, "website");
   for (const u of instagramImages) pushImg(u, "instagram");
 
-  let finalPhotos = saved.map((s) => s.url).slice(0, saveTotalImages);
+  const srcOf = new Map<string, Img["source"]>(saved.map((s) => [s.url, s.source]));
+  let finalPhotos = selectWithDiversity(saved.map((s) => s.url), srcOf, saveTotalImages);
   let diag: Record<string, unknown> = {
     gathered: saved.length,
     by_source: {
@@ -371,7 +406,7 @@ export async function runImageFunnel(opts: {
         const rest = saved.map((s) => s.url).filter((u) => !analyzedSet.has(u));
         // Rubric-ranked images lead; un-analyzed gathered images follow in
         // metadata order. Then keep only the top N overall (source-independent).
-        finalPhotos = dedup([...ranked, ...rest]).slice(0, saveTotalImages);
+        finalPhotos = selectWithDiversity(dedup([...ranked, ...rest]), srcOf, saveTotalImages);
         diag = {
           ...diag,
           vision: true,
