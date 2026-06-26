@@ -189,6 +189,12 @@ verify_jwt = false
 [functions.atlas-update-unit-data]
 verify_jwt = false
 
+# Read-only init endpoint for the n8n Enricher — returns { config, categories[],
+# tags[] } (Atlas knobs + closed category/tag vocabularies). Internal-only;
+# invoked by the n8n Enricher once at workflow start with the service-role bearer.
+[functions.atlas-get-config]
+verify_jwt = false
+
 # Place enricher agent — runs the Atlas tier pipeline (Google contents → links →
 # source gather → image funnel → grounded synthesis) to complete the venue
 # profile (details{}, About, menus, popular times, photos). Internal-only;
