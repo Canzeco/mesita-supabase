@@ -109,9 +109,6 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # enforce @canzeco.com + MFA. verify_jwt = true gates each to a real
 # session.
 
-[functions.admin-signin-email]
-verify_jwt = true
-
 [functions.business-signin-email]
 verify_jwt = true
 
@@ -258,9 +255,6 @@ verify_jwt = true
 [functions.consumer-schedule-unit-creation]
 verify_jwt = true
 
-[functions.admin-schedule-unit-creation]
-verify_jwt = true
-
 [functions.admin-schedule-multiple-units-creation]
 verify_jwt = true
 
@@ -336,9 +330,6 @@ verify_jwt = true
 
 # Google Places proxies. Keep the platform key server-side.
 [functions.business-suggest-places]
-verify_jwt = true
-
-[functions.business-get-place]
 verify_jwt = true
 
 # Team management — owner / editor / viewer tier + waiters.
@@ -472,24 +463,4 @@ verify_jwt = false
 [functions.twilio-bootstrap-staff-invite]
 verify_jwt = false
 
-# --- Link-discovery benchmark (Sonar vs Search vs Agent vs Firecrawl) ---
-#
-# Throwaway test harness comparing four link-finding methods over the 50
-# restaurants in restaurants_benchmark.csv. Each takes { name, city } and
-# returns the six links. JWT off so the `tester` caller can hit them with
-# the anon key. Secrets: PERPLEXITY_KEY, FIRECRAWL_KEY.
-
-[functions.bench-sonar]
-verify_jwt = false
-
-[functions.bench-search]
-verify_jwt = false
-
-[functions.bench-agent]
-verify_jwt = false
-
-[functions.bench-firecrawl]
-verify_jwt = false
-
-[functions.atlas-enrich-event]
-verify_jwt = false
+# (Link-discovery benchmark harness + bench tables removed — research lives in n8n.)
