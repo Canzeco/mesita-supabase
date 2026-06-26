@@ -1,5 +1,5 @@
 // Atlas source — Apify Google Maps: ALL reviews (Places caps at ~5) + venue
-// PHOTOS in one run. Spine-tier. Reviews capped at 100 for the EF wall-clock
+// PHOTOS in one run. Spine step (S1). Reviews capped at 100 for the EF wall-clock
 // (a safety bound, not a product cap); images capped at the Google gather cap.
 
 import { APIFY_ACTORS, runApifyActor } from "./apify.ts";

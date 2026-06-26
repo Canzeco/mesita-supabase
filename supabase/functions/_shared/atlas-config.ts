@@ -8,7 +8,7 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 export const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 // Vision + sort always run on the cheap multimodal model — image work doesn't
-// need the synthesis-quality tier (which governs only the profile text model).
+// need the synthesis-quality setting (which governs only the profile text model).
 export const VISION_MODEL = "gpt-4o-mini";
 
 // Synthesis model by the admin 'synthesis quality' param. Synthesis reads only
@@ -21,15 +21,17 @@ export const QUALITY_MODEL: Record<string, string> = {
   high: "gpt-4o",
 };
 
-// Execution tier gates (ADEA catalog — Notion Enrichment Strategy 2026-06).
-// T0 = spine (always on). Admin ceiling T1–T5 gates each stage in order:
-//   T1 Google spine · T2 all links (one agent) · T3 source gather ·
-//   T4 perception · T5 heavy scrapes · Final = Cognition (always).
-export const EXEC_GOOGLE_TIER = 1;
-export const EXEC_LINKS_TIER = 2;
-export const EXEC_GATHER_TIER = 3;
-export const EXEC_PERCEPTION_TIER = 4;
-export const EXEC_HEAVY_TIER = 5;
+// Admin "source step ceiling" (1–5): how deep ADEA runs. Each level unlocks the
+// next source group, in order. The S0 spine (Mesita + Google identity + the
+// Cognition brain) is always on and never gated; the Final synthesis (S5) always
+// runs too. Ceiling levels (Notion 🌐 Atlas catalog):
+//   1 Google data (S1) · 2 SERP + all links (S2–S3) · 3 source gather (S4) ·
+//   4 image perception (S5) · 5 heavy scrapes (optional).
+export const EXEC_GOOGLE_STEP = 1;
+export const EXEC_LINKS_STEP = 2;
+export const EXEC_GATHER_STEP = 3;
+export const EXEC_PERCEPTION_STEP = 4;
+export const EXEC_HEAVY_STEP = 5;
 
 // Hard ceiling on photos persisted to the venue, regardless of per-source caps.
 // Safety bound on the candidate pool before save (the real, source-independent
@@ -72,7 +74,7 @@ export type MediaAssetPayload = {
 };
 
 export type AtlasConfig = {
-  tierCeiling: number;
+  stepCeiling: number;
   synthesisQuality: string;
   // GATHER caps — how many to PULL per source before anything else.
   gatherGoogleImages: number;
@@ -88,11 +90,11 @@ export type AtlasConfig = {
   analyzeInstagramImages: number;
   imageAnalysisPrompt: string;
   imageSortingPrompt: string;
-  // Derived execution-tier gates.
+  // Derived execution-step gates.
   googleLayer: boolean;
-  // Tier-2 SERP synthesis (Agent X) — fast Perplexity web-grounded editorial
+  // SERP synthesis (Agent X, step S2) — fast Perplexity web-grounded editorial
   // color. SOFT signal that feeds Agent Y context + the final synthesis. Rides
-  // the link-discovery tier (T2): present whenever links are unlocked.
+  // the link-discovery ceiling (level 2): present whenever links are unlocked.
   serpLayer: boolean;
   linkDiscoveryLayer: boolean;
   sourceGatherLayer: boolean;
@@ -105,7 +107,7 @@ const DEFAULT_ANALYSIS_PROMPT =
 const DEFAULT_SORTING_PROMPT =
   "Rank these venue photos best to worst for a should-we-go-tonight decision. We sell EXPERIENCES: weight beautiful place / ambiance / vibe shots EQUALLY with food. Favor visual quality, representativeness, and a balanced mix. Drop duplicates, blurry, dark, or text-heavy images.";
 
-// Read the Atlas admin knobs from app_settings (row id=1) and derive the tier
+// Read the Atlas admin knobs from app_settings (row id=1) and derive the step
 // gates. The select is a single string LITERAL on purpose: supabase-js infers
 // the row type only from a literal argument — anything that widens to `string`
 // falls back to GenericStringError and untypes cfg.atlas_*.
@@ -120,10 +122,12 @@ export async function loadAtlasConfig(admin: SupabaseClient): Promise<AtlasConfi
 
   const num = (v: unknown, d: number) =>
     typeof v === "number" && Number.isFinite(v) ? v : d;
-  const tierCeiling = num(cfg?.atlas_source_tier_ceiling, 3);
+  // DB column keeps its legacy 'tier' name (atlas_source_tier_ceiling); renaming
+  // it needs a coordinated migration + admin-frontend change + lockstep deploy.
+  const stepCeiling = num(cfg?.atlas_source_tier_ceiling, 3);
 
   return {
-    tierCeiling,
+    stepCeiling,
     synthesisQuality: (cfg?.atlas_synthesis_quality as string | undefined) ?? "economy",
     gatherGoogleImages: num(cfg?.atlas_gather_google_images, 10),
     gatherWebsiteImages: num(cfg?.atlas_gather_website_images, 10),
@@ -138,11 +142,11 @@ export async function loadAtlasConfig(admin: SupabaseClient): Promise<AtlasConfi
       (cfg?.atlas_image_analysis_prompt as string | undefined)?.trim() || DEFAULT_ANALYSIS_PROMPT,
     imageSortingPrompt:
       (cfg?.atlas_image_sorting_prompt as string | undefined)?.trim() || DEFAULT_SORTING_PROMPT,
-    googleLayer: tierCeiling >= EXEC_GOOGLE_TIER,
-    serpLayer: tierCeiling >= EXEC_LINKS_TIER,
-    linkDiscoveryLayer: tierCeiling >= EXEC_LINKS_TIER,
-    sourceGatherLayer: tierCeiling >= EXEC_GATHER_TIER,
-    perceptionLayer: tierCeiling >= EXEC_PERCEPTION_TIER,
-    heavyScrapeLayer: tierCeiling >= EXEC_HEAVY_TIER,
+    googleLayer: stepCeiling >= EXEC_GOOGLE_STEP,
+    serpLayer: stepCeiling >= EXEC_LINKS_STEP,
+    linkDiscoveryLayer: stepCeiling >= EXEC_LINKS_STEP,
+    sourceGatherLayer: stepCeiling >= EXEC_GATHER_STEP,
+    perceptionLayer: stepCeiling >= EXEC_PERCEPTION_STEP,
+    heavyScrapeLayer: stepCeiling >= EXEC_HEAVY_STEP,
   };
 }

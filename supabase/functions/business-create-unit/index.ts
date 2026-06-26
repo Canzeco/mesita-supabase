@@ -7,7 +7,7 @@
 // the venue row (adea_status='generating') and returns { id, slug, name,
 // status }; the async enricher completes the profile and lands 'ready'. The
 // Firecrawl/Perplexity/OpenAI/CSE/Instagram pipeline that create used to run
-// inline is gone — atlas-enrich-place re-does every bit of it in its tiers, so
+// inline is gone — atlas-enrich-place re-does every bit of it in its steps, so
 // running it here was pure duplication and made create slow.
 //
 // Local:  supabase functions serve business-create-unit
