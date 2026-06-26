@@ -5,8 +5,8 @@
 //   • places — the full Atlas profile (Google identity, geo, channels, signals,
 //     synthesis, photos)
 //   • units  — the owned Mesita entity (shared PK with the place), landing
-//     status='active', listing_type='web', adea_status='ready' immediately —
-//     the create flow is synchronous now, so there is no 'generating' window.
+//     status='active', listing_type='web', and a caller-supplied adea_status
+//     (the async create path passes 'generating'; defaults to 'ready').
 //
 // Idempotent on google_place_id (409 venue_already_exists). Slug is made unique
 // against the live catalog. Inserts are sequenced places→units (shared id); a
@@ -36,7 +36,7 @@ type PlacePayload = Record<string, unknown> & {
   google_place_id?: string;
   name?: string;
 };
-type Body = { place?: PlacePayload };
+type Body = { place?: PlacePayload; adea_status?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -57,6 +57,13 @@ Deno.serve(async (req) => {
   const name = (place.name ?? "").toString().trim();
   if (!googlePlaceId) return json({ ok: false, error: "place.google_place_id is required" }, 400);
   if (!name) return json({ ok: false, error: "place.name is required" }, 400);
+
+  // adea_status is caller-controlled: the synchronous create lands 'ready'; the
+  // async create path lands 'generating' (the n8n Enricher flips it to 'ready'
+  // later via atlas-update-unit-data). Defaults to 'ready' for back-compat.
+  const ADEA_STATUSES = new Set(["queued", "generating", "ready", "failed"]);
+  const adeaRaw = (bodyRes.body.adea_status ?? "ready").toString().trim();
+  const adeaStatus = ADEA_STATUSES.has(adeaRaw) ? adeaRaw : "ready";
 
   const admin = adminClient(envRes.env);
 
@@ -109,7 +116,8 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `place_insert: ${placeErr?.message ?? "no row"}`, code: placeErr?.code ?? null }, 400);
   }
 
-  // ── 2) units (entity, shared PK). Create-time is synchronous → adea 'ready'. ──
+  // ── 2) units (entity, shared PK). adea_status is caller-supplied (async create
+  // → 'generating'; default 'ready'). ──
   const { data: unitRow, error: unitErr } = await admin
     .from("units")
     .insert({
@@ -117,7 +125,7 @@ Deno.serve(async (req) => {
       slug,
       status: "active",
       listing_type: "web",
-      adea_status: "ready",
+      adea_status: adeaStatus,
     })
     .select("id, slug, status")
     .single();

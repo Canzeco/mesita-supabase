@@ -1,11 +1,13 @@
 // Supabase Edge Function — atlas-run-scheduled-create (artificial caller / agent)
 //
 // The SERVICE-GATED internal create path the SQL scheduler poller invokes. It is
-// the headless twin of admin-create-unit: same pipeline (early dedupe ->
-// atlas-get-enriched-place (read-only) -> atlas-save-unit-data (places+units) ->
-// atlas-save-place-media (best-effort)), but gated by requireInternalCaller
-// instead of getAuthedUser+requireSuperAdmin, because the poller is service-role
-// with no end-user JWT and CANNOT call the JWT-gated natural create EFs.
+// the headless twin of admin-create-unit: same ASYNC pipeline (early dedupe ->
+// fetchGoogleBasics (Google identity spine, category='undefined') ->
+// atlas-save-unit-data (places+units, adea_status='generating') ->
+// triggerEnrichPlace (n8n webhook, fire-and-forget)), but gated by
+// requireInternalCaller instead of getAuthedUser+requireSuperAdmin, because the
+// poller is service-role with no end-user JWT and CANNOT call the JWT-gated
+// natural create EFs.
 //
 // It also owns the queue row lifecycle: given a scheduled_id, it writes the row
 // to 'done' (with the result summary) or 'failed' (with the error). The poller
@@ -25,22 +27,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { invokeArtificialCaller, requireInternalCaller } from "../_shared/internal.ts";
+import { triggerEnrichPlace } from "../_shared/n8n.ts";
+import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
 
 type Body = { placeId?: string; scheduled_id?: string };
-
-// atlas-get-enriched-place response — the read-only profile compute.
-type EnrichedResult = {
-  place: Record<string, unknown> & {
-    name?: string;
-    photos?: unknown;
-    google_stars_overall?: number | null;
-    google_review_count?: number | null;
-    instagram_followers_count?: number | null;
-  };
-  media_assets?: unknown[];
-  preferred_photo_urls?: string[];
-  sources?: Record<string, unknown>;
-};
 
 // atlas-save-unit-data response.
 type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
@@ -110,26 +100,36 @@ Deno.serve(async (req) => {
     );
   }
 
-  // ── 1) Enrich — read-only, synchronous. Builds the full places-shaped profile. ──
-  const enrichedRes = await invokeArtificialCaller<EnrichedResult>(
-    env,
-    "atlas-run-scheduled-create",
-    "atlas-get-enriched-place",
-    { placeId },
-  );
-  if (!enrichedRes.ok) {
-    await finishRow("failed", { error: `get_enriched: ${enrichedRes.error}` });
-    return json({ ok: false, error: enrichedRes.error }, enrichedRes.status || 502);
+  // ── 1) Minimal seed — Google basics only (Default process). fetchGoogleBasics
+  // builds the identity spine directly (no EF hop); category is left 'undefined'
+  // for the n8n Enricher to infer at S5. NO Apify/Firecrawl/Perplexity/OpenAI
+  // here — deep enrichment is async (step 3). ──
+  const GOOGLE_KEY = Deno.env.get("GMP_KEY") ?? Deno.env.get("SUPA_GMP_KEY");
+  if (!GOOGLE_KEY) {
+    await finishRow("failed", { error: "server_misconfigured: missing GMP_KEY" });
+    return json({ ok: false, error: "Server misconfigured (missing core secrets)" }, 500);
   }
-  const enriched = enrichedRes.data;
+  const basicsRes = await fetchGoogleBasics(placeId, GOOGLE_KEY);
+  if (!basicsRes.ok) {
+    await finishRow("failed", { error: `google_basics: ${basicsRes.error}` });
+    return json({ ok: false, code: basicsRes.code, error: basicsRes.error }, basicsRes.status || 502);
+  }
+  // category 'undefined' until the Enricher resolves it; the category-label
+  // trigger fills category_label from the 'undefined' catalog row.
+  const place: Record<string, unknown> = {
+    ...basicsRes.basics,
+    category: "undefined",
+    category_label: null,
+  };
 
-  // ── 2) Persist places + units (idempotent; lands status='active'/adea 'ready') ──
-  // No businesses upsert — the scheduler creates an unowned listing.
+  // ── 2) Persist the minimal row — lands adea_status='generating' until the
+  // Enricher flips it to 'ready' via atlas-update-unit-data. No businesses
+  // upsert — the scheduler creates an unowned listing. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,
     "atlas-run-scheduled-create",
     "atlas-save-unit-data",
-    { place: enriched.place },
+    { place, adea_status: "generating" },
   );
   if (!saveRes.ok) {
     await finishRow("failed", { error: `save_unit_data: ${saveRes.error}` });
@@ -138,33 +138,24 @@ Deno.serve(async (req) => {
   const saved = saveRes.data;
   const venue = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
 
-  // ── 3) Persist media — best-effort. A media failure NEVER fails the venue. ──
-  const assets = Array.isArray(enriched.media_assets) ? enriched.media_assets : [];
-  let mediaSaved = false;
-  if (assets.length > 0) {
-    const mediaRes = await invokeArtificialCaller(
-      env,
-      "atlas-run-scheduled-create",
-      "atlas-save-place-media",
-      { venue_id: saved.unit_id, assets, preferred_photo_urls: enriched.preferred_photo_urls ?? [] },
-    );
-    mediaSaved = mediaRes.ok;
-  }
+  // ── 3) Hand deep enrichment to the n8n Enricher (async). Fire-and-forget: the
+  // webhook acks immediately, the workflow runs in n8n. A trigger failure NEVER
+  // fails creation — the row exists ('generating') and can be re-triggered. ──
+  const trigger = await triggerEnrichPlace(saved.unit_id, placeId);
 
-  // ── Build the enrichment summary (same shape as admin-create-unit). ──
-  const place = enriched.place ?? {};
-  const sources = enriched.sources ?? {};
+  // ── Build the create summary (same shape as admin-create-unit; now async). ──
   const channelCount = CHANNEL_KEYS.filter((k) => !!place[k]).length;
   const enrichment = {
     google: true,
-    enrichmentTriggered: true,
-    enrichmentAsync: false,
+    enrichmentTriggered: trigger.ok,
+    enrichmentAsync: true,
+    enrichmentError: trigger.ok ? null : trigger.error ?? null,
     photoCount: Array.isArray(place.photos) ? place.photos.length : 0,
-    photoCandidates: assets.length,
-    photoRanked: mediaSaved,
-    firecrawl: !!sources.firecrawl,
-    perplexity: !!(sources.serp || sources.discovery),
-    openai: !!sources.synthesis,
+    photoCandidates: 0,
+    photoRanked: false,
+    firecrawl: false,
+    perplexity: false,
+    openai: false,
     openaiError: null,
     channelCount,
     googleRating: (place.google_stars_overall as number | null) ?? null,
@@ -172,7 +163,7 @@ Deno.serve(async (req) => {
     instagramFollowers: (place.instagram_followers_count as number | null) ?? null,
   };
 
-  // ── Mark the queue row done with the venue + enrichment summary. ──
+  // ── Mark the queue row done — the unit was created and enrichment dispatched. ──
   await finishRow("done", { result: { venue, enrichment } });
 
   return json({ ok: true, venue, enrichment, caller: callerRes.callerName }, 201);

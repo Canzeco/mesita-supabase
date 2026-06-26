@@ -1,9 +1,11 @@
 // Supabase Edge Function — admin-create-unit (admin caller / LIVE admin create path)
 //
 // The admin-app equivalent of business-create-unit: an admin operator passes a
-// Google Places `placeId` and gets a fully-enriched, 'ready' unit back. Same
-// SYNCHRONOUS pipeline — early dedupe → atlas-get-enriched-place (read-only) →
-// atlas-save-unit-data (places+units) → atlas-save-place-media (best-effort).
+// Google Places `placeId` and gets back a MINIMAL 'generating' unit; deep
+// enrichment then runs ASYNC in the n8n Enricher. Pipeline: early dedupe →
+// fetchGoogleBasics (Google identity spine, category='undefined') →
+// atlas-save-unit-data (places+units, adea_status='generating') →
+// triggerEnrichPlace (n8n webhook, fire-and-forget).
 //
 // Roles are simple now: admins create from the admin app via THIS function;
 // businesses create from the business app via business-create-unit. (There is
@@ -24,22 +26,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv, requireSuperAdmin } from "../_shared/auth.ts";
 import { invokeArtificialCaller } from "../_shared/internal.ts";
+import { triggerEnrichPlace } from "../_shared/n8n.ts";
+import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
 
 type Body = { placeId?: string };
-
-// atlas-get-enriched-place response — the read-only profile compute.
-type EnrichedResult = {
-  place: Record<string, unknown> & {
-    name?: string;
-    photos?: unknown;
-    google_stars_overall?: number | null;
-    google_review_count?: number | null;
-    instagram_followers_count?: number | null;
-  };
-  media_assets?: unknown[];
-  preferred_photo_urls?: string[];
-  sources?: Record<string, unknown>;
-};
 
 // atlas-save-unit-data response.
 type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
@@ -92,25 +82,34 @@ Deno.serve(async (req) => {
     );
   }
 
-  // ── 1) Enrich — read-only, synchronous. Builds the full places-shaped profile. ──
-  const enrichedRes = await invokeArtificialCaller<EnrichedResult>(
-    env,
-    "admin-create-unit",
-    "atlas-get-enriched-place",
-    { placeId },
-  );
-  if (!enrichedRes.ok) {
-    return json({ ok: false, error: enrichedRes.error }, enrichedRes.status || 502);
+  // ── 1) Minimal seed — Google basics only (Default process). fetchGoogleBasics
+  // builds the identity spine directly (no EF hop); category is left 'undefined'
+  // for the n8n Enricher to infer at S5. NO Apify/Firecrawl/Perplexity/OpenAI
+  // here — deep enrichment is async (step 3). ──
+  const GOOGLE_KEY = Deno.env.get("GMP_KEY") ?? Deno.env.get("SUPA_GMP_KEY");
+  if (!GOOGLE_KEY) {
+    return json({ ok: false, error: "Server misconfigured (missing core secrets)" }, 500);
   }
-  const enriched = enrichedRes.data;
+  const basicsRes = await fetchGoogleBasics(placeId, GOOGLE_KEY);
+  if (!basicsRes.ok) {
+    return json({ ok: false, code: basicsRes.code, error: basicsRes.error }, basicsRes.status || 502);
+  }
+  // category 'undefined' until the Enricher resolves it; the category-label
+  // trigger fills category_label from the 'undefined' catalog row.
+  const place: Record<string, unknown> = {
+    ...basicsRes.basics,
+    category: "undefined",
+    category_label: null,
+  };
 
-  // ── 2) Persist places + units (idempotent; lands status='active'/adea 'ready') ──
-  // No businesses upsert — admin creates an unowned listing.
+  // ── 2) Persist the minimal row — lands adea_status='generating' until the
+  // Enricher flips it to 'ready' via atlas-update-unit-data. No businesses
+  // upsert — admin creates an unowned listing. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,
     "admin-create-unit",
     "atlas-save-unit-data",
-    { place: enriched.place },
+    { place, adea_status: "generating" },
   );
   if (!saveRes.ok) {
     return json({ ok: false, error: saveRes.error }, saveRes.status || 502);
@@ -118,22 +117,13 @@ Deno.serve(async (req) => {
   const saved = saveRes.data;
   const venue = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
 
-  // ── 3) Persist media — best-effort. A media failure NEVER fails the venue. ──
-  const assets = Array.isArray(enriched.media_assets) ? enriched.media_assets : [];
-  let mediaSaved = false;
-  if (assets.length > 0) {
-    const mediaRes = await invokeArtificialCaller(
-      env,
-      "admin-create-unit",
-      "atlas-save-place-media",
-      { venue_id: saved.unit_id, assets, preferred_photo_urls: enriched.preferred_photo_urls ?? [] },
-    );
-    mediaSaved = mediaRes.ok;
-  }
+  // ── 3) Hand deep enrichment to the n8n Enricher (async). Fire-and-forget: the
+  // webhook acks immediately, the workflow runs in n8n. A trigger failure NEVER
+  // fails the create — the row exists ('generating') and can be re-triggered. ──
+  const trigger = await triggerEnrichPlace(saved.unit_id, placeId);
 
-  // ── Respond — fully enriched + 'ready'; same shape as business-create-unit. ──
-  const place = enriched.place ?? {};
-  const sources = enriched.sources ?? {};
+  // ── Respond — minimal row created; deep enrichment in flight. enrichment.* kept
+  // for admin-web response-contract compatibility (now async). ──
   const channelCount = CHANNEL_KEYS.filter((k) => !!place[k]).length;
 
   return json(
@@ -142,14 +132,15 @@ Deno.serve(async (req) => {
       venue,
       enrichment: {
         google: true,
-        enrichmentTriggered: true,
-        enrichmentAsync: false,
+        enrichmentTriggered: trigger.ok,
+        enrichmentAsync: true,
+        enrichmentError: trigger.ok ? null : trigger.error ?? null,
         photoCount: Array.isArray(place.photos) ? place.photos.length : 0,
-        photoCandidates: assets.length,
-        photoRanked: mediaSaved,
-        firecrawl: !!sources.firecrawl,
-        perplexity: !!(sources.serp || sources.discovery),
-        openai: !!sources.synthesis,
+        photoCandidates: 0,
+        photoRanked: false,
+        firecrawl: false,
+        perplexity: false,
+        openai: false,
         openaiError: null,
         channelCount,
         googleRating: (place.google_stars_overall as number | null) ?? null,

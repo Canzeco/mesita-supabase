@@ -168,26 +168,23 @@ verify_jwt = false
 [functions.atlas-discover-places]
 verify_jwt = false
 
-# Read-only create-pipeline compute step — folds the old seed + enrich into one
-# function: builds the Google identity spine in memory, runs the full ADEA
-# pipeline (S0–S5), and RETURNS the places-shaped profile + media as JSON (no DB
-# writes). Internal-only; the create/schedule callers invoke it with the
-# service-role bearer.
-[functions.atlas-get-enriched-place]
-verify_jwt = false
-
-# Persist half of the create pipeline — writes the enriched profile as places +
-# units rows (shared PK, status='active' / adea_status='ready'), idempotent on
-# google_place_id. Internal-only; the create/schedule callers invoke it with the
-# service-role bearer right after atlas-get-enriched-place.
+# Persist half of the create pipeline — INSERTs the minimal Google-basics profile
+# as places + units rows (shared PK, status='active'), with a caller-supplied
+# adea_status (async create → 'generating'), idempotent on google_place_id.
+# Internal-only; the create/schedule callers invoke it with the service-role bearer.
 [functions.atlas-save-unit-data]
 verify_jwt = false
 
-# Place enricher agent — runs the Atlas tier pipeline (Google contents → links →
-# source gather → image funnel → grounded synthesis) to complete the venue
-# profile (details{}, About, menus, popular times, photos). Internal-only;
-# invoked by business-create-unit and admin-enrich-place with the service-role bearer.
-[functions.atlas-enrich-place]
+# UPDATE half of the ASYNC enrich pipeline — writes the enriched profile onto the
+# existing places/units row (UPDATE by id; flips adea_status → 'ready'/'failed').
+# Internal-only; invoked by the n8n Enricher with the service-role bearer.
+[functions.atlas-update-unit-data]
+verify_jwt = false
+
+# Read-only init endpoint for the n8n Enricher — returns { config, categories[],
+# tags[] } (Atlas knobs + closed category/tag vocabularies). Internal-only;
+# invoked by the n8n Enricher once at workflow start with the service-role bearer.
+[functions.atlas-get-config]
 verify_jwt = false
 
 # Async media persistence worker — stores source metadata immediately and mirrors
