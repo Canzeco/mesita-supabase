@@ -260,6 +260,11 @@ verify_jwt = true
 [functions.business-create-unit]
 verify_jwt = true
 
+# Admin-app create path (operator JWT → admin allowlist). Same pipeline as
+# business-create-unit, admin-gated, no businesses upsert.
+[functions.admin-create-unit]
+verify_jwt = true
+
 [functions.business-update-unit]
 verify_jwt = true
 
