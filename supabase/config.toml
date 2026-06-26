@@ -183,15 +183,6 @@ verify_jwt = false
 [functions.atlas-save-unit-data]
 verify_jwt = false
 
-# Synchronous Pre-ADEA seed — fetches Google Places BASICS only (name, address,
-# geo, category, phone, hours, first photos) and inserts the venue row with
-# adea_status='generating'. NO Firecrawl/Perplexity/OpenAI/CSE — instant. The
-# INSERT itself is the 'place seeded' notification (admin feed derives it from
-# venues.created_at). Internal-only; invoked by the create paths (business-
-# create-unit) with the service-role bearer.
-[functions.atlas-seed-place]
-verify_jwt = false
-
 # Place enricher agent — runs the Atlas tier pipeline (Google contents → links →
 # source gather → image funnel → grounded synthesis) to complete the venue
 # profile (details{}, About, menus, popular times, photos). Internal-only;
@@ -264,6 +255,22 @@ verify_jwt = true
 # business-create-unit, admin-gated, no businesses upsert.
 [functions.admin-create-unit]
 verify_jwt = true
+
+# Staggered scheduler: consumer/admin enqueue a scheduled_unit_creations row; the
+# pg_cron poller drips due rows to the service-gated atlas-run-scheduled-create.
+[functions.consumer-schedule-unit-creation]
+verify_jwt = true
+
+[functions.admin-schedule-unit-creation]
+verify_jwt = true
+
+[functions.admin-schedule-multiple-units-creation]
+verify_jwt = true
+
+# Service-gated internal create the poller invokes per due placeId
+# (get-enriched -> save-unit-data -> save-place-media; updates the queue row).
+[functions.atlas-run-scheduled-create]
+verify_jwt = false
 
 [functions.business-update-unit]
 verify_jwt = true

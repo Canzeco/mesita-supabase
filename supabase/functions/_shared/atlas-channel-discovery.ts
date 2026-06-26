@@ -163,9 +163,37 @@ function nameTokens(s: string): string[] {
     .filter((t) => t.length >= 3);
 }
 
+// Main registrable label of a host (label before the TLD): "cosmoprofbeauty"
+// for both "cosmoprofbeauty.com" and "stores.cosmoprofbeauty.com".
+function mainDomainLabel(host: string): string {
+  const parts = host.replace(/^www\./, "").toLowerCase().split(".").filter(Boolean);
+  return parts.length >= 2 ? parts[parts.length - 2] : (parts[0] ?? "");
+}
+
+// Fraction of a candidate host's main-label letters that the venue-name tokens
+// account for. A bare substring match is too loose — "cosmo" is inside the
+// unrelated "cosmoprofbeauty" — so we require the name to COVER a strong majority
+// of the label. Rejects cosmoprofbeauty (0.33) while accepting cosmosanpedro
+// (1.0) or cosmosp (0.71).
+function hostNameCoverage(host: string, name: string): number {
+  const letters = mainDomainLabel(host).replace(/[^a-z0-9]/g, "");
+  const toks = nameTokens(name);
+  if (!letters || !toks.length) return 0;
+  let covered = 0;
+  let rest = letters;
+  for (const t of [...toks].sort((a, b) => b.length - a.length)) {
+    const idx = rest.indexOf(t);
+    if (idx !== -1) {
+      covered += t.length;
+      rest = rest.slice(0, idx) + rest.slice(idx + t.length);
+    }
+  }
+  return covered / letters.length;
+}
+
 // ── Phase 1 — anchor the official website ────────────────────────────────────
-// One Firecrawl search. Prefer a result whose host carries a venue-name token
-// (guards against harvesting a different business's footer), else first plausible.
+// One Firecrawl search. Keep a result whose host is strongly name-matched
+// (guards against harvesting a DIFFERENT business's footer); none → no website.
 async function findWebsite(
   firecrawlKey: string,
   name: string,
@@ -181,12 +209,13 @@ async function findWebsite(
     .map((u) => pickWebsite([u]))
     .filter((u): u is string => !!u);
   if (!sites.length) return null;
-  const toks = nameTokens(name);
-  const named = sites.find((u) => {
-    const h = domainOf(u) ?? "";
-    return toks.some((t) => h.includes(t));
-  });
-  return named ?? sites[0];
+  // Require the candidate host's main label to be strongly EXPLAINED by the venue
+  // name. A loose substring match ("cosmo" ⊂ "cosmoprofbeauty") once resolved
+  // "Cosmo San Pedro" to a beauty-supply store. No confident match → return null
+  // (no website) rather than guessing sites[0]: a wrong site poisons footer
+  // harvest + website images downstream.
+  const named = sites.find((u) => hostNameCoverage(domainOf(u) ?? "", name) >= 0.55);
+  return named ?? null;
 }
 
 // ── Phase 2 — harvest the website footer ─────────────────────────────────────
