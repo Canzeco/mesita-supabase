@@ -137,7 +137,11 @@ begin
 end;
 $$;
 
-revoke all on function public.run_scheduled_unit_creations() from anon, authenticated;
+-- Revoke from PUBLIC (not just anon/authenticated): Postgres grants EXECUTE to
+-- PUBLIC by default, so revoking only anon/authenticated leaves the function
+-- callable via PostgREST RPC. The pg_cron job runs as the owner, so it is
+-- unaffected. (Supabase linter 0028/0029.)
+revoke all on function public.run_scheduled_unit_creations() from public;
 
 -- ── Schedules: poller every 10s + a daily cron-history cleanup ──────────────
 -- Idempotent: drop any prior schedule of the same name before (re)adding.
