@@ -36,9 +36,9 @@ import { instagramHandleFromUrl } from "../_shared/apify.ts";
 import {
   discoverEmailPerplexity,
   discoverPhonePerplexity,
-  fbSlugCandidate,
   resolveChannels,
 } from "../_shared/atlas-channel-discovery.ts";
+import { fbSlugCandidate } from "../_shared/channels.ts";
 import {
   loadAtlasConfig,
   type MediaAssetPayload,
@@ -127,7 +127,6 @@ Deno.serve(async (req) => {
 
   // Step S3 — all channel links resolved in one Link Discovery Agent (Agent Y) pass.
   const needsDiscovery =
-    cfg.linkDiscoveryLayer &&
     (!!FIRECRAWL_KEY || !!PERPLEXITY_KEY) &&
     (!resolvedInstagram ||
       !resolvedFacebook ||
@@ -141,7 +140,7 @@ Deno.serve(async (req) => {
       !resolvedEmail);
   const runDiscovery = needsDiscovery;
 
-  const runReviews = cfg.googleLayer && !!APIFY_KEY && !!placeId;
+  const runReviews = !!APIFY_KEY && !!placeId;
 
   // ── Step S1 — Google business contents ────────────────────────────────────
   let reviews: Record<string, unknown>[] = [];
@@ -166,7 +165,7 @@ Deno.serve(async (req) => {
   // grounds Agent Y's discovery prompts and the final Cognition synthesis, but
   // is never an authoritative source of facts/ratings/prices.
   let serpSummary: string | null = null;
-  if (cfg.serpLayer && !!PERPLEXITY_KEY) {
+  if (PERPLEXITY_KEY) {
     const serp = await gatherSerpSummary({
       perplexityKey: PERPLEXITY_KEY!,
       name,
@@ -187,8 +186,6 @@ Deno.serve(async (req) => {
       locationLine,
       category,
       serpContext: serpSummary ?? undefined,
-      resolveReservationDelivery: true,
-      resolveNicheSocial: true,
       have: {
         instagram: resolvedInstagram,
         facebook: resolvedFacebook,
@@ -286,17 +283,13 @@ Deno.serve(async (req) => {
   // FB slug reused as a handle, or a Perplexity lookup) — every candidate is
   // verify-gated, so widening the gate never attaches a wrong account.
   const canDiscoverIg = !!igHandle || !!fbHandleCandidate || !!PERPLEXITY_KEY;
-  const runInstagram =
-    cfg.sourceGatherLayer && !!APIFY_KEY && canDiscoverIg;
-  const runWebsite =
-    cfg.sourceGatherLayer && !!FIRECRAWL_KEY && !!resolvedWebsite;
+  const runInstagram = !!APIFY_KEY && canDiscoverIg;
+  const runWebsite = !!FIRECRAWL_KEY && !!resolvedWebsite;
   const maxVisionImages = cfg.visionEnabled
     ? cfg.analyzeGoogleImages + cfg.analyzeWebsiteImages + cfg.analyzeInstagramImages
     : 0;
-  const runVision =
-    cfg.perceptionLayer && cfg.visionEnabled && !!OPENAI_KEY && maxVisionImages > 0;
-  const runFacebook =
-    cfg.sourceGatherLayer && !!APIFY_KEY && !!resolvedFacebook;
+  const runVision = cfg.visionEnabled && !!OPENAI_KEY && maxVisionImages > 0;
+  const runFacebook = !!APIFY_KEY && !!resolvedFacebook;
 
   let ig: InstagramResult | null = null;
   let fb: FacebookResult | null = null;

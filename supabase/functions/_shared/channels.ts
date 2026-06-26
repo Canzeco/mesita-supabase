@@ -194,6 +194,22 @@ export function facebookPageFromUrl(url: string | null | undefined): string | nu
   return `https://www.facebook.com/${u.pathname.split("/").filter(Boolean)[0]}`;
 }
 
+// Bare page slug of a Facebook URL, usable as an Instagram-handle candidate
+// (venues reuse handles across networks). Numeric profile.php?id= pages and
+// anything outside the IG handle charset (≤30 of [A-Za-z0-9._]) return null.
+export function fbSlugCandidate(url: string | null | undefined): string | null {
+  const page = facebookPageFromUrl(url);
+  if (!page) return null;
+  let seg: string;
+  try {
+    seg = new URL(page).pathname.split("/").filter(Boolean)[0] ?? "";
+  } catch {
+    return null;
+  }
+  if (!seg || seg === "profile.php") return null;
+  return /^[A-Za-z0-9._]{2,30}$/.test(seg) ? seg : null;
+}
+
 // First search result that resolves to a real Instagram profile (skips /p/,
 // /reel/, /explore/ etc. via instagramHandleFromUrl) → canonical URL.
 export function pickInstagram(urls: string[]): string | null {
