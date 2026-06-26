@@ -36,7 +36,7 @@ type PlacePayload = Record<string, unknown> & {
   google_place_id?: string;
   name?: string;
 };
-type Body = { place?: PlacePayload };
+type Body = { place?: PlacePayload; adea_status?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -57,6 +57,13 @@ Deno.serve(async (req) => {
   const name = (place.name ?? "").toString().trim();
   if (!googlePlaceId) return json({ ok: false, error: "place.google_place_id is required" }, 400);
   if (!name) return json({ ok: false, error: "place.name is required" }, 400);
+
+  // adea_status is caller-controlled: the synchronous create lands 'ready'; the
+  // async create path lands 'generating' (the n8n Enricher flips it to 'ready'
+  // later via atlas-update-unit-data). Defaults to 'ready' for back-compat.
+  const ADEA_STATUSES = new Set(["queued", "generating", "ready", "failed"]);
+  const adeaRaw = (bodyRes.body.adea_status ?? "ready").toString().trim();
+  const adeaStatus = ADEA_STATUSES.has(adeaRaw) ? adeaRaw : "ready";
 
   const admin = adminClient(envRes.env);
 
@@ -117,7 +124,7 @@ Deno.serve(async (req) => {
       slug,
       status: "active",
       listing_type: "web",
-      adea_status: "ready",
+      adea_status: adeaStatus,
     })
     .select("id, slug, status")
     .single();

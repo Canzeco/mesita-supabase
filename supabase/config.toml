@@ -183,6 +183,12 @@ verify_jwt = false
 [functions.atlas-save-unit-data]
 verify_jwt = false
 
+# UPDATE half of the ASYNC enrich pipeline — writes the enriched profile onto the
+# existing places/units row (UPDATE by id; flips adea_status → 'ready'). Internal-only;
+# invoked by the n8n Enricher with the service-role bearer after atlas-get-enriched-place.
+[functions.atlas-update-unit-data]
+verify_jwt = false
+
 # Place enricher agent — runs the Atlas tier pipeline (Google contents → links →
 # source gather → image funnel → grounded synthesis) to complete the venue
 # profile (details{}, About, menus, popular times, photos). Internal-only;

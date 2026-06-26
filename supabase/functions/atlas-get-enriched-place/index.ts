@@ -48,7 +48,10 @@ import { fetchVenueCategories, inferVenueCategory } from "../_shared/categories.
 import { humanizeCategorySlug } from "../_shared/parse-utils.ts";
 import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
 
-type Body = { placeId?: string };
+// minimal=true → Default process: return after S0 (Google basics) + category
+// only — skip Apify/Perplexity/Firecrawl/vision/synthesis. The async create path
+// uses this to land a fast placeholder; the n8n Enricher re-runs this in FULL.
+type Body = { placeId?: string; minimal?: boolean };
 
 Deno.serve(async (req) => {
   // ━━━ guards ━━━
@@ -65,6 +68,7 @@ Deno.serve(async (req) => {
   if (!bodyRes.ok) return bodyRes.response;
   const placeId = (bodyRes.body.placeId ?? "").toString().trim();
   if (!placeId) return json({ ok: false, error: "placeId is required" }, 400);
+  const minimal = bodyRes.body.minimal === true;
 
   const GOOGLE_KEY = Deno.env.get("GMP_KEY") ?? Deno.env.get("SUPA_GMP_KEY");
   if (!GOOGLE_KEY) return json({ ok: false, error: "Server misconfigured (missing core secrets)" }, 500);
@@ -92,6 +96,46 @@ Deno.serve(async (req) => {
   const name = basics.name;
   const locationLine = [basics.address, basics.city].filter(Boolean).join(", ");
   const category = basics.category;
+
+  // ━━━ MINIMAL mode (Default process) — Google basics + category only ━━━
+  // Lands a fast placeholder row for the async create path. The Google spine
+  // (name/geo/seed channels/phone/email/photos) is already in `place`; we only
+  // add an inferred category, then return. Deep enrichment (Apify reviews,
+  // Perplexity SERP/discovery, Firecrawl, vision, synthesis) is done later by the
+  // n8n Enricher, which re-runs this function in FULL and persists via
+  // atlas-update-unit-data.
+  if (minimal) {
+    let inferred: string | null = null;
+    let candidateCount = 0;
+    if (OPENAI_KEY) {
+      const categoryList = await fetchVenueCategories(admin);
+      candidateCount = categoryList.length;
+      inferred = await inferVenueCategory(OPENAI_KEY, categoryList, {
+        name,
+        address: basics.address,
+        editorialSummary: basics.editorial_summary ?? null,
+        description: null,
+      });
+      if (inferred) {
+        place.category = inferred;
+        place.category_label =
+          categoryList.find((c) => c.slug === inferred)?.label ??
+          humanizeCategorySlug(inferred) ?? inferred;
+      }
+    }
+    sources.minimal = true;
+    sources.category = { ok: !!inferred, slug: inferred, candidates: candidateCount };
+    return json({
+      ok: true,
+      minimal: true,
+      place,
+      media_assets: [],
+      preferred_photo_urls: Array.isArray(place.photos) ? (place.photos as string[]) : [],
+      sources,
+      fields_filled: Object.keys(place).filter((k) => k !== "enriched_at" && k !== "enrichment_sources"),
+      caller: callerRes.callerName,
+    });
+  }
 
   // Channels seeded from Google; discovery fills the gaps.
   let resolvedInstagram = basics.instagram_url;
