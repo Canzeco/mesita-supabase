@@ -168,7 +168,12 @@ verify_jwt = false
 [functions.atlas-discover-places]
 verify_jwt = false
 
-[functions.atlas-get-place]
+# Read-only create-pipeline compute step — folds the old seed + enrich into one
+# function: builds the Google identity spine in memory, runs the full ADEA
+# pipeline (S0–S5), and RETURNS the places-shaped profile + media as JSON (no DB
+# writes). Internal-only; the create/schedule callers invoke it with the
+# service-role bearer.
+[functions.atlas-get-enriched-place]
 verify_jwt = false
 
 # Synchronous Pre-ADEA seed — fetches Google Places BASICS only (name, address,
