@@ -1,9 +1,9 @@
-// Atlas SERP synthesis (Agent X) — Step S2. A fast Perplexity research pass that
-// returns a SHORT web-grounded editorial blurb (vibe, reputation, signature
-// dishes/drinks, notable press) used as SOFT context only — never an
-// authoritative source of facts, ratings, or prices. Its summary grounds Agent
-// Y's discovery prompts AND the final Cognition synthesis. Shares the one
-// Perplexity Agent client (perplexity-agent.ts) with Agent Y.
+// Atlas SERP summary — Step S2 · P2 (Perplexity, niche). A fast Perplexity
+// research pass that returns a SHORT web-grounded editorial blurb (vibe,
+// reputation, signature dishes/drinks, notable press) used as SOFT context only —
+// never an authoritative source of facts, ratings, or prices. Its summary grounds
+// P3's discovery prompts AND the final Cognition synthesis. Shares the one
+// Perplexity Agent client (perplexity-agent.ts) with P3.
 
 import { callPerplexityAgent } from "./perplexity-agent.ts";
 
