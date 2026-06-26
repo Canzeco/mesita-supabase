@@ -1,7 +1,7 @@
 // Atlas SERP synthesis (Agent X). A fast Perplexity research pass that returns a
 // SHORT web-grounded editorial blurb (vibe, reputation, signature dishes/drinks,
 // notable press) used as SOFT context only — never as an authoritative source of
-// facts, ratings, or prices. Runs as Tier 2 (after Google, before link
+// facts, ratings, or prices. Runs as Step S2 (after Google, before link
 // discovery): its summary is threaded into Agent Y's discovery prompts AND into
 // the final Cognition synthesis as extra grounding.
 //

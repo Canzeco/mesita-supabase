@@ -10,7 +10,7 @@
 //
 // What it DELIBERATELY does NOT do: Firecrawl, Perplexity, OpenAI synthesis,
 // Google CSE images, Instagram scraping. All of that is the heavy/redundant
-// path — atlas-enrich-place re-does every bit of it in its own tier pipeline,
+// path — atlas-enrich-place re-does every bit of it in its own step pipeline,
 // so create-time copies would just duplicate work and add latency. The
 // enricher runs asynchronously after this seed returns.
 //
@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
   // ── Channel extraction — Google-derived identity links only ──
   // Classify Google's websiteUri + googleMapsUri into our flat channel
   // columns. No Firecrawl links (we never scraped a site here), so no email
-  // either — atlas-enrich-place fills email/socials via its link-discovery tier.
+  // either — atlas-enrich-place fills email/socials via its link-discovery step.
   const channels = classifyLinks([details.websiteUri, details.googleMapsUri]);
   const email = null;
 

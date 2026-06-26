@@ -49,7 +49,7 @@ const DELIVERY_CHANNELS_SCHEMA = {
   },
 } as const;
 
-// ADEA niche-social Link fields (T3): TikTok / TripAdvisor / Yelp. Link-only,
+// ADEA niche-social Link fields (S3): TikTok / TripAdvisor / Yelp. Link-only,
 // low-priority, same Firecrawl-Search + Perplexity-Agent chain.
 const NICHE_CHANNELS_SCHEMA = {
   type: "object",
@@ -528,8 +528,8 @@ export async function resolveChannels(opts: {
   // Agent X SERP summary — soft web-grounded context, threaded into the
   // Perplexity discovery prompts (never the source of a URL).
   serpContext?: string;
-  // Tier-2 Link Discovery resolves every channel URL in one agent pass when
-  // the caller's source-tier ceiling reaches 2 (all links unlock together).
+  // Link discovery (step S3) resolves every channel URL in one agent pass when
+  // the caller's source-step ceiling reaches level 2 (all links unlock together).
   resolveReservationDelivery?: boolean;
   // Same gate — TikTok / TripAdvisor / Yelp ride the same agent call.
   resolveNicheSocial?: boolean;
@@ -781,7 +781,7 @@ export async function resolveChannels(opts: {
 
   // ── Phase 2 (Perplexity leg) — candidate generation via the Perplexity Agent,
   // running in PARALLEL with the Firecrawl leg above (NOT a fallback; ADEA
-  // policy is both providers always run when the key is present and the tier is
+  // policy is both providers always run when the key is present and the ceiling is
   // unlocked). The agent is handed the best Firecrawl candidate per field to
   // validate + fill, plus the Agent X SERP summary as soft grounding; its
   // candidate is recorded for cross-reference even when Firecrawl wins (the

@@ -114,8 +114,8 @@ Deno.serve(async (req) => {
   }
 
   // ── Sourcing ──────────────────────────────────────────────────────────
-  // ADEA tiers span T0–T5. T0 (Google/Mesita spine + the analysis brain) is
-  // always on and not a ceiling value; the ceiling selects T1–T5.
+  // ADEA steps span S0–S6. S0 (Google/Mesita spine + the Cognition brain) is
+  // always on and not a ceiling value; the source ceiling selects depth 1–5.
   if (body.sourceTierCeiling !== undefined) {
     const n = intInRange(body.sourceTierCeiling, 1, 5);
     if (n === null) {

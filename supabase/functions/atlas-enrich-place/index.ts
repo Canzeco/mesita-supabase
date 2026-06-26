@@ -2,22 +2,23 @@
 //
 // Atlas is THE caller/orchestrator for venue profile enrichment. business-create
 // -unit seeds the venue from Google Places, then hands it to this agent, which
-// runs the Atlas pipeline as an ordered TIER workflow — tasks within a tier run
-// in parallel, tiers run in sequence — ending in a grounded synthesis:
+// runs the Atlas pipeline as an ordered STEP workflow — tasks within a step run
+// in parallel, steps run in sequence — ending in a grounded synthesis:
 //
-//   Tier 1  Google data       Apify Google Maps → reviews, ratings, photos.
-//   Tier 2  SERP synthesis     Agent X (Perplexity) → SHORT web-grounded editorial
+//   Step S1  Google data      Apify Google Maps → reviews, ratings, photos.
+//   Step S2  SERP synthesis    Agent X (Perplexity) → SHORT web-grounded editorial
 //                             color (vibe, reputation, signature dishes, press).
 //                             SOFT signal; feeds Agent Y context + final synthesis.
-//   Tier 3  Link discovery     Agent Y → every missing channel link in one batch;
+//   Step S3  Link discovery    Agent Y → every missing channel link in one batch;
 //                             Firecrawl + Perplexity BOTH run (perp NOT a fallback),
 //                             then false-positive + false-negative passes.
-//   Tier 4  Source + perceive ∥ Apify Instagram · Apify Facebook · Firecrawl site,
-//                             then image vision funnel (text-perception leg removed).
-//   Tier 5  Heavy scrapes     OpenTable + TripAdvisor contents (when implemented).
-//   Final   Synthesis (T0)     Cognition Agent compiles the profile from ALL
-//                             gathered material only (no re-search → can't drift):
+//   Step S4  Source contents  ∥ Apify Instagram · Apify Facebook · Firecrawl site
+//                             (optional heavy scrapes: OpenTable + TripAdvisor).
+//   Step S5  Perceive + write  image vision funnel (text-perception leg removed),
+//                             then Cognition compiles the profile from ALL gathered
+//                             material only (no re-search → can't drift):
 //                             About + tags + category + selected images → write.
+//   Step S6  Storage           selected images mirrored to Supabase Storage.
 //
 // CONFIG: every knob lives in app_settings, read at run time (the DB is the
 // single source of truth). Every source is best-effort + independent; whatever
@@ -124,7 +125,7 @@ Deno.serve(async (req) => {
   // last-resort Perplexity leg below when it's still empty.
   let resolvedEmail = strOrNull(row.email);
 
-  // Tier 3 — all channel links resolved in one Link Discovery Agent (Agent Y) pass.
+  // Step S3 — all channel links resolved in one Link Discovery Agent (Agent Y) pass.
   const needsDiscovery =
     cfg.linkDiscoveryLayer &&
     (!!FIRECRAWL_KEY || !!PERPLEXITY_KEY) &&
@@ -142,7 +143,7 @@ Deno.serve(async (req) => {
 
   const runReviews = cfg.googleLayer && !!APIFY_KEY && !!placeId;
 
-  // ── Tier 1 — Google business contents ────────────────────────────────────
+  // ── Step S1 — Google business contents ────────────────────────────────────
   let reviews: Record<string, unknown>[] = [];
   let reviewCount: number | null = null;
   let googleReviewsText = "";
@@ -160,7 +161,7 @@ Deno.serve(async (req) => {
     sources.apify_google_reviews = g.diag;
   }
 
-  // ── Tier 2 — SERP synthesis (Agent X; soft web-grounded color) ───────────────
+  // ── Step S2 — SERP synthesis (Agent X; soft web-grounded color) ───────────────
   // Runs AFTER Google, BEFORE discovery. The summary is SOFT context only: it
   // grounds Agent Y's discovery prompts and the final Cognition synthesis, but
   // is never an authoritative source of facts/ratings/prices.
@@ -176,7 +177,7 @@ Deno.serve(async (req) => {
     sources.serp = serp.diag;
   }
 
-  // ── Tier 3 — Link discovery (Agent Y; all channels in one pass) ──────────────────
+  // ── Step S3 — Link discovery (Agent Y; all channels in one pass) ──────────────────
   if (runDiscovery) {
     const found = await resolveChannels({
       firecrawlKey: FIRECRAWL_KEY,
@@ -261,7 +262,7 @@ Deno.serve(async (req) => {
 
   // Persist newly resolved channels. instagram_url is deliberately NOT persisted
   // here — for a generic name the searched candidate may be a different same-
-  // named account, so it persists only AFTER the IG scrape verifies it (Tier 4).
+  // named account, so it persists only AFTER the IG scrape verifies it (Step S4).
   if (resolvedFacebook && resolvedFacebook !== row.facebook_url) update.facebook_url = resolvedFacebook;
   if (resolvedWebsite && resolvedWebsite !== row.website_url) update.website_url = resolvedWebsite;
   // OpenTable/Uber Eats + niche socials are host + shape-validated links (no
@@ -280,7 +281,7 @@ Deno.serve(async (req) => {
   const igHandle = instagramHandleFromUrl(resolvedInstagram);
   const fbHandleCandidate = fbSlugCandidate(resolvedFacebook);
 
-  // ── Tier 4 — Source gather + perception (parallel; depends on Tier 3 links) ──
+  // ── Step S4 — Source gather (parallel; depends on Step S3 links) ──
   // Run IG whenever we have ANY way to reach a candidate (resolved handle, the
   // FB slug reused as a handle, or a Perplexity lookup) — every candidate is
   // verify-gated, so widening the gate never attaches a wrong account.
@@ -359,7 +360,7 @@ Deno.serve(async (req) => {
     update.instagram_url = igR.verifiedInstagramUrl;
   }
 
-  // ── Tier 4 — Image perception (vision funnel; text-perception leg removed) ────────────
+  // ── Step S5 — Image perception (vision funnel; text-perception leg removed) ────────────
   const funnel = await runImageFunnel({
     googleImages,
     websiteImages,
@@ -381,7 +382,7 @@ Deno.serve(async (req) => {
   if (funnel.finalPhotos.length > 0) update.photos = funnel.finalPhotos;
   sources.image_funnel = funnel.diag;
 
-  // ── Final (T0) — grounded synthesis (Cognition Agent) + category + persist ──
+  // ── Step S5 (Final) — grounded synthesis (Cognition Agent) + category + persist ──
   // Compiles the profile from ALL gathered material with NO re-search: the About
   // narrative + structured details, the inferred category (below), and the final
   // selected images (already chosen by the image funnel above, persisted into
