@@ -1,7 +1,7 @@
-// Atlas channel URL discovery (Agent Y) — Step S3. WEBSITE-FIRST: a venue's own
-// site footer is the highest-precision source of its official channels, so we
-// anchor on the website, classify its outbound links, then make ONE Perplexity
-// Agent call to fill only what's still missing. Every URL is host + shape
+// Atlas channel URL discovery — Step S3, WEBSITE-FIRST: a venue's own site footer
+// is the highest-precision source of its official channels, so we anchor on the
+// website, classify its outbound links, then make ONE Perplexity Agent call — P3,
+// the niche gap-filler — to fill only what's still missing. Every URL is host + shape
 // validated before it's trusted. No scoring engine, no multi-pass FP/FN review.
 //
 //   Phase 0  SEED      keep anything already supplied (Google/Mesita); freeze it.
@@ -322,7 +322,7 @@ async function firecrawlSearchFill(
   return out;
 }
 
-// ── resolveChannels (Agent Y entry) ──────────────────────────────────────────
+// ── resolveChannels — Step S3 link-discovery entry (P3 is the gap-fill within) ──
 export async function resolveChannels(opts: {
   firecrawlKey?: string;
   perplexityKey?: string;
@@ -330,7 +330,7 @@ export async function resolveChannels(opts: {
   city: string | null;
   locationLine: string;
   category: string | null;
-  // Agent X SERP summary — soft grounding for the Perplexity fill prompt.
+  // P2 SERP summary — soft grounding for the Perplexity fill prompt.
   serpContext?: string;
   have: {
     instagram: string | null;
@@ -448,7 +448,7 @@ function normaliseEmail(raw: unknown): string | null {
 }
 
 // Last-resort public phone lookup, used only when the Mesita seed + Google gave
-// nothing. Grounded by the website + Agent X SERP summary. null on anything
+// nothing. Grounded by the website + P2 SERP summary. null on anything
 // uncertain (a wrong number is worse than a missing one).
 export async function discoverPhonePerplexity(
   key: string,

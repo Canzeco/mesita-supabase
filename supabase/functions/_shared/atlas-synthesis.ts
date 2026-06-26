@@ -105,7 +105,7 @@ export async function synthesizeProfile(input: {
   igBio: string;
   googleReviewsText: string;
   siteMarkdown: string;
-  // Agent X (SERP) web-grounded editorial color — SOFT context only, never
+  // P2 (SERP) web-grounded editorial color — SOFT context only, never
   // authoritative. Labelled as such in the grounding block so synthesis treats
   // it as background, not as a source of facts/ratings/prices.
   serpSummary?: string | null;

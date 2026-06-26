@@ -1,15 +1,15 @@
 // Shared Perplexity Agent (pro-search) client. One fetch/parse contract for
-// every Atlas Perplexity call: Agent X's SERP summary (atlas-serp.ts) and Agent
-// Y's channel fill + phone/email legs (atlas-channel-discovery.ts). Best-effort:
-// any non-2xx / network / parse failure returns null, so callers degrade to null.
+// every Atlas Perplexity call: P2's SERP summary (atlas-serp.ts) and P3's channel
+// fill + phone/email legs (atlas-channel-discovery.ts). Best-effort: any non-2xx /
+// network / parse failure returns null, so callers degrade to null.
 
 import { safeParseJson } from "./parse-utils.ts";
 
 const PERPLEXITY_AGENT_URL = "https://api.perplexity.ai/v1/agent";
 const PERPLEXITY_AGENT_PRESET = "pro-search";
 
-// Default agent instructions — URL resolution (Agent Y's discovery + phone/email
-// legs). Agent X overrides with its own editorial-context instructions.
+// Default agent instructions — URL resolution (P3's discovery + phone/email
+// legs). P2 overrides with its own editorial-context instructions.
 const DEFAULT_INSTRUCTIONS =
   "Resolve venue URLs by anchoring on the official website and trusting the links the site itself points to. Output only JSON matching the schema. Never fabricate URLs; prefer null when unsure.";
 

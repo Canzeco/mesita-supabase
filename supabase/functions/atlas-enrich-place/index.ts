@@ -1,32 +1,36 @@
-// Supabase Edge Function — atlas-enrich-place (artificial caller / agent)
+// Supabase Edge Function — atlas-enrich-place (ADEA orchestrator)
 //
-// Atlas is THE caller/orchestrator for venue profile enrichment. business-create
-// -unit seeds the venue from Google Places, then hands it to this agent, which
-// runs the Atlas pipeline as an ordered STEP workflow — tasks within a step run
-// in parallel, steps run in sequence — ending in a grounded synthesis:
+// THE caller/orchestrator for venue profile enrichment. business-create-unit (or
+// admin-enrich-place on re-run) seeds the venue from Google Places, then hands it
+// here. ADEA runs as an ordered STEP workflow — tasks within a step run in
+// parallel, steps run in sequence — ending in a grounded synthesis. EVERY step
+// runs on every enrichment; a step is skipped only when its real prerequisites are
+// missing (no API key, or no input to act on). There is no admin "ceiling".
 //
-//   Step S1  Google data      Apify Google Maps → reviews, ratings, photos.
-//   Step S2  SERP synthesis    Agent X (Perplexity) → SHORT web-grounded editorial
-//                             color (vibe, reputation, signature dishes, press).
-//                             SOFT signal; feeds Agent Y context + final synthesis.
-//   Step S3  Link discovery    Agent Y → every missing channel link in one batch;
-//                             Firecrawl + Perplexity BOTH run (perp NOT a fallback),
-//                             then false-positive + false-negative passes.
-//   Step S4  Source contents  ∥ Apify Instagram · Apify Facebook · Firecrawl site
-//                             (optional heavy scrapes: OpenTable + TripAdvisor).
-//   Step S5  Perceive + write  image vision funnel (text-perception leg removed),
-//                             then Cognition compiles the profile from ALL gathered
-//                             material only (no re-search → can't drift):
-//                             About + tags + category + selected images → write.
-//   Step S6  Storage           selected images mirrored to Supabase Storage.
+//   S1  Google data     Apify Google Maps → reviews, ratings, photos        · tools
+//   S2  SERP summary    P2 → SHORT web-grounded editorial color (vibe,       · agent
+//                       reputation, signature dishes, press). SOFT signal;
+//                       grounds P3 + the final synthesis.
+//   S3  Link discovery  WEBSITE-FIRST: anchor the official site + harvest    · tools
+//                       its footer (Firecrawl); P3 fills the still-missing    + agent
+//                       channels and the phone/email last-resort (Perplexity).
+//   S4  Source contents ∥ Apify Instagram · Apify Facebook · Firecrawl site  · tools
+//   S5  Perceive+write  image vision funnel, then Cognition compiles the     · OpenAI
+//                       profile from ALL gathered material only (no re-search
+//                       → can't drift): About + tags + category + images.
+//   S6  Storage         selected images mirrored to Supabase Storage         · tool
 //
-// CONFIG: every knob lives in app_settings, read at run time (the DB is the
-// single source of truth). Every source is best-effort + independent; whatever
-// fails degrades to null.
+// AGENTS: just two niche Perplexity helpers — P2 (S2 summary) and P3 (S3 gap-fill
+// + phone/email) — plus OpenAI Cognition/Vision in S5. Everything else is tools.
 //
-// Agent contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Invoked by business-create-unit (on create) and admin-enrich-place
-// (re-run). Writes the venue row + enrichment_sources.
+// Code sections below: ① guards · ② load & lock · ③ config & keys · ④ step chain
+// (S1–S6) · ⑤ persist & respond.
+//
+// CONFIG: every knob lives in app_settings, read at run time (DB = single source of
+// truth). Every source is best-effort + independent; whatever fails degrades to null.
+//
+// Contract: verify_jwt=false; requireInternalCaller gates the service-role bearer.
+// Writes the venue row + enrichment_sources.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -63,6 +67,7 @@ type Body = { venue_id?: string };
 const strOrNull = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
 
 Deno.serve(async (req) => {
+  // ━━━ ① GUARDS — method · env · internal caller · body(venue_id) ━━━
   if (req.method === "OPTIONS") return corsPreflight();
   if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
 
@@ -76,6 +81,7 @@ Deno.serve(async (req) => {
   const venueId = (bodyRes.body.venue_id ?? "").toString().trim();
   if (!venueId) return json({ ok: false, error: "venue_id is required" }, 400);
 
+  // ━━━ ② LOAD & LOCK — fetch venue (seed identity + channels) · flip 'generating' ━━━
   const admin = adminClient(envRes.env);
   const { data: row } = await admin
     .from("venues")
@@ -92,6 +98,7 @@ Deno.serve(async (req) => {
   // caller marks 'failed' if this invocation errors.
   await admin.from("venues").update({ adea_status: "generating" }).eq("id", venueId);
 
+  // ━━━ ③ CONFIG & KEYS — admin knobs + provider keys; every step gates on these ━━━
   // Admin config (app_settings) — read at run time; callers don't pass overrides.
   const cfg = await loadAtlasConfig(admin);
 
@@ -118,14 +125,15 @@ Deno.serve(async (req) => {
   let resolvedTripAdvisor = strOrNull(row.tripadvisor_url);
   let resolvedYelp = strOrNull(row.yelp_url);
   // Phone is NOT a URL — handled outside the channel discovery pool. Mesita seed
-  // (the venues.phone column from create) is the first source; Agent Y has a
+  // (the venues.phone column from create) is the first source; P3 has a
   // last-resort Perplexity leg below when it's still empty.
   let resolvedPhone = strOrNull(row.phone);
-  // Email is NOT a URL either — Mesita seed (venues.email) first; Agent Y has a
+  // Email is NOT a URL either — Mesita seed (venues.email) first; P3 has a
   // last-resort Perplexity leg below when it's still empty.
   let resolvedEmail = strOrNull(row.email);
 
-  // Step S3 — all channel links resolved in one Link Discovery Agent (Agent Y) pass.
+  // S3 prerequisite — discovery runs only when a provider key is present AND at
+  // least one channel/contact is still missing (nothing to do otherwise).
   const needsDiscovery =
     (!!FIRECRAWL_KEY || !!PERPLEXITY_KEY) &&
     (!resolvedInstagram ||
@@ -141,6 +149,8 @@ Deno.serve(async (req) => {
   const runDiscovery = needsDiscovery;
 
   const runReviews = !!APIFY_KEY && !!placeId;
+
+  // ━━━ ④ STEP CHAIN (S1–S6) — every step runs on its prerequisites; no ceiling ━━━
 
   // ── Step S1 — Google business contents ────────────────────────────────────
   let reviews: Record<string, unknown>[] = [];
@@ -160,10 +170,10 @@ Deno.serve(async (req) => {
     sources.apify_google_reviews = g.diag;
   }
 
-  // ── Step S2 — SERP synthesis (Agent X; soft web-grounded color) ───────────────
+  // ── Step S2 — SERP summary · P2 (Perplexity, niche) ───────────────────────────
   // Runs AFTER Google, BEFORE discovery. The summary is SOFT context only: it
-  // grounds Agent Y's discovery prompts and the final Cognition synthesis, but
-  // is never an authoritative source of facts/ratings/prices.
+  // grounds P3's discovery prompts and the final Cognition synthesis, but is
+  // never an authoritative source of facts/ratings/prices.
   let serpSummary: string | null = null;
   if (PERPLEXITY_KEY) {
     const serp = await gatherSerpSummary({
@@ -176,7 +186,7 @@ Deno.serve(async (req) => {
     sources.serp = serp.diag;
   }
 
-  // ── Step S3 — Link discovery (Agent Y; all channels in one pass) ──────────────────
+  // ── Step S3 — Link discovery · website-first; P3 (Perplexity) fills gaps ──────
   if (runDiscovery) {
     const found = await resolveChannels({
       firecrawlKey: FIRECRAWL_KEY,
@@ -206,7 +216,7 @@ Deno.serve(async (req) => {
     if (!resolvedTripAdvisor && found.tripadvisor_url) resolvedTripAdvisor = found.tripadvisor_url;
     if (!resolvedYelp && found.yelp_url) resolvedYelp = found.yelp_url;
 
-    // Agent Y last-resort PHONE leg: phone isn't a URL, so it rides outside the
+    // P3 last-resort PHONE leg: phone isn't a URL, so it rides outside the
     // channel pool. Only when still empty (Mesita seed missed, Google exposed
     // none) and a Perplexity key is present. Returns a normalised number or null.
     let phoneVia: string | null = null;
@@ -223,7 +233,7 @@ Deno.serve(async (req) => {
         phoneVia = "perplexity";
       }
     }
-    // Agent Y last-resort EMAIL leg — same shape as phone: only when still empty.
+    // P3 last-resort EMAIL leg — same shape as phone: only when still empty.
     let emailVia: string | null = null;
     if (!resolvedEmail && PERPLEXITY_KEY) {
       const email = await discoverEmailPerplexity(
@@ -270,7 +280,7 @@ Deno.serve(async (req) => {
   if (resolvedTikTok && resolvedTikTok !== row.tiktok_url) update.tiktok_url = resolvedTikTok;
   if (resolvedTripAdvisor && resolvedTripAdvisor !== row.tripadvisor_url) update.tripadvisor_url = resolvedTripAdvisor;
   if (resolvedYelp && resolvedYelp !== row.yelp_url) update.yelp_url = resolvedYelp;
-  // Phone (Mesita seed or Agent Y's last-resort lookup); persist when changed.
+  // Phone (Mesita seed or P3's last-resort lookup); persist when changed.
   if (resolvedPhone && resolvedPhone !== row.phone) update.phone = resolvedPhone;
   // Email — same treatment as phone.
   if (resolvedEmail && resolvedEmail !== row.email) update.email = resolvedEmail;
@@ -379,7 +389,7 @@ Deno.serve(async (req) => {
   // Compiles the profile from ALL gathered material with NO re-search: the About
   // narrative + structured details, the inferred category (below), and the final
   // selected images (already chosen by the image funnel above, persisted into
-  // update.photos). The Agent X SERP summary rides along as SOFT context only.
+  // update.photos). The P2 SERP summary rides along as SOFT context only.
   if (!OPENAI_KEY) return json({ ok: false, error: "OPENAI_KEY not configured" }, 500);
   const synthesisModel = synthesisModelFor(cfg.synthesisQuality);
   const { parsed, diag } = await synthesizeProfile({
@@ -425,6 +435,7 @@ Deno.serve(async (req) => {
   // ever see a fully-enriched venue, never a half-written one.
   update.adea_status = "ready";
 
+  // ━━━ ⑤ PERSIST & RESPOND — single venue write (flip 'ready') · S6 media · reply ━━━
   const { error: updErr } = await admin.from("venues").update(update).eq("id", venueId);
   if (updErr) return json({ ok: false, error: `venue_update: ${updErr.message}` }, 500);
 
