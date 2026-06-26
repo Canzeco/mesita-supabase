@@ -1,14 +1,22 @@
-// Supabase Edge Function — business-create-unit
+// Supabase Edge Function — business-create-unit (LIVE business create path)
 //
-// The LIVE business create path. The signed-in business passes a Google
-// Places `placeId`; this function authenticates the business, delegates the
-// Google-basics seed to atlas-seed-place (sync), then dispatches
-// atlas-enrich-place (async) — no heavy work at create time. The seed inserts
-// the venue row (adea_status='generating') and returns { id, slug, name,
-// status }; the async enricher completes the profile and lands 'ready'. The
-// Firecrawl/Perplexity/OpenAI/CSE/Instagram pipeline that create used to run
-// inline is gone — atlas-enrich-place re-does every bit of it in its steps, so
-// running it here was pure duplication and made create slow.
+// The signed-in business passes a Google Places `placeId`. SYNCHRONOUS create —
+// the venue is fully enriched and 'ready' by the time this returns:
+//   1. authenticate the business + EARLY-dedupe on google_place_id (a cheap 409
+//      BEFORE any enrichment spend — the old seed gated cheaply, the new
+//      read-only pipeline is expensive so the caller must gate first),
+//   2. upsert the businesses row (ownership scaffolding),
+//   3. await atlas-get-enriched-place — read-only, builds the full profile JSON,
+//   4. await atlas-save-unit-data — writes the places + units rows,
+//   5. await atlas-save-place-media — mirrors photos (best-effort; a media
+//      failure never fails a created venue).
+//
+// The old seed → async-enrich (EdgeRuntime.waitUntil) flow is gone: there is no
+// 'generating' window anymore, enrichment completes inline.
+//
+// Intentionally NO venue_members insert — the caller becomes owner only when
+// admin-decide-verification approves the ownership claim; until then the venue
+// is publicly listed but unowned.
 //
 // Local:  supabase functions serve business-create-unit
 // Deploy: supabase functions deploy business-create-unit
@@ -18,15 +26,30 @@ import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
 import { invokeArtificialCaller } from "../_shared/internal.ts";
 
-// Supabase background-task API — keeps the worker alive past the HTTP response
-// so the fire-and-forget enrichment dispatch completes. Declared for deno check.
-declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
+type Body = { placeId?: string };
 
-type EnrichBody = { placeId?: string };
+// atlas-get-enriched-place response — the read-only profile compute.
+type EnrichedResult = {
+  place: Record<string, unknown> & {
+    name?: string;
+    photos?: unknown;
+    google_stars_overall?: number | null;
+    google_review_count?: number | null;
+    instagram_followers_count?: number | null;
+  };
+  media_assets?: unknown[];
+  preferred_photo_urls?: string[];
+  sources?: Record<string, unknown>;
+};
 
-// Shape atlas-seed-place returns on success. invokeArtificialCaller wraps this
-// in { ok: true, data: SeedResult } — read it from seedRes.data.
-type SeedResult = { id: string; slug: string; name: string; status: string };
+// atlas-save-unit-data response.
+type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
+
+const CHANNEL_KEYS = [
+  "website_url", "instagram_url", "facebook_url", "tiktok_url", "x_url", "threads_url",
+  "reddit_url", "whatsapp_url", "opentable_url", "resy_url", "uber_eats_url",
+  "didi_food_url", "tripadvisor_url", "yelp_url", "google_maps_url",
+];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -36,31 +59,44 @@ Deno.serve(async (req) => {
   if (!envRes.ok) return envRes.response;
   const env = envRes.env;
 
-  // Authenticate caller.
+  // Authenticate the business.
   const authRes = await getAuthedUser(req, env);
   if (!authRes.ok) return authRes.response;
   const userId = authRes.user.id;
   const userEmail = authRes.user.email;
 
   // Parse input.
-  const bodyRes = await readJson<EnrichBody>(req);
+  const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const placeId = (bodyRes.body.placeId ?? "").toString().trim();
   if (!placeId) return json({ ok: false, error: "placeId is required" }, 400);
 
-  // Service-role client for the businesses ownership upsert and the
-  // failed-marking write on the async enrich dispatch. atlas-seed-place owns
-  // the venue insert; the caller keeps the end-user-tied writes because the
-  // seed is venue-only and has no end user.
   const admin = adminClient(env);
 
-  // ── Business ownership ───────────────────────────────────────────────
-  // Upsert the signed-in business so the businesses row exists for any later
-  // ownership claim. This MUST run on the caller side — atlas-seed-place is
-  // venue-only and never sees the end user. Intentionally no venue_members
-  // insert: the caller becomes the owner only when admin-decide-verification
-  // approves their ownership claim; until then the venue is publicly listed
-  // but unowned.
+  // ── Early dedupe (idempotency on google_place_id) ─────────────────────────
+  // placeId IS the venue's google_place_id. Reject already-onboarded venues
+  // BEFORE spending any enrichment budget. atlas-save-unit-data dedupes again as
+  // a race guard, but gating here is what keeps a duplicate click cheap.
+  const { data: existing } = await admin
+    .from("venues")
+    .select("id, slug, name, status, listing_type")
+    .eq("google_place_id", placeId)
+    .maybeSingle();
+  if (existing) {
+    return json(
+      {
+        ok: false,
+        code: "venue_already_exists",
+        error: "This venue is already on Mesita. If you manage it, contact support to claim ownership.",
+        existing,
+      },
+      409,
+    );
+  }
+
+  // ── Ownership scaffolding ─────────────────────────────────────────────────
+  // Upsert the signed-in business so its row exists for any later ownership
+  // claim. NO venue_members insert — ownership lands at admin-decide-verification.
   const { error: businessError } = await admin
     .from("businesses")
     .upsert({ id: userId, email: userEmail }, { onConflict: "id" });
@@ -68,46 +104,49 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `business_upsert: ${businessError.message}` }, 500);
   }
 
-  // ── Delegate the Google-basics seed to atlas-seed-place (synchronous) ──
-  // The seed fetches Google Places BASICS only, inserts the venue row with
-  // adea_status='generating', is idempotent on google_place_id, and returns
-  // { id, slug, name, status }. We await it so the business gets a created
-  // venue back immediately. The seed already performs its own placeId dedupe
-  // and returns 409 venue_already_exists / 422 google_spine_incomplete /
-  // 502/503 google errors — we pass those through unchanged so the business
-  // UI is identical to before the refactor.
-  const seedRes = await invokeArtificialCaller<SeedResult>(
+  // ── 1) Enrich — read-only, synchronous. Builds the full places-shaped profile. ──
+  const enrichedRes = await invokeArtificialCaller<EnrichedResult>(
     env,
     "business-create-unit",
-    "atlas-seed-place",
+    "atlas-get-enriched-place",
     { placeId },
   );
-  if (!seedRes.ok) {
-    return json({ ok: false, error: seedRes.error }, seedRes.status || 502);
+  if (!enrichedRes.ok) {
+    return json({ ok: false, error: enrichedRes.error }, enrichedRes.status || 502);
   }
-  const venue = seedRes.data; // { id, slug, name, status }
+  const enriched = enrichedRes.data;
 
-  // ── Phase 2a: hand the fresh venue to the profile-enricher NON-BLOCKING ──
-  // Create returns immediately; the heavy Atlas pipeline runs in a background
-  // task (EdgeRuntime.waitUntil) keyed on the SEEDED venue id. The caller name
-  // stays 'business-create-unit' so admin-enrich attribution is unchanged.
-  // atlas-enrich-place keeps adea_status 'generating' while working then lands
-  // 'ready'; if the invocation errors we mark it 'failed' here (the enricher
-  // does NOT write 'failed' itself). The venue surfaces to consumers (RLS gates
-  // on adea_status='ready') only once enrichment completes. atlas-enrich-place
-  // reads only `venue_id` and re-loads everything else from the seeded row.
-  const markEnrichFailed = () =>
-    admin.from("venues").update({ adea_status: "failed" }).eq("id", venue.id);
-  EdgeRuntime.waitUntil(
-    invokeArtificialCaller(
+  // ── 2) Persist places + units (idempotent; lands status='active'/adea 'ready') ──
+  const saveRes = await invokeArtificialCaller<SaveResult>(
+    env,
+    "business-create-unit",
+    "atlas-save-unit-data",
+    { place: enriched.place },
+  );
+  if (!saveRes.ok) {
+    return json({ ok: false, error: saveRes.error }, saveRes.status || 502);
+  }
+  const saved = saveRes.data;
+  const venue = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
+
+  // ── 3) Persist media — best-effort. A media failure NEVER fails the venue. ──
+  const assets = Array.isArray(enriched.media_assets) ? enriched.media_assets : [];
+  let mediaSaved = false;
+  if (assets.length > 0) {
+    const mediaRes = await invokeArtificialCaller(
       env,
       "business-create-unit",
-      "atlas-enrich-place",
-      { venue_id: venue.id },
-    )
-      .then((enrichRes) => (enrichRes.ok ? undefined : markEnrichFailed()))
-      .catch(() => markEnrichFailed()),
-  );
+      "atlas-save-place-media",
+      { venue_id: saved.unit_id, assets, preferred_photo_urls: enriched.preferred_photo_urls ?? [] },
+    );
+    mediaSaved = mediaRes.ok;
+  }
+
+  // ── Respond — fully enriched + 'ready'. enrichment.* kept for business-web
+  // response-contract compatibility, now reporting real synchronous values. ──
+  const place = enriched.place ?? {};
+  const sources = enriched.sources ?? {};
+  const channelCount = CHANNEL_KEYS.filter((k) => !!place[k]).length;
 
   return json(
     {
@@ -115,30 +154,19 @@ Deno.serve(async (req) => {
       venue,
       enrichment: {
         google: true,
-        // Enrichment runs asynchronously now — reports the dispatch, not
-        // completion. The venue lands 'ready' (discoverable) in the background;
-        // adea_status starts 'generating' at seed time.
         enrichmentTriggered: true,
-        enrichmentAsync: true,
-        // The heavy create-time work (photo vision ranking, Firecrawl,
-        // Perplexity, OpenAI synth, Instagram, channel/CSE sourcing) moved into
-        // atlas-seed-place (basics) + atlas-enrich-place (the rest). These
-        // fields are kept for response-contract compatibility with existing
-        // business-web clients reading enrichment.* — they no longer report
-        // create-time work and so are neutralised. atlas-seed-place does not
-        // echo per-seed counts in its response today, so seed-derived values
-        // stay 0/null here.
-        photoCount: 0,
-        photoCandidates: 0,
-        photoRanked: false,
-        firecrawl: false,
-        perplexity: false,
-        openai: false,
+        enrichmentAsync: false,
+        photoCount: Array.isArray(place.photos) ? place.photos.length : 0,
+        photoCandidates: assets.length,
+        photoRanked: mediaSaved,
+        firecrawl: !!sources.firecrawl,
+        perplexity: !!(sources.serp || sources.discovery),
+        openai: !!sources.synthesis,
         openaiError: null,
-        channelCount: 0,
-        googleRating: null,
-        googleReviewCount: null,
-        instagramFollowers: null,
+        channelCount,
+        googleRating: (place.google_stars_overall as number | null) ?? null,
+        googleReviewCount: (place.google_review_count as number | null) ?? null,
+        instagramFollowers: (place.instagram_followers_count as number | null) ?? null,
       },
     },
     201,
