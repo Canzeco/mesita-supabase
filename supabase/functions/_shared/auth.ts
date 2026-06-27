@@ -1,12 +1,12 @@
-// Auth + venue-membership helpers shared by every business-* Edge
+// Auth + place-membership helpers shared by every business-* Edge
 // Function on the Team surface (and reusable anywhere else that needs
-// "is this caller allowed to touch this venue?").
+// "is this caller allowed to touch this place?").
 //
 // The three EF entry-points always look the same:
 //
 //   1. Read SUPABASE_URL / ANON_KEY / SERVICE_ROLE_KEY → 500 if missing
 //   2. Verify Bearer JWT → resolve auth.user → 401 if missing/invalid
-//   3. (Optionally) confirm the user is a member of a venue, possibly
+//   3. (Optionally) confirm the user is a member of a place, possibly
 //      with role ≥ X, with super_admins as a bypass — 403 otherwise
 //
 // Repeating all three inline 7 times is what this module exists to
@@ -156,24 +156,24 @@ export function adminClient(env: EFEnv): SupabaseClient {
 // ─── Membership ─────────────────────────────────────────────────────
 
 // Mirrors the public.member_role enum (see migration 0025). 'staff' is
-// legacy — only present on venue_members rows created before venue_roles
+// legacy — only present on project_members rows created before project_roles
 // existed; the Team UI speaks owner / editor / viewer.
 type MembershipRole = "owner" | "editor" | "viewer" | "staff";
 
 type Membership = {
   isSuperAdmin: boolean;
-  // The venue_members.role for the caller, or null when the caller has
+  // The project_members.role for the caller, or null when the caller has
   // no membership row (super-admins land here too — owners write access
   // either way via the isSuperAdmin flag).
   role: MembershipRole | null;
 };
 
-// Returns whether the caller is a member of the venue (or a
+// Returns whether the caller is a member of the place (or a
 // super-admin). Runs the two lookups in parallel.
 export async function checkMembership(
   admin: SupabaseClient,
   user: AuthedUser,
-  venueId: string,
+  projectId: string,
 ): Promise<Membership> {
   const saPromise = user.emailLower
     ? admin
@@ -184,9 +184,9 @@ export async function checkMembership(
     : Promise.resolve({ data: null });
 
   const vmPromise = admin
-    .from("venue_members")
+    .from("project_members")
     .select("role")
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .eq("business_id", user.id)
     .maybeSingle();
 
@@ -258,16 +258,16 @@ export async function requireSuperAdmin(
 export async function requireMembership(
   admin: SupabaseClient,
   user: AuthedUser,
-  venueId: string,
+  projectId: string,
 ): Promise<
   | { ok: true; membership: Membership }
   | { ok: false; response: Response }
 > {
-  const m = await checkMembership(admin, user, venueId);
+  const m = await checkMembership(admin, user, projectId);
   if (!m.isSuperAdmin && m.role == null) {
     return {
       ok: false,
-      response: json({ ok: false, error: "Not a member of this venue" }, 403),
+      response: json({ ok: false, error: "Not a member of this place" }, 403),
     };
   }
   return { ok: true, membership: m };
@@ -277,13 +277,13 @@ export async function requireMembership(
 export async function requireOwner(
   admin: SupabaseClient,
   user: AuthedUser,
-  venueId: string,
+  projectId: string,
   errorMessage = "Only owners can do that.",
 ): Promise<
   | { ok: true; membership: Membership }
   | { ok: false; response: Response }
 > {
-  const m = await checkMembership(admin, user, venueId);
+  const m = await checkMembership(admin, user, projectId);
   if (!m.isSuperAdmin && m.role !== "owner") {
     return {
       ok: false,

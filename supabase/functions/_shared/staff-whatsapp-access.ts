@@ -5,33 +5,33 @@ import { phoneDigits } from "./phone.ts";
 import type {
   StaffAccess,
   StaffIdentity,
-  StaffVenue,
+  StaffPlace,
 } from "./staff-whatsapp-types.ts";
 
-async function listStaffVenues(
+async function listStaffPlaces(
   admin: SupabaseClient,
   userId: string,
-): Promise<StaffVenue[]> {
+): Promise<StaffPlace[]> {
   const roleRows = await admin
-    .from("venue_roles")
-    .select("venue_id, venues(name)")
+    .from("project_roles")
+    .select("project_id, places(name)")
     .eq("user_id", userId)
     .eq("role", "staff");
   if (roleRows.error || !roleRows.data?.length) return [];
 
-  const venues: StaffVenue[] = [];
+  const places: StaffPlace[] = [];
   for (const row of roleRows.data) {
-    const join = row.venues as unknown as { name: string } | null;
-    venues.push({
-      venueId: row.venue_id,
-      venueName: join?.name ?? "Venue",
+    const join = row.places as unknown as { name: string } | null;
+    places.push({
+      projectId: row.project_id,
+      placeName: join?.name ?? "Place",
     });
   }
-  venues.sort((a, b) => a.venueName.localeCompare(b.venueName));
-  return venues;
+  places.sort((a, b) => a.placeName.localeCompare(b.placeName));
+  return places;
 }
 
-/** Staff auth + venue team membership for this WhatsApp number. */
+/** Staff auth + place team membership for this WhatsApp number. */
 export async function resolveStaffAccess(
   admin: SupabaseClient,
   phoneE164: string,
@@ -43,15 +43,15 @@ export async function resolveStaffAccess(
   const userId = userIdRes.data as string | null;
   if (!userId) return { status: "unknown_phone" };
 
-  const venues = await listStaffVenues(admin, userId);
-  if (venues.length === 0) return { status: "not_on_team" };
+  const places = await listStaffPlaces(admin, userId);
+  if (places.length === 0) return { status: "not_on_team" };
 
   return {
     status: "ok",
     identity: {
       staffUserId: userId,
       phoneE164,
-      venues,
+      places,
     },
   };
 }

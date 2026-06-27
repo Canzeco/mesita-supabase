@@ -2,8 +2,8 @@
 //
 // Thin facade for the consumer /discover/search page picker. Resolves
 // the caller's user id (so the atlas caller can flag
-// verified_partner_self vs _other on already-owned venues — relevant
-// when a consumer who also runs a venue searches for it from inside
+// verified_partner_self vs _other on already-owned places — relevant
+// when a consumer who also runs a place searches for it from inside
 // the consumer app) and forwards to atlas-suggest-places for the
 // actual Google + Mesita merge.
 //

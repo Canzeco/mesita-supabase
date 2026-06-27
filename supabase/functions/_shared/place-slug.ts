@@ -1,4 +1,4 @@
-// Venue URL slug generation + uniqueness check (service-role client).
+// Place URL slug generation + uniqueness check (service-role client).
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
@@ -15,9 +15,9 @@ export async function ensureUniqueSlug(
   admin: SupabaseClient,
   base: string,
 ): Promise<string> {
-  let candidate = base || `venue-${Date.now()}`;
+  let candidate = base || `place-${Date.now()}`;
   for (let i = 0; i < 5; i += 1) {
-    const { data } = await admin.from("venues").select("id").eq("slug", candidate)
+    const { data } = await admin.from("projects_view").select("id").eq("slug", candidate)
       .maybeSingle();
     if (!data) return candidate;
     candidate = `${base}-${Math.random().toString(36).slice(2, 6)}`;

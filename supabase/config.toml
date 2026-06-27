@@ -123,7 +123,7 @@ verify_jwt = true
 
 # --- Consumer (public reads + authed writes) ---
 
-# Public catalog reads. RLS enforces which venue statuses are visible.
+# Public catalog reads. RLS enforces which place statuses are visible.
 [functions.consumer-list-places]
 verify_jwt = false
 
@@ -132,7 +132,7 @@ verify_jwt = false
 
 # Personalised discovery surfaces. JWT required so we can read the
 # consumer's class + history; the recommendation logic still respects
-# RLS for venue visibility.
+# RLS for place visibility.
 [functions.consumer-recommend-catalog]
 verify_jwt = true
 
@@ -153,10 +153,10 @@ verify_jwt = false
 [functions.recommender-rank-catalog]
 verify_jwt = false
 
-# Artificial callers (atlas-*) — venue intelligence + encyclopaedia. The
+# Artificial callers (atlas-*) — place intelligence + encyclopaedia. The
 # Google Places key (SUPA_GMP_KEY) only lives inside these EFs; natural
 # callers forward requests through invokeArtificialCaller. Atlas is the
-# umbrella for every venue-research / venue-data-source surface (Google,
+# umbrella for every place-research / place-data-source surface (Google,
 # Foursquare, schema.org, …).
 
 [functions.atlas-suggest-places]
@@ -167,13 +167,13 @@ verify_jwt = false
 
 # Persist half of the create pipeline — INSERTs the minimal Google-basics profile
 # as places + units rows (shared PK, status='active'), with a caller-supplied
-# adea_status (async create → 'generating'), idempotent on google_place_id.
+# content_status (async create → 'generating'), idempotent on google_place_id.
 # Internal-only; the create/schedule callers invoke it with the service-role bearer.
 [functions.atlas-save-unit-data]
 verify_jwt = false
 
 # UPDATE half of the ASYNC enrich pipeline — writes the enriched profile onto the
-# existing places/units row (UPDATE by id; flips adea_status → 'ready'/'failed').
+# existing places/units row (UPDATE by id; flips content_status → 'ready'/'failed').
 # Internal-only; invoked by the n8n Enricher with the service-role bearer.
 [functions.atlas-update-unit-data]
 verify_jwt = false
@@ -200,7 +200,7 @@ verify_jwt = true
 verify_jwt = true
 
 # Entity-split EFs (migration 0031). consumer-list-tickets stays for
-# now while clients migrate; the new surfaces split saved-venues,
+# now while clients migrate; the new surfaces split saved-places,
 # reservations, and coupons into first-class entities.
 [functions.consumer-save-place]
 verify_jwt = true
@@ -238,7 +238,7 @@ verify_jwt = true
 [functions.business-create-profile]
 verify_jwt = true
 
-# Unit (venue) lifecycle
+# Unit (place) lifecycle
 [functions.business-list-units]
 verify_jwt = true
 
@@ -250,7 +250,7 @@ verify_jwt = true
 [functions.admin-create-unit]
 verify_jwt = true
 
-# Staggered scheduler: consumer/admin enqueue a scheduled_unit_creations row; the
+# Staggered scheduler: consumer/admin enqueue a scheduled_project_creations row; the
 # pg_cron poller drips due rows to the service-gated atlas-run-scheduled-create.
 [functions.consumer-schedule-unit-creation]
 verify_jwt = true
@@ -270,7 +270,7 @@ verify_jwt = true
 verify_jwt = true
 
 # Tag vocabulary for the Place tag picker. Authenticated (the console always
-# has a session); reads the world-readable venue_tags config via the anon key.
+# has a session); reads the world-readable place_tags config via the anon key.
 [functions.business-list-tags]
 verify_jwt = true
 
@@ -295,13 +295,13 @@ verify_jwt = true
 [functions.business-verify-phone-otp]
 verify_jwt = true
 
-# State-aware Place ID → Mesita venue lookup. Powers the /add page's
+# State-aware Place ID → Mesita place lookup. Powers the /add page's
 # inline result card (not_in_mesita / web_listed_unclaimed / pending /
 # verified_partner).
 [functions.business-find-place]
 verify_jwt = true
 
-# One-shot dashboard bundle: user + venues + active venue + recent tickets.
+# One-shot dashboard bundle: user + places + active place + recent tickets.
 [functions.business-get-overview]
 verify_jwt = true
 
@@ -391,13 +391,13 @@ verify_jwt = true
 [functions.admin-suggest-places]
 verify_jwt = true
 
-# Resolve a Google Place ID to a Mesita venue. Powers the admin
+# Resolve a Google Place ID to a Mesita place. Powers the admin
 # console's "open in business" link generator.
 [functions.admin-find-place]
 verify_jwt = true
 
-# Super-admin free-text venue search (name / slug / id) for the admin
-# console's Manage Single Unit venue picker.
+# Super-admin free-text place search (name / slug / id) for the admin
+# console's Manage Single Unit place picker.
 [functions.admin-search-places]
 verify_jwt = true
 
@@ -418,7 +418,7 @@ verify_jwt = true
 [functions.admin-revoke-admin]
 verify_jwt = true
 
-# Atlas configuration — venue research/enrichment knobs on app_settings,
+# Atlas configuration — place research/enrichment knobs on app_settings,
 # owned by admins.
 [functions.admin-get-settings]
 verify_jwt = true
@@ -426,7 +426,7 @@ verify_jwt = true
 [functions.admin-update-atlas-config]
 verify_jwt = true
 
-# Re-run the profile enricher on an existing venue (super-admin only).
+# Re-run the profile enricher on an existing place (super-admin only).
 [functions.admin-enrich-place]
 verify_jwt = true
 

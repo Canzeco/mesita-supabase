@@ -1,29 +1,29 @@
-// Claimed ownership = venue_members.role 'owner' (OTP / admin approval).
+// Claimed ownership = project_members.role 'owner' (OTP / admin approval).
 // listing_type 'partner' is a separate catalog/discovery flag, not ownership.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
-export async function venueHasVerifiedOwner(
+export async function placeHasVerifiedOwner(
   admin: SupabaseClient,
-  venueId: string,
+  projectId: string,
 ): Promise<boolean> {
   const { count, error } = await admin
-    .from("venue_members")
+    .from("project_members")
     .select("id", { count: "exact", head: true })
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .eq("role", "owner");
   if (error) return false;
   return (count ?? 0) > 0;
 }
 
-export async function isLastOwnerOfVenue(
+export async function isLastOwnerOfPlace(
   admin: SupabaseClient,
-  venueId: string,
+  projectId: string,
 ): Promise<boolean> {
   const { count } = await admin
-    .from("venue_members")
+    .from("project_members")
     .select("id", { count: "exact", head: true })
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .eq("role", "owner");
   return (count ?? 0) <= 1;
 }

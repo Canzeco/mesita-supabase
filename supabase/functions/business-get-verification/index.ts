@@ -1,6 +1,6 @@
 // Supabase Edge Function — business-get-verification
 //
-// Returns the business's latest verification request for a given venue
+// Returns the business's latest verification request for a given place
 // (or null if none exists yet). Used by /unit/<id>/verify to show the
 // current state — pending submission, awaiting review, approved, or
 // rejected with reason.
@@ -17,7 +17,7 @@ import {
   readEFEnv,
 } from "../_shared/auth.ts";
 
-type Body = { venueId?: string };
+type Body = { projectId?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -34,16 +34,16 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const venueId = (body.venueId ?? "").trim();
-  if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
+  const projectId = (body.projectId ?? "").trim();
+  if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
 
   const admin = adminClient(envRes.env);
   const { data, error } = await admin
-    .from("venue_verifications")
+    .from("project_verifications")
     .select(
       "id, method, payload, requester_email, status, reject_reason, decided_at, decided_via, created_at",
     )
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .eq("requester_id", userId)
     .order("created_at", { ascending: false })
     .limit(1)

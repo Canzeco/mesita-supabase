@@ -7,7 +7,7 @@
 //   2. Ensure a `businesses` profile exists for the caller — the
 //      Supabase invite flow creates the auth.users row but never
 //      writes our domain table.
-//   3. Insert venue_members at the stored role (upsert is idempotent
+//   3. Insert project_members at the stored role (upsert is idempotent
 //      so a double-click is harmless).
 //   4. Mark the invite claimed.
 //   5. Stamp app_metadata.role = 'business' so future JWTs carry it.
@@ -39,8 +39,8 @@ Deno.serve(async (req) => {
   const admin = adminClient(envRes.env);
 
   const invite = await admin
-    .from("business_invites")
-    .select("id, venue_id, email, role, claimed_at, expires_at")
+    .from("account_invites")
+    .select("id, project_id, email, role, claimed_at, expires_at")
     .eq("token", token)
     .maybeSingle();
   if (invite.error) {
@@ -63,12 +63,12 @@ Deno.serve(async (req) => {
   }
 
   const { data: existingBusiness } = await admin
-    .from("businesses")
+    .from("accounts")
     .select("id")
     .eq("id", user.id)
     .maybeSingle();
   if (!existingBusiness) {
-    const ins = await admin.from("businesses").insert({
+    const ins = await admin.from("accounts").insert({
       id: user.id,
       email: user.emailLower,
       full_name: (user.raw?.user_metadata?.full_name as string | null) ?? null,
@@ -79,14 +79,14 @@ Deno.serve(async (req) => {
   }
 
   const upsert = await admin
-    .from("venue_members")
+    .from("project_members")
     .upsert(
       {
-        venue_id: invite.data.venue_id,
+        project_id: invite.data.project_id,
         business_id: user.id,
         role: invite.data.role,
       },
-      { onConflict: "venue_id,business_id", ignoreDuplicates: false },
+      { onConflict: "project_id,business_id", ignoreDuplicates: false },
     )
     .select("id, role")
     .single();
@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
   }
 
   const claim = await admin
-    .from("business_invites")
+    .from("account_invites")
     .update({ claimed_at: new Date().toISOString(), claimed_by: user.id })
     .eq("id", invite.data.id)
     .is("claimed_at", null);
@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
 
   return json({
     ok: true,
-    venueId: invite.data.venue_id,
+    projectId: invite.data.project_id,
     role: upsert.data.role,
   });
 });

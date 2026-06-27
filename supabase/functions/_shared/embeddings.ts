@@ -1,4 +1,4 @@
-// Shared embedding + ranking helpers for any EF that runs RAG over venues.
+// Shared embedding + ranking helpers for any EF that runs RAG over places.
 //
 // Lives in _shared/ rather than an artificial-caller EF because the helpers
 // are pure or near-pure (a SHA-1 digest, a cosine, an OpenAI HTTP call). The
@@ -14,10 +14,10 @@ import type { createClient } from "jsr:@supabase/supabase-js@2";
 const EMBEDDING_MODEL = "text-embedding-3-small";
 export const EMBEDDING_DIMS = 1536;
 
-// Structural type satisfied by every EF's VenueRow definition. Only the
+// Structural type satisfied by every EF's PlaceRow definition. Only the
 // fields used for source-text + persistence are required; readers may carry
 // arbitrary extra columns.
-type EmbeddableVenue = {
+type EmbeddablePlace = {
   id: string;
   name: string;
   category: string | null;
@@ -33,7 +33,7 @@ type EmbeddableVenue = {
 // Stable source text we feed to the embedder. Order matters — name first so
 // the model anchors on identity, then the soft descriptors. Story is hard-
 // capped so a freakishly long story can't dominate the embedding budget.
-function venueSourceText(v: EmbeddableVenue): string {
+function placeSourceText(v: EmbeddablePlace): string {
   const lines: string[] = [];
   lines.push(`Name: ${v.name}`);
   if (v.category) lines.push(`Category: ${v.category}`);
@@ -45,7 +45,7 @@ function venueSourceText(v: EmbeddableVenue): string {
   return lines.join("\n");
 }
 
-// Cheap stable hash of the source text so we can detect "this venue's text
+// Cheap stable hash of the source text so we can detect "this place's text
 // changed, re-embed" without storing the whole text alongside the embedding.
 async function digest(text: string): Promise<string> {
   const buf = new TextEncoder().encode(text);
@@ -56,7 +56,7 @@ async function digest(text: string): Promise<string> {
     .slice(0, 32);
 }
 
-export function shouldEmbed(v: EmbeddableVenue): boolean {
+export function shouldEmbed(v: EmbeddablePlace): boolean {
   if (!v.embedding) return true;
   return v.embedding_source_hash == null;
 }
@@ -133,17 +133,17 @@ export async function embedBatch(texts: string[], apiKey: string): Promise<numbe
   return out;
 }
 
-// Lazy-embeds + persists a slice of venues. Returns a map of venue.id →
+// Lazy-embeds + persists a slice of places. Returns a map of place.id →
 // { embedding, hash } for every row that landed; the caller patches its
 // local rows from this map so we never need a re-SELECT after writing.
-export async function embedAndPersistVenues<T extends EmbeddableVenue>(
+export async function embedAndPersistPlaces<T extends EmbeddablePlace>(
   rows: T[],
   admin: ReturnType<typeof createClient>,
   apiKey: string,
   logPrefix: string,
 ): Promise<Map<string, { embedding: number[]; hash: string }>> {
   const inputs = await Promise.all(rows.map(async (r) => {
-    const text = venueSourceText(r);
+    const text = placeSourceText(r);
     return { id: r.id, text, hash: await digest(text) };
   }));
   const out = new Map<string, { embedding: number[]; hash: string }>();
@@ -163,7 +163,7 @@ export async function embedAndPersistVenues<T extends EmbeddableVenue>(
       const v = byIdx.get(i);
       if (!v || v.length !== EMBEDDING_DIMS) return;
       const { error } = await admin
-        .from("venues")
+        .from("projects_view")
         .update({
           embedding: vectorLiteral(v),
           embedding_source_hash: inp.hash,

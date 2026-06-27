@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
   const invite = await admin
     .from("staff_invites")
     .select(
-      "id, venue_id, phone, claimed_at, expires_at, created_by, venues(name)",
+      "id, project_id, phone, claimed_at, expires_at, created_by, places(name)",
     )
     .eq("token", token)
     .maybeSingle();
@@ -68,16 +68,16 @@ Deno.serve(async (req) => {
     );
   }
 
-  const join = invite.data.venues as { name: string } | null;
+  const join = invite.data.places as { name: string } | null;
   const redeemed = await redeemStaffInvite(admin, {
     invite: {
       id: invite.data.id,
-      venue_id: invite.data.venue_id,
+      project_id: invite.data.project_id,
       phone: invite.data.phone,
       claimed_at: invite.data.claimed_at,
       expires_at: invite.data.expires_at,
       created_by: invite.data.created_by,
-      venue_name: join?.name ?? "your venue",
+      place_name: join?.name ?? "your place",
     },
     userId: user.id,
   });
@@ -88,6 +88,6 @@ Deno.serve(async (req) => {
   return json({
     ok: true,
     role: "staff",
-    venue_id: redeemed.venueId,
+    project_id: redeemed.projectId,
   });
 });

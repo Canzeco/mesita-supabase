@@ -1,7 +1,7 @@
 // Supabase Edge Function — business-update-member-role
 //
-// Promote / demote a venue member. Owners only. The last owner of a
-// venue can never be demoted — there has to be at least one owner at
+// Promote / demote a place member. Owners only. The last owner of a
+// place can never be demoted — there has to be at least one owner at
 // rest, otherwise no one can re-invite. (Removing the last owner is
 // also blocked by business-remove-member.)
 
@@ -14,7 +14,7 @@ import {
   requireOwner,
 } from "../_shared/auth.ts";
 import { isMemberRole, type MemberRole } from "../_shared/roles.ts";
-import { isLastOwnerOfVenue } from "../_shared/venue-ownership.ts";
+import { isLastOwnerOfPlace } from "../_shared/place-ownership.ts";
 
 type Body = {
   memberId?: string;
@@ -41,8 +41,8 @@ Deno.serve(async (req) => {
   const admin = adminClient(envRes.env);
 
   const target = await admin
-    .from("venue_members")
-    .select("id, venue_id, business_id, role")
+    .from("project_members")
+    .select("id, project_id, business_id, role")
     .eq("id", memberId)
     .maybeSingle();
   if (target.error) {
@@ -55,13 +55,13 @@ Deno.serve(async (req) => {
   const owner = await requireOwner(
     admin,
     authRes.user,
-    target.data.venue_id,
+    target.data.project_id,
     "Only owners can change roles.",
   );
   if (!owner.ok) return owner.response;
 
   if (target.data.role === "owner" && role !== "owner") {
-    if (await isLastOwnerOfVenue(admin, target.data.venue_id)) {
+    if (await isLastOwnerOfPlace(admin, target.data.project_id)) {
       return json(
         { ok: false, code: "last_owner", error: "Promote another owner first." },
         409,
@@ -70,7 +70,7 @@ Deno.serve(async (req) => {
   }
 
   const upd = await admin
-    .from("venue_members")
+    .from("project_members")
     .update({ role })
     .eq("id", memberId)
     .select("id, role")

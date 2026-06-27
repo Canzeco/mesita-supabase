@@ -5,7 +5,7 @@
 // and queues the consumer's review. Single confirmation — the consumer never
 // confirms payment, and Mesita never touches the money.
 //
-// Authorisation: a venue_member of the ticket's venue (super-admins bypass via
+// Authorisation: a place_member of the ticket's place (super-admins bypass via
 // requireMembership). Self-contained: own auth, service-role writes.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
 
   const ticketRow = await admin
     .from("tickets")
-    .select("id, venue_id, consumer_id, status")
+    .select("id, project_id, consumer_id, status")
     .eq("id", ticketId)
     .maybeSingle();
   if (ticketRow.error) {
@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
   if (!ticketRow.data) return json({ ok: false, error: "Ticket not found" }, 404);
   const ticket = ticketRow.data;
 
-  const memberRes = await requireMembership(admin, authRes.user, ticket.venue_id);
+  const memberRes = await requireMembership(admin, authRes.user, ticket.project_id);
   if (!memberRes.ok) return memberRes.response;
 
   // Idempotent: already closed.
@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
     admin,
     ticketId,
     ticket.consumer_id,
-    ticket.venue_id,
+    ticket.project_id,
   );
   if (!closed.ok) {
     return json({ ok: false, error: `ticket_close: ${closed.error}` }, 500);

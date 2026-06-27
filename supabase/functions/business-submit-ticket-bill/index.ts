@@ -17,8 +17,8 @@ import {
 } from "../_shared/auth.ts";
 import { computeTicketBill } from "../_shared/business-ticket-billing.ts";
 import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
-import { isConsumerFirstVisit, selectVenueRate } from "../_shared/membership.ts";
-import { venueInstagramHandleForPayload } from "../_shared/ticket-informal.ts";
+import { isConsumerFirstVisit, selectprojectRate } from "../_shared/membership.ts";
+import { placeInstagramHandleForPayload } from "../_shared/ticket-informal.ts";
 
 type Body = {
   ticketId?: string;
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
   const ticketRow = await admin
     .from("tickets")
     .select(
-      "id, venue_id, consumer_id, kind, status, check_subtotal_cents, total_cents, currency",
+      "id, project_id, consumer_id, kind, status, check_subtotal_cents, total_cents, currency",
     )
     .eq("id", ticketId)
     .maybeSingle();
@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
   }
   const ticket = ticketRow.data;
 
-  const memberRes = await requireMembership(admin, authRes.user, ticket.venue_id);
+  const memberRes = await requireMembership(admin, authRes.user, ticket.project_id);
   if (!memberRes.ok) return memberRes.response;
 
   if (ticket.status !== "open") {
@@ -87,19 +87,19 @@ Deno.serve(async (req) => {
   const kind = ticket.kind;
   const requiresStory = STORY_KINDS.has(kind);
 
-  const venueRow = await admin
-    .from("venues")
+  const placeRow = await admin
+    .from("projects_view")
     .select(
       "id, name, slug, photos, instagram_url, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, status",
     )
-    .eq("id", ticket.venue_id)
+    .eq("id", ticket.project_id)
     .maybeSingle();
-  if (venueRow.error || !venueRow.data) {
-    return json({ ok: false, error: "Venue not found" }, 404);
+  if (placeRow.error || !placeRow.data) {
+    return json({ ok: false, error: "Place not found" }, 404);
   }
-  const venue = venueRow.data;
-  if (venue.status === "archived") {
-    return json({ ok: false, error: "Venue is archived" }, 409);
+  const place = placeRow.data;
+  if (place.status === "archived") {
+    return json({ ok: false, error: "Place is archived" }, 409);
   }
 
   const consumerRow = await admin
@@ -111,9 +111,9 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "Consumer not found" }, 404);
   }
 
-  const firstVisit = await isConsumerFirstVisit(admin, ticket.consumer_id, ticket.venue_id);
-  const ratePercent = selectVenueRate(venue, consumerRow.data.tier_key, firstVisit);
-  const capPesos = venue.monthly_promo_cap;
+  const firstVisit = await isConsumerFirstVisit(admin, ticket.consumer_id, ticket.project_id);
+  const ratePercent = selectprojectRate(place, consumerRow.data.tier_key, firstVisit);
+  const capPesos = place.monthly_promo_cap;
 
   const billRes = computeTicketBill({ subtotal, ratePercent, capPesos });
   if (!billRes.ok) {
@@ -161,11 +161,11 @@ Deno.serve(async (req) => {
     status: "completed",
     resolved_at: now,
     payload: {
-      venue_id: venue.id,
-      venue_slug: venue.slug ?? null,
-      venue_name: venue.name,
-      venue_photo_url: venue.photos?.[0] ?? null,
-      venue_instagram_handle: venueInstagramHandleForPayload(venue.instagram_url),
+      project_id: place.id,
+      place_slug: place.slug ?? null,
+      place_name: place.name,
+      place_photo_url: place.photos?.[0] ?? null,
+      place_instagram_handle: placeInstagramHandleForPayload(place.instagram_url),
       ticket_kind: kind,
       check_subtotal_cents: snap.checkSubtotalCents,
       tip_cents: snap.tipCents,

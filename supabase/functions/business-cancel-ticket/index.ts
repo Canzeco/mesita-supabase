@@ -2,7 +2,7 @@
 //
 // Authenticated. Validator cancels a pending_pay ticket they opened by
 // mistake (wrong total, consumer left without paying, etc.). Only the
-// venue's members can cancel. Paid tickets cannot be cancelled — those
+// place's members can cancel. Paid tickets cannot be cancelled — those
 // need an explicit refund flow (out of scope for now).
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
 
   const ticket = await admin
     .from("tickets")
-    .select("id, venue_id, status")
+    .select("id, project_id, status")
     .eq("id", ticketId)
     .maybeSingle();
   if (ticket.error) {
@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
   }
   if (!ticket.data) return json({ ok: false, error: "Ticket not found" }, 404);
 
-  const membership = await requireMembership(admin, authRes.user, ticket.data.venue_id);
+  const membership = await requireMembership(admin, authRes.user, ticket.data.project_id);
   if (!membership.ok) return membership.response;
 
   if (ticket.data.status === "cancelled") {

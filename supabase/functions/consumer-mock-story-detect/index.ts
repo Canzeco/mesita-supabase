@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
 
   const ticketRow = await admin
     .from("tickets")
-    .select("id, consumer_id, venue_id, kind, status, story_status, total_cents")
+    .select("id, consumer_id, project_id, kind, status, story_status, total_cents")
     .eq("id", ticketId)
     .maybeSingle();
   if (ticketRow.error) {

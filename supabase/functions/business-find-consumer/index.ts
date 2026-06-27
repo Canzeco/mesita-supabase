@@ -1,10 +1,10 @@
 // Supabase Edge Function — business-find-consumer
 //
-// Authenticated. A validator (any venue_member) looks up a consumer by
+// Authenticated. A validator (any place_member) looks up a consumer by
 // the 8-digit code on their QR (0000-0000). Returns the consumer's display name +
 // current profile so the validator UI can show "Pato — $55
-// available" before opening a ticket. Membership of *some* venue is
-// enough — we don't enforce which venue here because lookup is global.
+// available" before opening a ticket. Membership of *some* place is
+// enough — we don't enforce which place here because lookup is global.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -37,11 +37,11 @@ Deno.serve(async (req) => {
 
   const admin = adminClient(envRes.env);
 
-  // Caller must be a member of at least one venue. This blocks random
+  // Caller must be a member of at least one place. This blocks random
   // signed-in consumers from probing other people's codes for their names /
   // balances.
   const callerMembership = await admin
-    .from("venue_members")
+    .from("project_members")
     .select("business_id", { count: "exact", head: true })
     .eq("business_id", authRes.user.id)
     .limit(1);
@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `auth_check: ${callerMembership.error.message}` }, 500);
   }
   if (!callerMembership.count) {
-    return json({ ok: false, error: "Not a venue member" }, 403);
+    return json({ ok: false, error: "Not a place member" }, 403);
   }
 
   const { data: consumer, error } = await admin

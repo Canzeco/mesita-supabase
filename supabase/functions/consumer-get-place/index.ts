@@ -1,18 +1,18 @@
 // Supabase Edge Function — consumer-get-place
 //
-// Public. Returns a single venue by id (uuid) or slug, plus the business
+// Public. Returns a single place by id (uuid) or slug, plus the business
 // authority info needed for the detail page (vibe / channels / etc.).
-// Anon-readable but the venues RLS policy still gates which rows ship.
+// Anon-readable but the places RLS policy still gates which rows ship.
 //
-// Caller: consumer. Verb: get. Noun: venue. (Per the new <caller>-<verb>-<noun>
+// Caller: consumer. Verb: get. Noun: place. (Per the new <caller>-<verb>-<noun>
 // naming convention.)
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { readAnonEnv } from "../_shared/auth.ts";
-import { VENUE_PUBLIC_COLUMNS as VENUE_COLUMNS } from "../_shared/venue-columns.ts";
-import { resolveVenueTags } from "../_shared/tags.ts";
+import { PLACE_PUBLIC_COLUMNS as PLACE_COLUMNS } from "../_shared/place-columns.ts";
+import { resolvePlaceTags } from "../_shared/tags.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -38,22 +38,22 @@ Deno.serve(async (req) => {
   const column = UUID_RE.test(idOrSlug) ? "id" : "slug";
 
   const { data, error } = await supabase
-    .from("venues")
-    .select(VENUE_COLUMNS)
+    .from("projects_view")
+    .select(PLACE_COLUMNS)
     .eq(column, idOrSlug)
     .maybeSingle();
 
   if (error) return json({ ok: false, error: error.message }, 500);
-  if (!data) return json({ ok: false, error: "Venue not found" }, 404);
+  if (!data) return json({ ok: false, error: "Place not found" }, 404);
 
-  // Resolve the venue's tag slugs (venues.tags) into ordered, labelled catalog
+  // Resolve the place's tag slugs (places.tags) into ordered, labelled catalog
   // entries so the detail modal can render chips without a second round-trip or
   // a client-side tag dictionary. Unknown slugs are dropped.
-  const tags = await resolveVenueTags(
+  const tags = await resolvePlaceTags(
     supabase,
     (data as { tags?: string[] | null }).tags,
   );
 
-  return json({ ok: true, venue: data, tags });
+  return json({ ok: true, place: data, tags });
 });
 

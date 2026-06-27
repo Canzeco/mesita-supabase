@@ -2,16 +2,16 @@
 //
 // Always-available fallback for /add ownership verification. Used when:
 //
-//   * the venue has no Google-listed phone, AND
+//   * the place has no Google-listed phone, AND
 //   * no on-domain email was discovered on the website
 //
 // …or any operator who'd rather talk to a human. Unlike ai_call and
 // ai_email, this path NEVER auto-grants ownership. It writes a pending
-// venue_verifications row (method='manual_contact') so the admin queue
+// project_verifications row (method='manual_contact') so the admin queue
 // sees the request, and returns the Mesita ops contact details the UI
 // renders as deep-link buttons.
 //
-// Region routing (off the venue's country):
+// Region routing (off the place's country):
 //   MX / LatAm (long list)  →  WhatsApp as primary, email floor
 //   US / CA                  →  SMS as primary, email floor
 //   anything else / null     →  email only
@@ -33,7 +33,7 @@ import {
 } from "../_shared/auth.ts";
 import { resolveRequesterEmail } from "../_shared/input.ts";
 
-type Body = { venueId?: string; requesterEmail?: string; note?: string };
+type Body = { projectId?: string; requesterEmail?: string; note?: string };
 
 type Region = "mx_latam" | "us" | "other";
 
@@ -89,9 +89,9 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const venueId = (body.venueId ?? "").trim();
+  const projectId = (body.projectId ?? "").trim();
   const note = (body.note ?? "").trim().slice(0, 500);
-  if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
+  if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
 
   const requesterEmail = resolveRequesterEmail({
     bodyEmail: body.requesterEmail,
@@ -112,50 +112,50 @@ Deno.serve(async (req) => {
 
   const admin = adminClient(envRes.env);
 
-  const { data: venue, error: venueError } = await admin
-    .from("venues")
+  const { data: place, error: placeError } = await admin
+    .from("projects_view")
     .select("id, name, country")
-    .eq("id", venueId)
+    .eq("id", projectId)
     .maybeSingle();
-  if (venueError || !venue) {
-    return json({ ok: false, error: "Venue not found" }, 404);
+  if (placeError || !place) {
+    return json({ ok: false, error: "Place not found" }, 404);
   }
 
   const { data: existingOwner } = await admin
-    .from("venue_members")
+    .from("project_members")
     .select("business_id")
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .eq("role", "owner")
     .maybeSingle();
   if (existingOwner) {
     return json(
       {
         ok: false,
-        code: "venue_already_owned",
+        code: "place_already_owned",
         error:
-          "This venue already has a verified owner. Use the contact / report-fraud flow instead.",
+          "This place already has a verified owner. Use the contact / report-fraud flow instead.",
       },
       409,
     );
   }
 
-  const region = regionForCountry(venue.country);
+  const region = regionForCountry(place.country);
   const whatsapp = (Deno.env.get("MESITA_OPS_WHATSAPP") ?? "").trim() || null;
   const sms = (Deno.env.get("MESITA_OPS_SMS") ?? "").trim() || null;
 
-  // Dedup: drop any prior pending row by this caller on this venue
+  // Dedup: drop any prior pending row by this caller on this place
   // before inserting the new one. Same pattern as the OTP EFs.
   await admin
-    .from("venue_verifications")
+    .from("project_verifications")
     .delete()
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .eq("requester_id", userId)
     .eq("status", "pending");
 
   const { data: verification, error: insertError } = await admin
-    .from("venue_verifications")
+    .from("project_verifications")
     .insert({
-      venue_id: venueId,
+      project_id: projectId,
       requester_id: userId,
       method: "manual_contact",
       payload: {
@@ -192,6 +192,6 @@ Deno.serve(async (req) => {
       sms: region === "us" ? sms : null,
       email: OPS_EMAIL,
     },
-    venueName: venue.name,
+    placeName: place.name,
   });
 });

@@ -1,7 +1,7 @@
 // Supabase Edge Function — admin-reset-database
 //
-// DESTRUCTIVE. Wipes all operational data (venues, tickets, consumers,
-// businesses, staff invites, verifications, venue roles)
+// DESTRUCTIVE. Wipes all operational data (places, tickets, consumers,
+// businesses, staff invites, verifications, place roles)
 // and deletes every auth.users row that isn't a super-admin. Preserves
 // public.super_admins (and their auth accounts) plus the app_settings
 // config singleton.
@@ -27,7 +27,7 @@ import {
 type Body = { confirm?: string };
 
 const CONFIRM_PHRASE = "RESET";
-// Invariant: venue-images must survive admin reset (do not delete files).
+// Invariant: place-images must survive admin reset (do not delete files).
 // We only clear legacy atlas artifacts here.
 const RESET_BUCKETS = ["atlas"] as const;
 

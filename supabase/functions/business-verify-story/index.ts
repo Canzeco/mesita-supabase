@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
 
   const ticketRow = await admin
     .from("tickets")
-    .select("id, venue_id, consumer_id, kind, status, story_status, total_cents")
+    .select("id, project_id, consumer_id, kind, status, story_status, total_cents")
     .eq("id", ticketId)
     .maybeSingle();
   if (ticketRow.error) {
@@ -76,9 +76,9 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Membership: the staff member who verifies must belong to the ticket's venue
+  // Membership: the staff member who verifies must belong to the ticket's place
   // (super-admins bypass — same rule as every other Team-surface EF).
-  const memberRes = await requireMembership(admin, authRes.user, ticket.venue_id);
+  const memberRes = await requireMembership(admin, authRes.user, ticket.project_id);
   if (!memberRes.ok) return memberRes.response;
 
   // Idempotency: once we've moved to a terminal verified/rejected state we

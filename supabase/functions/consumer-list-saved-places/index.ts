@@ -1,7 +1,7 @@
 // Supabase Edge Function — consumer-list-saved-places (natural caller)
 //
-// Authenticated read of the caller's bookmarks. Returns saved_venues
-// joined with the venue summary the saved card needs (name, slug,
+// Authenticated read of the caller's bookmarks. Returns saved_places
+// joined with the place summary the saved card needs (name, slug,
 // hero photo, category, price level, distance computed client-side).
 //
 // Deploy: supabase functions deploy consumer-list-saved-places
@@ -36,14 +36,14 @@ Deno.serve(async (req) => {
   const admin = adminClient(envRes.env);
 
   const { data, error } = await admin
-    .from("saved_venues")
+    .from("saved_places")
     .select(
-      "id, created_at, venue:venues(id, slug, name, category, price_level, listing_type, photos, address, lat, lng)",
+      "id, created_at, place:places(id, slug, name, category, price_level, listing_type, photos, address, lat, lng)",
     )
     .eq("consumer_id", consumerId)
     .order("created_at", { ascending: false })
     .limit(limit);
 
   if (error) return json({ ok: false, error: error.message }, 500);
-  return json({ ok: true, saved_venues: data ?? [] });
+  return json({ ok: true, saved_places: data ?? [] });
 });

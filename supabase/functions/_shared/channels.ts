@@ -1,5 +1,5 @@
 // Shared social/web channel URL classification + canonicalisation. Used by the
-// venue create path (business-create-unit, which classifies a bag of links
+// place create path (business-create-unit, which classifies a bag of links
 // into channel columns) and the enricher (atlas-enrich-place, which picks the
 // canonical profile out of search results). Keeping the host table + URL
 // normalisers in one place stops the two from drifting.
@@ -195,7 +195,7 @@ export function facebookPageFromUrl(url: string | null | undefined): string | nu
 }
 
 // Bare page slug of a Facebook URL, usable as an Instagram-handle candidate
-// (venues reuse handles across networks). Numeric profile.php?id= pages and
+// (places reuse handles across networks). Numeric profile.php?id= pages and
 // anything outside the IG handle charset (≤30 of [A-Za-z0-9._]) return null.
 export function fbSlugCandidate(url: string | null | undefined): string | null {
   const page = facebookPageFromUrl(url);

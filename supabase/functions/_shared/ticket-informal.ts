@@ -4,9 +4,9 @@
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { instagramHandleFromUrl } from "./apify.ts";
-import { isConsumerFirstVisit, selectVenueRate } from "./membership.ts";
+import { isConsumerFirstVisit, selectprojectRate } from "./membership.ts";
 
-export type VenueRateRow = {
+export type PlaceRateRow = {
   id: string;
   name: string;
   welcome_free_rate: number | null;
@@ -55,16 +55,16 @@ export function promoEligibleSubtotalCents(
 
 export async function computeInformalBill(
   admin: SupabaseClient,
-  venue: VenueRateRow,
+  place: PlaceRateRow,
   consumer: ConsumerRow,
   subtotal: number,
   _tip: number,
 ): Promise<InformalBillCalc> {
   const total = subtotal;
-  const firstVisit = await isConsumerFirstVisit(admin, consumer.id, venue.id);
-  const ratePercent = selectVenueRate(venue, consumer.tier_key, firstVisit);
+  const firstVisit = await isConsumerFirstVisit(admin, consumer.id, place.id);
+  const ratePercent = selectprojectRate(place, consumer.tier_key, firstVisit);
 
-  const capPesos = venue.monthly_promo_cap;
+  const capPesos = place.monthly_promo_cap;
   const eligibleCents = promoEligibleSubtotalCents(subtotal, capPesos);
 
   const discountPercent = ratePercent;
@@ -91,14 +91,14 @@ export function formatMoneyMx(cents: number, currency = "MXN"): string {
 }
 
 /** Payload for consumer Pay → Tickets (Realtime notification). */
-export function venueInstagramHandleForPayload(
+export function placeInstagramHandleForPayload(
   instagramUrl: string | null | undefined,
 ): string | null {
   return instagramHandleFromUrl(instagramUrl);
 }
 
 export function buildConsumerBillPayload(
-  venue: {
+  place: {
     name: string;
     photos?: string[] | null;
     slug?: string | null;
@@ -106,22 +106,22 @@ export function buildConsumerBillPayload(
     instagram_url?: string | null;
   },
   calc: InformalBillCalc,
-  venueId: string,
+  projectId: string,
 ): Record<string, unknown> {
   const discount = calc.discountCents ?? 0;
   return {
-    venue_id: venueId,
-    venue_slug: venue.slug ?? null,
-    venue_name: venue.name,
-    venue_photo_url: venue.photos?.[0] ?? null,
-    venue_instagram_handle: venueInstagramHandleForPayload(venue.instagram_url),
+    project_id: projectId,
+    place_slug: place.slug ?? null,
+    place_name: place.name,
+    place_photo_url: place.photos?.[0] ?? null,
+    place_instagram_handle: placeInstagramHandleForPayload(place.instagram_url),
     check_subtotal_cents: calc.subtotal,
     tip_cents: calc.tip,
     total_cents: calc.total,
     discount_cents: discount,
     discount_percent: calc.discountPercent,
     total_reward_cents: discount,
-    reward_cap_mxn: venue.monthly_promo_cap ?? null,
+    reward_cap_mxn: place.monthly_promo_cap ?? null,
     amount_due_cents: calc.amountDueCents,
     currency: "MXN",
   };
@@ -165,11 +165,11 @@ export async function closeTicketAndEnqueueReview(
   admin: SupabaseClient,
   ticketId: string,
   consumerId: string,
-  venueId: string,
+  projectId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const fin = await finalizeInformalTicket(admin, ticketId);
   if (!fin.ok) return fin;
-  await ensureConsumerReviewNotification(admin, consumerId, ticketId, venueId);
+  await ensureConsumerReviewNotification(admin, consumerId, ticketId, projectId);
   return { ok: true };
 }
 
@@ -180,10 +180,10 @@ export async function prepareTicketForReview(
   admin: SupabaseClient,
   ticketId: string,
   consumerId: string,
-): Promise<{ ok: true; venueId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; projectId: string } | { ok: false; error: string }> {
   const ticket = await admin
     .from("tickets")
-    .select("id, venue_id, status")
+    .select("id, project_id, status")
     .eq("id", ticketId)
     .eq("consumer_id", consumerId)
     .maybeSingle();
@@ -197,9 +197,9 @@ export async function prepareTicketForReview(
       admin,
       consumerId,
       ticketId,
-      row.venue_id,
+      row.project_id,
     );
-    return { ok: true, venueId: row.venue_id };
+    return { ok: true, projectId: row.project_id };
   }
 
   return { ok: false, error: "Ticket is not ready for review" };
@@ -209,7 +209,7 @@ export async function ensureConsumerReviewNotification(
   admin: SupabaseClient,
   consumerId: string,
   ticketId: string,
-  venueId: string,
+  projectId: string,
 ): Promise<void> {
   const existing = await admin
     .from("consumer_pay_notifications")
@@ -220,11 +220,11 @@ export async function ensureConsumerReviewNotification(
     .maybeSingle();
   if (existing.data) return;
 
-  const [venueRes, ticketRes] = await Promise.all([
+  const [placeRes, ticketRes] = await Promise.all([
     admin
-      .from("venues")
+      .from("projects_view")
       .select("name, slug, photos, instagram_url")
-      .eq("id", venueId)
+      .eq("id", projectId)
       .single(),
     admin
       .from("tickets")
@@ -235,7 +235,7 @@ export async function ensureConsumerReviewNotification(
       .single(),
   ]);
 
-  const v = venueRes.data;
+  const v = placeRes.data;
   const t = ticketRes.data;
   const discount = t?.discount_cents ?? 0;
 
@@ -245,11 +245,11 @@ export async function ensureConsumerReviewNotification(
     kind: "review",
     status: "pending",
     payload: {
-      venue_id: venueId,
-      venue_slug: v?.slug ?? null,
-      venue_name: v?.name ?? "Partner venue",
-      venue_photo_url: v?.photos?.[0] ?? null,
-      venue_instagram_handle: venueInstagramHandleForPayload(v?.instagram_url),
+      project_id: projectId,
+      place_slug: v?.slug ?? null,
+      place_name: v?.name ?? "Partner place",
+      place_photo_url: v?.photos?.[0] ?? null,
+      place_instagram_handle: placeInstagramHandleForPayload(v?.instagram_url),
       ticket_kind: t?.kind ?? null,
       check_subtotal_cents: t?.check_subtotal_cents ?? null,
       tip_cents: t?.tip_cents ?? null,

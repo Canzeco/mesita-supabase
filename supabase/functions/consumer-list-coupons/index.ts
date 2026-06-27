@@ -1,7 +1,7 @@
 // Supabase Edge Function — consumer-list-coupons (natural caller)
 //
 // Authenticated read of the caller's coupons wallet. Returns coupons
-// joined with the venue summary needed to render the coupon card
+// joined with the place summary needed to render the coupon card
 // (name, slug, photo, address). Defaults to active coupons only; pass
 // `include_inactive: true` to also receive redeemed / expired /
 // cancelled history (used by the wallet's "Past" subtab).
@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
   let q = admin
     .from("coupons")
     .select(
-      "id, status, issued_at, redeemed_at, cancelled_at, expires_at, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, cap_cents, currency, venue:venues(id, slug, name, category, photos, address)",
+      "id, status, issued_at, redeemed_at, cancelled_at, expires_at, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, cap_cents, currency, place:places(id, slug, name, category, photos, address)",
     )
     .eq("consumer_id", consumerId)
     .order("issued_at", { ascending: false })

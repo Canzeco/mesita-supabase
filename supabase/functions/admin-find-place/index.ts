@@ -1,9 +1,9 @@
 // Supabase Edge Function — admin-find-place
 //
-// Resolves a Google Place ID to a Mesita venue (id + name + slug) when
-// the venue is already onboarded. Used by the admin console's "open in
+// Resolves a Google Place ID to a Mesita place (id + name + slug) when
+// the place is already onboarded. Used by the admin console's "open in
 // business" link generator: the admin pastes a Place ID, this EF returns
-// the venue.id, and the admin web builds a
+// the place.id, and the admin web builds a
 // https://business.mesita.ai/unit/<id>/home URL the operator can open.
 //
 // Auth: caller's JWT email must be in public.super_admins.
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
   }
 
   const { data, error } = await admin
-    .from("venues")
+    .from("projects_view")
     .select("id, slug, name, status, created_at, updated_at")
     .eq("google_place_id", placeId)
     .maybeSingle();
@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `lookup_failed: ${error.message}` }, 500);
   }
   if (!data) {
-    return json({ ok: true, venue: null });
+    return json({ ok: true, place: null });
   }
-  return json({ ok: true, venue: data });
+  return json({ ok: true, place: data });
 });

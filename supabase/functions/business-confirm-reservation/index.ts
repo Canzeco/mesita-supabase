@@ -1,8 +1,8 @@
 // Supabase Edge Function — business-confirm-reservation
 //
-// Authenticated. The venue confirms or declines a reservation. Membership-
-// gated and scoped to the venue (the update is filtered by venue_id) so a
-// member can only act on that venue's bookings. Mirrors the reservation
+// Authenticated. The place confirms or declines a reservation. Membership-
+// gated and scoped to the place (the update is filtered by project_id) so a
+// member can only act on that place's bookings. Mirrors the reservation
 // lifecycle: pending/confirmed -> confirmed | declined.
 //
 // Deploy: supabase functions deploy business-confirm-reservation
@@ -18,7 +18,7 @@ import {
 import { RESERVATION_SELECT } from "../_shared/reservation-columns.ts";
 
 type Decision = "confirm" | "decline";
-type Body = { venueId?: string; reservationId?: string; decision?: Decision };
+type Body = { projectId?: string; reservationId?: string; decision?: Decision };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -34,10 +34,10 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const venueId = (body.venueId ?? "").toString().trim();
+  const projectId = (body.projectId ?? "").toString().trim();
   const reservationId = (body.reservationId ?? "").toString().trim();
   const decision = body.decision;
-  if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
+  if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
   if (!reservationId) {
     return json({ ok: false, error: "reservationId is required" }, 400);
   }
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
   }
 
   const admin = adminClient(envRes.env);
-  const memberRes = await requireMembership(admin, authRes.user, venueId);
+  const memberRes = await requireMembership(admin, authRes.user, projectId);
   if (!memberRes.ok) return memberRes.response;
 
   const nowIso = new Date().toISOString();
@@ -55,13 +55,13 @@ Deno.serve(async (req) => {
       ? { status: "confirmed", confirmed_at: nowIso, updated_at: nowIso }
       : { status: "declined", updated_at: nowIso };
 
-  // Scope the update to this venue and to still-actionable states so a
+  // Scope the update to this place and to still-actionable states so a
   // member can't flip a terminal booking (declined / no_show / cancelled).
   const { data, error } = await admin
     .from("reservations")
     .update(patch)
     .eq("id", reservationId)
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .in("status", ["pending", "confirmed"])
     .select(RESERVATION_SELECT)
     .maybeSingle();

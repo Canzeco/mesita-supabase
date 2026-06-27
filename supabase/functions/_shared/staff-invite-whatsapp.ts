@@ -91,7 +91,7 @@ async function completeStaffInviteAccept(opts: {
     admin,
     twilio,
     fromPhone,
-    buildStaffInviteAcceptedReply(redeemed.venueName),
+    buildStaffInviteAcceptedReply(redeemed.placeName),
   );
   return { handled: true };
 }
@@ -144,7 +144,7 @@ export async function promptPendingStaffInviteOnWhatsApp(opts: {
     admin,
     twilio,
     fromPhone,
-    `${invite.venue_name} te invitó al equipo. Si quieres unirte, responde sí (o escribe sí quiero).`,
+    `${invite.place_name} te invitó al equipo. Si quieres unirte, responde sí (o escribe sí quiero).`,
   );
   return { handled: true };
 }

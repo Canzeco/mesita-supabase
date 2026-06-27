@@ -1,26 +1,26 @@
 // Shared types for the staff WhatsApp Type A flow.
 
-export type StaffVenue = {
-  venueId: string;
-  venueName: string;
+export type StaffPlace = {
+  projectId: string;
+  placeName: string;
 };
 
 export type StaffIdentity = {
   staffUserId: string;
   phoneE164: string;
-  venues: StaffVenue[];
+  places: StaffPlace[];
 };
 
 export type StaffContext = StaffIdentity & {
-  venueId: string;
-  venueName: string;
+  projectId: string;
+  placeName: string;
 };
 
 export type SessionRow = {
   id: string;
   phone_e164: string;
   staff_user_id: string;
-  venue_id: string | null;
+  project_id: string | null;
   state: string;
   consumer_id: string | null;
   ticket_id: string | null;
@@ -28,7 +28,7 @@ export type SessionRow = {
   context: Record<string, unknown>;
 };
 
-export type VenueOption = { venue_id: string; name: string };
+export type PlaceOption = { project_id: string; name: string };
 
 export type StaffAccess =
   | { status: "ok"; identity: StaffIdentity }

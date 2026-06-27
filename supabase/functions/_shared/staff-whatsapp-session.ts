@@ -1,4 +1,4 @@
-// Venue selection + session persistence for staff WhatsApp Type A.
+// Place selection + session persistence for staff WhatsApp Type A.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { displayConsumerCode } from "./consumer-code.ts";
@@ -6,8 +6,8 @@ import type {
   SessionRow,
   StaffContext,
   StaffIdentity,
-  StaffVenue,
-  VenueOption,
+  StaffPlace,
+  PlaceOption,
 } from "./staff-whatsapp-types.ts";
 
 export async function loadSession(
@@ -23,27 +23,27 @@ export async function loadSession(
   return existing.data ? (existing.data as SessionRow) : null;
 }
 
-export async function enterVenueSelection(
+export async function enterPlaceSelection(
   admin: SupabaseClient,
   identity: StaffIdentity,
   session: SessionRow | null,
-  venues: StaffVenue[],
+  places: StaffPlace[],
 ): Promise<SessionRow> {
-  const options: VenueOption[] = venues.map((v) => ({
-    venue_id: v.venueId,
-    name: v.venueName,
+  const options: PlaceOption[] = places.map((v) => ({
+    project_id: v.projectId,
+    name: v.placeName,
   }));
 
   if (session) {
     const updated = await admin
       .from("staff_whatsapp_sessions")
       .update({
-        state: "selecting_venue",
-        venue_id: null,
+        state: "selecting_project",
+        project_id: null,
         consumer_id: null,
         ticket_id: null,
         pending_consumer_code: null,
-        context: { venue_options: options },
+        context: { place_options: options },
       })
       .eq("id", session.id)
       .select("*")
@@ -57,9 +57,9 @@ export async function enterVenueSelection(
     .insert({
       phone_e164: identity.phoneE164,
       staff_user_id: identity.staffUserId,
-      venue_id: null,
-      state: "selecting_venue",
-      context: { venue_options: options },
+      project_id: null,
+      state: "selecting_project",
+      context: { place_options: options },
     })
     .select("*")
     .single();
@@ -67,17 +67,17 @@ export async function enterVenueSelection(
   return inserted.data as SessionRow;
 }
 
-export async function applyActiveVenue(
+export async function applyActivePlace(
   admin: SupabaseClient,
   identity: StaffIdentity,
   session: SessionRow | null,
-  venue: StaffVenue,
+  place: StaffPlace,
 ): Promise<SessionRow> {
   if (session) {
     const updated = await admin
       .from("staff_whatsapp_sessions")
       .update({
-        venue_id: venue.venueId,
+        project_id: place.projectId,
         state: "idle",
         staff_user_id: identity.staffUserId,
         consumer_id: null,
@@ -97,7 +97,7 @@ export async function applyActiveVenue(
     .insert({
       phone_e164: identity.phoneE164,
       staff_user_id: identity.staffUserId,
-      venue_id: venue.venueId,
+      project_id: place.projectId,
       state: "idle",
     })
     .select("*")
@@ -106,7 +106,7 @@ export async function applyActiveVenue(
   return inserted.data as SessionRow;
 }
 
-export async function resolveActiveVenue(
+export async function resolveActivePlace(
   admin: SupabaseClient,
   identity: StaffIdentity,
   session: SessionRow | null,
@@ -114,32 +114,32 @@ export async function resolveActiveVenue(
   | { kind: "ok"; staff: StaffContext; session: SessionRow }
   | { kind: "need_selection"; session: SessionRow }
 > {
-  const venues = identity.venues;
-  if (venues.length === 0) {
-    throw new Error("staff has no venue_roles");
+  const places = identity.places;
+  if (places.length === 0) {
+    throw new Error("staff has no project_roles");
   }
 
-  if (venues.length === 1) {
-    const sessionOut = await applyActiveVenue(admin, identity, session, venues[0]);
+  if (places.length === 1) {
+    const sessionOut = await applyActivePlace(admin, identity, session, places[0]);
     return {
       kind: "ok",
-      staff: { ...identity, ...venues[0] },
+      staff: { ...identity, ...places[0] },
       session: sessionOut,
     };
   }
 
   if (!session) {
-    const created = await enterVenueSelection(admin, identity, null, venues);
+    const created = await enterPlaceSelection(admin, identity, null, places);
     return { kind: "need_selection", session: created };
   }
 
-  if (session.state === "selecting_venue" || !session.venue_id) {
+  if (session.state === "selecting_project" || !session.project_id) {
     return { kind: "need_selection", session };
   }
 
-  const active = venues.find((v) => v.venueId === session.venue_id);
+  const active = places.find((v) => v.projectId === session.project_id);
   if (!active) {
-    const created = await enterVenueSelection(admin, identity, session, venues);
+    const created = await enterPlaceSelection(admin, identity, session, places);
     return { kind: "need_selection", session: created };
   }
 
@@ -160,12 +160,12 @@ export async function resolveActiveVenue(
 export async function resetSession(
   admin: SupabaseClient,
   sessionId: string,
-  venueId: string | null,
+  projectId: string | null,
 ) {
   await admin
     .from("staff_whatsapp_sessions")
     .update({
-      state: venueId ? "idle" : "selecting_venue",
+      state: projectId ? "idle" : "selecting_project",
       consumer_id: null,
       ticket_id: null,
       pending_consumer_code: null,
@@ -174,8 +174,8 @@ export async function resetSession(
     .eq("id", sessionId);
 }
 
-export function prefixActiveVenue(staff: StaffContext): string {
-  return `Unidad: ${staff.venueName}\n`;
+export function prefixActivePlace(staff: StaffContext): string {
+  return `Unidad: ${staff.placeName}\n`;
 }
 
 export function idleOpsBlockedReminder(
@@ -190,7 +190,7 @@ export function idleOpsBlockedReminder(
     | { name?: string }
     | undefined;
   const name = preview?.name;
-  let msg = `Unidad: ${staff.venueName}\n`;
+  let msg = `Unidad: ${staff.placeName}\n`;
   if (code && name) msg += `Último comensal: ${name} (${code})\n`;
   msg +=
     `\nNo puedes abrir ticket con descuento todavía:\n${opsMessage}\n\n` +
@@ -201,29 +201,29 @@ export function idleOpsBlockedReminder(
 export function helpText(
   state: string,
   staff: StaffContext,
-  venues: StaffVenue[],
+  places: StaffPlace[],
   canSwitch: boolean,
 ): string {
   const switchLine = canSwitch
     ? "cambiar unidad — otro local (solo sin comensal activo)\n"
     : "";
   switch (state) {
-    case "selecting_venue":
-      return venuePickerText(venues);
+    case "selecting_project":
+      return placePickerText(places);
     case "consumer_identified":
       return (
-        prefixActiveVenue(staff) +
+        prefixActivePlace(staff) +
         "Manda la cuenta en un mensaje o en varios:\n" +
         "• SUBTOTAL 850 y después PROPINA 100\n" +
         "• o 850 y luego 100\n" +
         "Montos en pesos. Escribe cancelar para empezar de nuevo."
       );
     case "awaiting_staff_payment_confirm":
-      return prefixActiveVenue(staff) +
+      return prefixActivePlace(staff) +
         "Cuando el comensal haya pagado su parte, responde listo o sí.";
     default:
       return (
-        prefixActiveVenue(staff) +
+        prefixActivePlace(staff) +
         "Mesita Ops — ticket con descuento (tipo A)\n" +
         "1) Código del comensal (0000-0000)\n" +
         "2) SUBTOTAL y PROPINA por WhatsApp\n" +
@@ -235,8 +235,8 @@ export function helpText(
   }
 }
 
-export function venuePickerText(venues: StaffVenue[]): string {
-  const lines = venues.map((v, i) => `${i + 1}) ${v.venueName}`);
+export function placePickerText(places: StaffPlace[]): string {
+  const lines = places.map((v, i) => `${i + 1}) ${v.placeName}`);
   return (
     "Trabajas en varios locales de Mesita.\n" +
     "¿En cuál estás hoy? (un WhatsApp = una unidad activa):\n\n" +
@@ -246,33 +246,33 @@ export function venuePickerText(venues: StaffVenue[]): string {
   );
 }
 
-export function isSwitchVenueCommand(body: string): boolean {
-  return /^(switch|cambiar(\s+unidad)?|unidad|sucursal|venue|unit)\b/i.test(
+export function isSwitchPlaceCommand(body: string): boolean {
+  return /^(switch|cambiar(\s+unidad)?|unidad|sucursal|place|unit)\b/i.test(
     body.trim(),
   );
 }
 
-export function parseVenueSelection(body: string, venues: StaffVenue[]): string | null {
+export function parsePlaceSelection(body: string, places: StaffPlace[]): string | null {
   const t = body.trim();
   if (!t) return null;
 
   const numOnly = t.match(/^(\d+)$/);
   if (numOnly) {
     const idx = Number(numOnly[1]) - 1;
-    if (idx >= 0 && idx < venues.length) return venues[idx].venueId;
+    if (idx >= 0 && idx < places.length) return places[idx].projectId;
   }
 
-  const numPrefix = t.match(/^(?:venue|unidad|sucursal|unit)\s*#?\s*(\d+)/i);
+  const numPrefix = t.match(/^(?:place|unidad|sucursal|unit)\s*#?\s*(\d+)/i);
   if (numPrefix) {
     const idx = Number(numPrefix[1]) - 1;
-    if (idx >= 0 && idx < venues.length) return venues[idx].venueId;
+    if (idx >= 0 && idx < places.length) return places[idx].projectId;
   }
 
   const lower = t.toLowerCase();
-  for (const v of venues) {
-    const name = v.venueName.toLowerCase();
+  for (const v of places) {
+    const name = v.placeName.toLowerCase();
     if (lower === name || lower.includes(name) || name.includes(lower)) {
-      return v.venueId;
+      return v.projectId;
     }
   }
   return null;

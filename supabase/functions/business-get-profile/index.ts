@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
 
   // Read; on miss, insert and re-read. Race-safe because (id) is the PK.
   const existing = await admin
-    .from("businesses")
+    .from("accounts")
     .select("id, full_name, first_name, last_name, email, phone, created_at")
     .eq("id", userId)
     .maybeSingle();
@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
     // Keep email mirrored if it drifted (user changed it in auth).
     if (userEmail && existing.data.email !== userEmail) {
       const refresh = await admin
-        .from("businesses")
+        .from("accounts")
         .update({ email: userEmail })
         .eq("id", userId)
         .select("id, full_name, first_name, last_name, email, phone, created_at")
@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
   }
 
   const inserted = await admin
-    .from("businesses")
+    .from("accounts")
     .insert({ id: userId, email: userEmail })
     .select("id, full_name, first_name, last_name, email, phone, created_at")
     .single();

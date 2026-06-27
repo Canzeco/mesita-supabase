@@ -26,7 +26,7 @@ export const QUALITY_MODEL: Record<string, string> = {
 // relevant API key is present AND its required input exists, e.g. a website to
 // scrape). The only remaining feature toggle is `visionEnabled` (image vision).
 
-// Hard ceiling on photos persisted to the venue, regardless of per-source caps.
+// Hard ceiling on photos persisted to the place, regardless of per-source caps.
 // Safety bound on the candidate pool before save (the real, source-independent
 // save cap is atlas_save_total_images, applied at the end).
 export const PHOTO_CEILING = 50;
@@ -85,9 +85,9 @@ export type AtlasConfig = {
 };
 
 const DEFAULT_ANALYSIS_PROMPT =
-  "Describe this venue photo: subject (ambiance / interior / exterior / food / people / detail), visual quality, lighting, and whether it is representative and appealing. Be concise and factual.";
+  "Describe this place photo: subject (ambiance / interior / exterior / food / people / detail), visual quality, lighting, and whether it is representative and appealing. Be concise and factual.";
 const DEFAULT_SORTING_PROMPT =
-  "Rank these venue photos best to worst for a should-we-go-tonight decision. We sell EXPERIENCES: weight beautiful place / ambiance / vibe shots EQUALLY with food. Favor visual quality, representativeness, and a balanced mix. Drop duplicates, blurry, dark, or text-heavy images.";
+  "Rank these place photos best to worst for a should-we-go-tonight decision. We sell EXPERIENCES: weight beautiful place / ambiance / vibe shots EQUALLY with food. Favor visual quality, representativeness, and a balanced mix. Drop duplicates, blurry, dark, or text-heavy images.";
 
 // Read the Atlas admin knobs from app_settings (row id=1) and derive the step
 // gates. The select is a single string LITERAL on purpose: supabase-js infers

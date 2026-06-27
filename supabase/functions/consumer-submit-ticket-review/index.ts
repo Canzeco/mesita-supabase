@@ -73,7 +73,7 @@ Deno.serve(async (req) => {
 
   const ticket = await admin
     .from("tickets")
-    .select("id, consumer_id, venue_id, status")
+    .select("id, consumer_id, project_id, status")
     .eq("id", ticketId)
     .eq("consumer_id", userId)
     .maybeSingle();
@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
       {
         ticket_id: ticketId,
         consumer_id: userId,
-        venue_id: ticket.data.venue_id,
+        project_id: ticket.data.project_id,
         food,
         service,
         ambiance,

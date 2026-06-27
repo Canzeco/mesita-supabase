@@ -4,7 +4,7 @@
 // Google Places `placeId` and gets back a MINIMAL 'generating' unit; deep
 // enrichment then runs ASYNC in the n8n Enricher. Pipeline: early dedupe →
 // fetchGoogleBasics (Google identity spine, category='undefined') →
-// atlas-save-unit-data (places+units, adea_status='generating') →
+// atlas-save-unit-data (places+units, content_status='generating') →
 // triggerEnrichPlace (n8n webhook, fire-and-forget).
 //
 // Roles are simple now: admins create from the admin app via THIS function;
@@ -62,11 +62,11 @@ Deno.serve(async (req) => {
   if (!placeId) return json({ ok: false, error: "placeId is required" }, 400);
 
   // ── Early dedupe (idempotency on google_place_id) ─────────────────────────
-  // placeId IS the venue's google_place_id. Reject already-onboarded venues
+  // placeId IS the place's google_place_id. Reject already-onboarded places
   // BEFORE spending any enrichment budget. atlas-save-unit-data dedupes again as
   // a race guard, but gating here keeps a duplicate request cheap.
   const { data: existing } = await admin
-    .from("venues")
+    .from("projects_view")
     .select("id, slug, name, status, listing_type")
     .eq("google_place_id", placeId)
     .maybeSingle();
@@ -74,8 +74,8 @@ Deno.serve(async (req) => {
     return json(
       {
         ok: false,
-        code: "venue_already_exists",
-        error: "This venue is already on Mesita.",
+        code: "place_already_exists",
+        error: "This place is already on Mesita.",
         existing,
       },
       409,
@@ -102,20 +102,20 @@ Deno.serve(async (req) => {
     category_label: null,
   };
 
-  // ── 2) Persist the minimal row — lands adea_status='generating' until the
+  // ── 2) Persist the minimal row — lands content_status='generating' until the
   // Enricher flips it to 'ready' via atlas-update-unit-data. No businesses
   // upsert — admin creates an unowned listing. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,
     "admin-create-unit",
     "atlas-save-unit-data",
-    { place, adea_status: "generating" },
+    { place, content_status: "generating" },
   );
   if (!saveRes.ok) {
     return json({ ok: false, error: saveRes.error }, saveRes.status || 502);
   }
   const saved = saveRes.data;
-  const venue = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
+  const place = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
 
   // ── 3) Hand deep enrichment to the n8n Enricher (async). Fire-and-forget: the
   // webhook acks immediately, the workflow runs in n8n. A trigger failure NEVER
@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
   return json(
     {
       ok: true,
-      venue,
+      place,
       enrichment: {
         google: true,
         enrichmentTriggered: trigger.ok,

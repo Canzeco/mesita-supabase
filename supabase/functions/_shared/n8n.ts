@@ -6,7 +6,7 @@
 // Webhook node uses responseMode 'onReceived', so the POST is acknowledged in
 // milliseconds while the real (minutes-long) workflow runs asynchronously inside
 // n8n. A trigger failure NEVER fails the caller — the row is already created and
-// the unit can be re-triggered (it stays adea_status='generating').
+// the unit can be re-triggered (it stays content_status='generating').
 //
 // Config (EF env / Supabase secrets):
 //   N8N_BASE_URL        default https://canzeco.app.n8n.cloud
@@ -49,11 +49,11 @@ export async function triggerN8nWorkflow(
 }
 
 // Convenience wrapper for the place enricher workflow (enricher-enrich-place).
-// Sends { venue_id, placeId } — the workflow enriches placeId in FULL and
-// persists onto venue_id via atlas-update-unit-data + atlas-save-place-media.
+// Sends { project_id, placeId } — the workflow enriches placeId in FULL and
+// persists onto project_id via atlas-update-unit-data + atlas-save-place-media.
 export function triggerEnrichPlace(
-  venueId: string,
+  projectId: string,
   placeId: string,
 ): Promise<{ ok: boolean; status: number; error?: string }> {
-  return triggerN8nWorkflow("enrich-place", { venue_id: venueId, placeId });
+  return triggerN8nWorkflow("enrich-place", { project_id: projectId, placeId });
 }

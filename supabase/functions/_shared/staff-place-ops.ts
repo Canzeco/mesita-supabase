@@ -1,12 +1,12 @@
-// Mesita Ops (Staff WhatsApp) — venue eligibility + guest reward copy.
+// Mesita Ops (Staff WhatsApp) — place eligibility + guest reward copy.
 // Type A = informal discount tickets only (see docs/whatsapp.md).
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { isConsumerFirstVisit, type VenueRates } from "./membership.ts";
-import type { VenueRateRow } from "./ticket-informal.ts";
-import { venueHasVerifiedOwner } from "./venue-ownership.ts";
+import { isConsumerFirstVisit, type PlaceRates } from "./membership.ts";
+import type { PlaceRateRow } from "./ticket-informal.ts";
+import { placeHasVerifiedOwner } from "./place-ownership.ts";
 
-export type VenueOpsRow = VenueRateRow & {
+export type PlaceOpsRow = PlaceRateRow & {
   plan: string | null;
   instagram_url?: string | null;
 };
@@ -17,7 +17,7 @@ export type DiscountOpsBlock = {
   ok: false;
   code:
     | "not_claimed"
-    | "formal_venue"
+    | "formal_place"
     | "free_plan"
     | "wrong_plan"
     | "no_rates_configured";
@@ -31,12 +31,12 @@ export type DiscountOpsOk = {
 export type DiscountOpsEligibility = DiscountOpsBlock | DiscountOpsOk;
 
 /** Highest configured promo % across welcome + returning, free + premium. */
-export function maxConfiguredPromoRate(venue: VenueRates): number {
+export function maxConfiguredPromoRate(place: PlaceRates): number {
   const candidates = [
-    venue.welcome_free_rate,
-    venue.welcome_premium_rate,
-    venue.free_rate,
-    venue.premium_rate,
+    place.welcome_free_rate,
+    place.welcome_premium_rate,
+    place.free_rate,
+    place.premium_rate,
   ];
   let max = 0;
   for (const r of candidates) {
@@ -47,7 +47,7 @@ export function maxConfiguredPromoRate(venue: VenueRates): number {
 
 /** Discount % from Promos toggles only (null/Off = 0). */
 export function selectDiscountPromoRate(
-  venue: VenueRates,
+  place: PlaceRates,
   tier: string | null | undefined,
   isFirstVisit: boolean,
 ): number {
@@ -55,24 +55,24 @@ export function selectDiscountPromoRate(
   let rate: number | null = null;
   if (isFirstVisit) {
     rate = isPremium
-      ? venue.welcome_premium_rate ?? venue.welcome_free_rate
-      : venue.welcome_free_rate;
+      ? place.welcome_premium_rate ?? place.welcome_free_rate
+      : place.welcome_free_rate;
   } else {
     rate = isPremium
-      ? venue.premium_rate ?? venue.free_rate
-      : venue.free_rate;
+      ? place.premium_rate ?? place.free_rate
+      : place.free_rate;
   }
   return Math.max(0, Math.min(100, rate ?? 0));
 }
 
 export function assessDiscountTicketOps(
-  venue: VenueOpsRow,
+  place: PlaceOpsRow,
   hasVerifiedOwner: boolean,
 ): DiscountOpsEligibility {
-  if (venue.fiscal_type !== "informal") {
+  if (place.fiscal_type !== "informal") {
     return {
       ok: false,
-      code: "formal_venue",
+      code: "formal_place",
       staffMessage:
         "Este local no está configurado para descuentos en cuenta.\n\n" +
         "Mesita Ops por WhatsApp solo abre tickets con descuento (tipo A).\n" +
@@ -80,7 +80,7 @@ export function assessDiscountTicketOps(
     };
   }
 
-  const plan = (venue.plan ?? "free").toLowerCase();
+  const plan = (place.plan ?? "free").toLowerCase();
   if (plan === "free") {
     return {
       ok: false,
@@ -101,7 +101,7 @@ export function assessDiscountTicketOps(
     };
   }
 
-  if (maxConfiguredPromoRate(venue) === 0) {
+  if (maxConfiguredPromoRate(place) === 0) {
     return {
       ok: false,
       code: "no_rates_configured",
@@ -129,7 +129,7 @@ export function tierLabelEs(tierKey: string | null | undefined): string {
   return "Free";
 }
 
-/** What this guest would get at this venue right now (for staff WhatsApp). */
+/** What this guest would get at this place right now (for staff WhatsApp). */
 export function formatGuestRewardLine(opts: {
   ratePercent: number;
   firstVisit: boolean;
@@ -164,24 +164,24 @@ export function formatGuestRewardLine(opts: {
   );
 }
 
-export async function loadVenueOpsRow(
+export async function loadPlaceOpsRow(
   admin: SupabaseClient,
-  venueId: string,
-): Promise<VenueOpsRow | null> {
+  projectId: string,
+): Promise<PlaceOpsRow | null> {
   const res = await admin
-    .from("venues")
+    .from("projects_view")
     .select(
       "id, name, slug, photos, instagram_url, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type, plan",
     )
-    .eq("id", venueId)
+    .eq("id", projectId)
     .maybeSingle();
   if (res.error || !res.data) return null;
-  return res.data as VenueOpsRow;
+  return res.data as PlaceOpsRow;
 }
 
 export async function guestRewardContext(
   admin: SupabaseClient,
-  venue: VenueOpsRow,
+  place: PlaceOpsRow,
   consumerId: string,
   tierKey: string | null | undefined,
 ): Promise<{
@@ -190,10 +190,10 @@ export async function guestRewardContext(
   firstVisit: boolean;
   rewardLine: string;
 }> {
-  const firstVisit = await isConsumerFirstVisit(admin, consumerId, venue.id);
-  const hasOwner = await venueHasVerifiedOwner(admin, venue.id);
-  const ops = assessDiscountTicketOps(venue, hasOwner);
-  const ratePercent = selectDiscountPromoRate(venue, tierKey, firstVisit);
+  const firstVisit = await isConsumerFirstVisit(admin, consumerId, place.id);
+  const hasOwner = await placeHasVerifiedOwner(admin, place.id);
+  const ops = assessDiscountTicketOps(place, hasOwner);
+  const ratePercent = selectDiscountPromoRate(place, tierKey, firstVisit);
   const rewardLine = formatGuestRewardLine({
     ratePercent,
     firstVisit,
@@ -204,14 +204,14 @@ export async function guestRewardContext(
 }
 
 /** Short note when staff picks a unit that cannot run discount tickets yet. */
-export async function venueOpsShortWarning(
+export async function placeOpsShortWarning(
   admin: SupabaseClient,
-  venueId: string,
+  projectId: string,
 ): Promise<string> {
-  const venue = await loadVenueOpsRow(admin, venueId);
-  if (!venue) return "";
-  const hasOwner = await venueHasVerifiedOwner(admin, venueId);
-  const ops = assessDiscountTicketOps(venue, hasOwner);
+  const place = await loadPlaceOpsRow(admin, projectId);
+  if (!place) return "";
+  const hasOwner = await placeHasVerifiedOwner(admin, projectId);
+  const ops = assessDiscountTicketOps(place, hasOwner);
   if (ops.ok) return "";
   return (
     "\n\n⚠️ Este local no puede abrir tickets con descuento por WhatsApp todavía. " +

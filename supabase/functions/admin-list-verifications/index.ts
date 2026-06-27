@@ -1,6 +1,6 @@
 // Supabase Edge Function — admin-list-verifications
 //
-// Returns ownership verification requests with venue + requester
+// Returns ownership verification requests with place + requester
 // metadata, ordered newest first. Used by admin.mesita.ai/verifications
 // to surface the queue. Pending rows are the actionable ones; decided
 // rows (approved / rejected) are kept in the list as history.
@@ -49,9 +49,9 @@ Deno.serve(async (req) => {
   const limit = Math.min(200, Math.max(1, body.limit ?? 100));
 
   let query = admin
-    .from("venue_verifications")
+    .from("project_verifications")
     .select(
-      "id, venue_id, requester_id, method, payload, requester_email, status, reject_reason, decided_at, decided_by, decided_via, created_at, venue:venues(id, slug, name, status, phone, address, google_place_id)",
+      "id, project_id, requester_id, method, payload, requester_email, status, reject_reason, decided_at, decided_by, decided_via, created_at, place:places(id, slug, name, status, phone, address, google_place_id)",
     )
     .order("created_at", { ascending: false })
     .limit(limit);

@@ -1,27 +1,27 @@
 // Staff WhatsApp orchestration — Ticket Type A (dp, informal, no story).
 //
-// Business rule: one WhatsApp number → exactly one active venue at a time.
+// Business rule: one WhatsApp number → exactly one active place at a time.
 // Staff may belong to many units; they must pick (or SWITCH) before guest codes.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import {
-  applyActiveVenue,
-  enterVenueSelection,
+  applyActivePlace,
+  enterPlaceSelection,
   helpText,
   idleOpsBlockedReminder,
-  isSwitchVenueCommand,
+  isSwitchPlaceCommand,
   loadSession,
-  parseVenueSelection,
+  parsePlaceSelection,
   resetSession,
-  resolveActiveVenue,
-  venuePickerText,
+  resolveActivePlace,
+  placePickerText,
 } from "./staff-whatsapp-session.ts";
 import { resolveTicketOpener } from "./staff-whatsapp-payment.ts";
 import type {
   SessionRow,
   StaffContext,
   StaffIdentity,
-  StaffVenue,
+  StaffPlace,
 } from "./staff-whatsapp-types.ts";
 import {
   displayConsumerCode,
@@ -41,10 +41,10 @@ import { isCasualStaffMessage, parseStaffWhatsAppMessage } from "./staff-llm.ts"
 import {
   assessDiscountTicketOps,
   guestRewardContext,
-  loadVenueOpsRow,
-  venueOpsShortWarning,
-} from "./staff-venue-ops.ts";
-import { venueHasVerifiedOwner } from "./venue-ownership.ts";
+  loadPlaceOpsRow,
+  placeOpsShortWarning,
+} from "./staff-place-ops.ts";
+import { placeHasVerifiedOwner } from "./place-ownership.ts";
 import { replyStaffCoach } from "./staff-whatsapp-replies.ts";
 import {
   buildConsumerBillPayload,
@@ -56,7 +56,7 @@ import {
 import { sendStaffWhatsAppReply } from "./staff-whatsapp-messages.ts";
 import { sendWhatsAppText, type TwilioEnv } from "./twilio.ts";
 
-export type { StaffAccess, StaffIdentity, StaffVenue } from "./staff-whatsapp-types.ts";
+export type { StaffAccess, StaffIdentity, StaffPlace } from "./staff-whatsapp-types.ts";
 export { resolveStaffAccess, resolveStaffIdentity } from "./staff-whatsapp-access.ts";
 
 export async function handleStaffInboundMessage(opts: {
@@ -67,12 +67,12 @@ export async function handleStaffInboundMessage(opts: {
   conversationHistory?: string;
 }): Promise<void> {
   const { admin, twilio, identity, body, conversationHistory = "" } = opts;
-  const venues = identity.venues;
+  const places = identity.places;
 
   let session = await loadSession(admin, identity.phoneE164);
 
-  if (isSwitchVenueCommand(body)) {
-    if (session && session.state !== "idle" && session.state !== "selecting_venue") {
+  if (isSwitchPlaceCommand(body)) {
+    if (session && session.state !== "idle" && session.state !== "selecting_project") {
       await reply(
         admin,
         twilio,
@@ -81,23 +81,23 @@ export async function handleStaffInboundMessage(opts: {
       );
       return;
     }
-    if (venues.length < 2) {
+    if (places.length < 2) {
       await reply(
         admin,
         twilio,
         identity.phoneE164,
-        venues.length === 1
-          ? `Solo estás en el equipo de ${venues[0].venueName}. No hace falta cambiar.`
+        places.length === 1
+          ? `Solo estás en el equipo de ${places[0].placeName}. No hace falta cambiar.`
           : "No tienes un restaurante asignado en tu perfil.",
       );
       return;
     }
-    session = await enterVenueSelection(admin, identity, session, venues);
-    await reply(admin, twilio, identity.phoneE164, venuePickerText(venues));
+    session = await enterPlaceSelection(admin, identity, session, places);
+    await reply(admin, twilio, identity.phoneE164, placePickerText(places));
     return;
   }
 
-  const sessionState = session?.state ?? "selecting_venue";
+  const sessionState = session?.state ?? "selecting_project";
   const pendingBill = billDraftFromContext(session?.context ?? {});
   const codeInBody = extractConsumerCodeFromText(body);
   const intent = await parseStaffWhatsAppMessage(
@@ -109,23 +109,23 @@ export async function handleStaffInboundMessage(opts: {
 
   if (
     intent.intent === "help" &&
-    (session?.state === "selecting_venue" || !session?.venue_id) &&
-    venues.length > 1
+    (session?.state === "selecting_project" || !session?.project_id) &&
+    places.length > 1
   ) {
-    await reply(admin, twilio, identity.phoneE164, venuePickerText(venues));
+    await reply(admin, twilio, identity.phoneE164, placePickerText(places));
     return;
   }
 
-  if (intent.intent === "select_venue" && intent.venue_index != null) {
-    const picked = venues[intent.venue_index];
+  if (intent.intent === "select_project" && intent.place_index != null) {
+    const picked = places[intent.place_index];
     if (picked) {
-      session = await applyActiveVenue(admin, identity, session, picked);
-      const warn = await venueOpsShortWarning(admin, picked.venueId);
+      session = await applyActivePlace(admin, identity, session, picked);
+      const warn = await placeOpsShortWarning(admin, picked.projectId);
       await reply(
         admin,
         twilio,
         identity.phoneE164,
-        `Unidad activa: ${picked.venueName} ✓\nManda el código Mesita del comensal (0000-0000).` +
+        `Unidad activa: ${picked.placeName} ✓\nManda el código Mesita del comensal (0000-0000).` +
           warn,
       );
       return;
@@ -135,57 +135,57 @@ export async function handleStaffInboundMessage(opts: {
       twilio,
       identity.phoneE164,
       await replyStaffCoach({
-        sessionState: "selecting_venue",
-        venueName: null,
-        multiVenue: venues.length > 1,
+        sessionState: "selecting_project",
+        placeName: null,
+        multiPlace: places.length > 1,
         userMessage: body,
-        situation: "invalid_venue_pick",
+        situation: "invalid_place_pick",
         conversationHistory,
       }),
     );
     return;
   }
 
-  const venuePick = parseVenueSelection(body, venues);
+  const placePick = parsePlaceSelection(body, places);
   if (
-    venuePick &&
-    (session?.state === "selecting_venue" || !session?.venue_id)
+    placePick &&
+    (session?.state === "selecting_project" || !session?.project_id)
   ) {
-    const picked = venues.find((v) => v.venueId === venuePick)!;
-    session = await applyActiveVenue(admin, identity, session, picked);
-    const warn = await venueOpsShortWarning(admin, picked.venueId);
+    const picked = places.find((v) => v.projectId === placePick)!;
+    session = await applyActivePlace(admin, identity, session, picked);
+    const warn = await placeOpsShortWarning(admin, picked.projectId);
     await reply(
       admin,
       twilio,
       identity.phoneE164,
-      `Unidad activa: ${picked.venueName} ✓\nManda el código Mesita del comensal (0000-0000).` +
+      `Unidad activa: ${picked.placeName} ✓\nManda el código Mesita del comensal (0000-0000).` +
         warn,
     );
     return;
   }
 
-  const resolved = await resolveActiveVenue(admin, identity, session);
+  const resolved = await resolveActivePlace(admin, identity, session);
   if (resolved.kind === "need_selection") {
     session = resolved.session;
     const unclear =
       intent.intent === "unknown" &&
-      !parseVenueSelection(body, venues) &&
-      intent.venue_index == null;
+      !parsePlaceSelection(body, places) &&
+      intent.place_index == null;
     if (unclear && body.trim().length > 0) {
       await reply(
         admin,
         twilio,
         identity.phoneE164,
         await replyStaffCoach({
-          sessionState: "selecting_venue",
-          venueName: null,
-          multiVenue: venues.length > 1,
+          sessionState: "selecting_project",
+          placeName: null,
+          multiPlace: places.length > 1,
           userMessage: body,
           conversationHistory,
         }),
       );
     } else {
-      await reply(admin, twilio, identity.phoneE164, venuePickerText(venues));
+      await reply(admin, twilio, identity.phoneE164, placePickerText(places));
     }
     return;
   }
@@ -194,13 +194,13 @@ export async function handleStaffInboundMessage(opts: {
   session = resolved.session;
 
   if (intent.intent === "cancel") {
-    await resetSession(admin, session.id, staff.venueId);
+    await resetSession(admin, session.id, staff.projectId);
     await reply(
       admin,
       twilio,
       staff.phoneE164,
-      `Sesión reiniciada en ${staff.venueName}.\nCuando tengas un comensal, manda su código (0000-0000).\n` +
-        (venues.length > 1 ? "Escribe cambiar unidad para moverte a otro local." : ""),
+      `Sesión reiniciada en ${staff.placeName}.\nCuando tengas un comensal, manda su código (0000-0000).\n` +
+        (places.length > 1 ? "Escribe cambiar unidad para moverte a otro local." : ""),
     );
     return;
   }
@@ -210,7 +210,7 @@ export async function handleStaffInboundMessage(opts: {
       admin,
       twilio,
       staff.phoneE164,
-      helpText(session.state, staff, venues, venues.length > 1),
+      helpText(session.state, staff, places, places.length > 1),
     );
     return;
   }
@@ -238,8 +238,8 @@ export async function handleStaffInboundMessage(opts: {
       staff.phoneE164,
       await replyStaffCoach({
         sessionState: "idle",
-        venueName: staff.venueName,
-        multiVenue: venues.length > 1,
+        placeName: staff.placeName,
+        multiPlace: places.length > 1,
         userMessage: body,
         conversationHistory,
       }),
@@ -365,8 +365,8 @@ export async function handleStaffInboundMessage(opts: {
       staff.phoneE164,
       await replyStaffCoach({
         sessionState: "idle",
-        venueName: staff.venueName,
-        multiVenue: venues.length > 1,
+        placeName: staff.placeName,
+        multiPlace: places.length > 1,
         userMessage: body,
         conversationHistory,
         pendingBill,
@@ -385,8 +385,8 @@ export async function handleStaffInboundMessage(opts: {
     staff.phoneE164,
     await replyStaffCoach({
       sessionState: session.state,
-      venueName: staff.venueName,
-      multiVenue: venues.length > 1,
+      placeName: staff.placeName,
+      multiPlace: places.length > 1,
       userMessage: body,
       conversationHistory,
       pendingBill,
@@ -420,14 +420,14 @@ async function handleLookupCode(
     return null;
   }
   const c = consumerRes.data as ConsumerRow;
-  const venueRow = await loadVenueOpsRow(admin, staff.venueId);
-  if (!venueRow) {
+  const placeRow = await loadPlaceOpsRow(admin, staff.projectId);
+  if (!placeRow) {
     await reply(admin, twilio, staff.phoneE164, "No encontré el restaurante.");
     return null;
   }
-  const venueOps = await guestRewardContext(
+  const placeOps = await guestRewardContext(
     admin,
-    venueRow,
+    placeRow,
     c.id,
     c.tier_key,
   );
@@ -454,10 +454,10 @@ async function handleLookupCode(
     `Código: ${displayConsumerCode(code)}\n` +
     `Nombre: ${name}\n` +
     `Nivel: ${tier}${igLine}${subLine}\n` +
-    `Unidad: ${staff.venueName}\n` +
-    `${venueOps.rewardLine}\n`;
+    `Unidad: ${staff.placeName}\n` +
+    `${placeOps.rewardLine}\n`;
 
-  if (!venueOps.ops.ok) {
+  if (!placeOps.ops.ok) {
     await admin
       .from("staff_whatsapp_sessions")
       .update({
@@ -467,7 +467,7 @@ async function handleLookupCode(
         ticket_id: null,
         context: {
           consumer_preview: { name, tier },
-          ops_block: venueOps.ops,
+          ops_block: placeOps.ops,
         },
       })
       .eq("id", session.id);
@@ -477,7 +477,7 @@ async function handleLookupCode(
       twilio,
       staff.phoneE164,
       guestBlock +
-        `\n⚠️ No puedes abrir ticket con descuento aquí:\n${venueOps.ops.staffMessage}`,
+        `\n⚠️ No puedes abrir ticket con descuento aquí:\n${placeOps.ops.staffMessage}`,
     );
     return null;
   }
@@ -526,10 +526,10 @@ async function replyIfDiscountOpsBlocked(
   staff: StaffContext,
   session: SessionRow,
 ): Promise<boolean> {
-  const venue = await loadVenueOpsRow(admin, staff.venueId);
-  if (!venue) return false;
-  const hasOwner = await venueHasVerifiedOwner(admin, staff.venueId);
-  const ops = assessDiscountTicketOps(venue, hasOwner);
+  const place = await loadPlaceOpsRow(admin, staff.projectId);
+  if (!place) return false;
+  const hasOwner = await placeHasVerifiedOwner(admin, staff.projectId);
+  const ops = assessDiscountTicketOps(place, hasOwner);
   if (ops.ok) return false;
 
   await admin
@@ -547,7 +547,7 @@ async function replyIfDiscountOpsBlocked(
     admin,
     twilio,
     staff.phoneE164,
-    `Unidad: ${staff.venueName}\n\n⚠️ ${ops.staffMessage}`,
+    `Unidad: ${staff.placeName}\n\n⚠️ ${ops.staffMessage}`,
   );
   return true;
 }
@@ -622,24 +622,24 @@ async function handleSubmitBill(
 ) {
   if (!session.consumer_id) return;
 
-  const venue = await loadVenueOpsRow(admin, staff.venueId);
-  if (!venue) {
+  const place = await loadPlaceOpsRow(admin, staff.projectId);
+  if (!place) {
     await reply(admin, twilio, staff.phoneE164, "No encontré el restaurante.");
     return;
   }
-  const hasOwner = await venueHasVerifiedOwner(admin, staff.venueId);
-  const ops = assessDiscountTicketOps(venue, hasOwner);
+  const hasOwner = await placeHasVerifiedOwner(admin, staff.projectId);
+  const ops = assessDiscountTicketOps(place, hasOwner);
   if (!ops.ok) {
     await reply(
       admin,
       twilio,
       staff.phoneE164,
-      `Unidad: ${staff.venueName}\n\n⚠️ ${ops.staffMessage}`,
+      `Unidad: ${staff.placeName}\n\n⚠️ ${ops.staffMessage}`,
     );
-    await resetSession(admin, session.id, staff.venueId);
+    await resetSession(admin, session.id, staff.projectId);
     return;
   }
-  if (venue.status === "archived") {
+  if (place.status === "archived") {
     await reply(admin, twilio, staff.phoneE164, "Este local está archivado.");
     return;
   }
@@ -658,7 +658,7 @@ async function handleSubmitBill(
 
   const calc = await computeInformalBill(
     admin,
-    venue,
+    place,
     consumerRes.data as ConsumerRow,
     amounts.subtotal,
     amounts.tip,
@@ -669,13 +669,13 @@ async function handleSubmitBill(
     return;
   }
 
-  const opener = await resolveTicketOpener(admin, staff.venueId, staff.staffUserId);
+  const opener = await resolveTicketOpener(admin, staff.projectId, staff.staffUserId);
 
   const now = new Date().toISOString();
   const insert = await admin
     .from("tickets")
     .insert({
-      venue_id: staff.venueId,
+      project_id: staff.projectId,
       consumer_id: session.consumer_id,
       opened_by: opener,
       opened_by_staff_user_id: staff.staffUserId,
@@ -702,7 +702,7 @@ async function handleSubmitBill(
   }
 
   const ticketId = insert.data.id;
-  const payload = buildConsumerBillPayload(venue, calc, staff.venueId);
+  const payload = buildConsumerBillPayload(place, calc, staff.projectId);
 
   // Deliver the discounted bill receipt to the consumer's Pay inbox.
   await admin.from("consumer_pay_notifications").insert({
@@ -728,7 +728,7 @@ async function handleSubmitBill(
       from: twilio.whatsappFromConsumers,
       to: guestPhone,
       body:
-        `Mesita — ${venue.name}\n` +
+        `Mesita — ${place.name}\n` +
         `Bill: ${formatMoneyMx(calc.total)}\n` +
         `Discount (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
         `You pay: ${formatMoneyMx(calc.amountDueCents)}\n\n` +
@@ -740,7 +740,7 @@ async function handleSubmitBill(
     admin,
     twilio,
     staff.phoneE164,
-    `Cuenta lista ✓ (${staff.venueName})\n` +
+    `Cuenta lista ✓ (${staff.placeName})\n` +
       `Subtotal: ${formatMoneyMx(calc.subtotal)}\n` +
       `Descuento (${calc.discountPercent}%): -${formatMoneyMx(calc.discountCents)}\n` +
       `Cobra al comensal: ${formatMoneyMx(calc.amountDueCents)} (efectivo o terminal).\n\n` +
@@ -762,7 +762,7 @@ async function handleStaffPaymentConfirm(
     .eq("id", session.ticket_id)
     .maybeSingle();
   if (!ticket.data || ticket.data.status !== "awaiting_payment_confirm") {
-    await resetSession(admin, session.id, staff.venueId);
+    await resetSession(admin, session.id, staff.projectId);
     await reply(
       admin,
       twilio,
@@ -776,19 +776,19 @@ async function handleStaffPaymentConfirm(
     admin,
     session.ticket_id,
     session.consumer_id,
-    staff.venueId,
+    staff.projectId,
   );
   if (!done.ok) {
     await reply(admin, twilio, staff.phoneE164, `Error al cerrar: ${done.error}`);
     return;
   }
 
-  await resetSession(admin, session.id, staff.venueId);
+  await resetSession(admin, session.id, staff.projectId);
   await reply(
     admin,
     twilio,
     staff.phoneE164,
-    `Pago registrado ✓ Ticket cerrado en ${staff.venueName}.\n` +
+    `Pago registrado ✓ Ticket cerrado en ${staff.placeName}.\n` +
       `El comensal ya puede dejar su reseña en la app.\n` +
       `Manda el código del siguiente comensal cuando quieras.`,
   );

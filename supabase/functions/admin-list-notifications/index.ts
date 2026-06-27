@@ -9,23 +9,23 @@
 // *derived* (there is no dedicated events/notifications table; we read the
 // timestamps the product already writes):
 //
-//   atlas.venue_created      a new row in public.venues
-//   atlas.venue_enriched     a venue whose Atlas profile pass completed
+//   atlas.place_created      a new row in public.places
+//   atlas.place_enriched     a place whose Atlas profile pass completed
 //                            (enriched_at stamped) — carries the textual
 //                            summary the enricher synthesised
 //   atlas.ownership_claimed  someone submitted an ownership proof
-//                            (public.venue_verifications) for a place
+//                            (public.project_verifications) for a place
 //
 // The envelope is category-agnostic so future categories (billing,
 // verifications, consumers…) slot in without a client rewrite: each item
-// is { id, category, type, occurredAt, venue, actor, detail, meta } and the
+// is { id, category, type, occurredAt, place, actor, detail, meta } and the
 // client renders title/icon from `type`.
 //
-// "Who called it" for a creation: venues don't persist the caller at insert
-// time (business-create-unit deliberately leaves the venue unowned until an
-// ownership claim is approved), so the closest honest signal is the venue's
-// current owner — resolved here via venue_members(role=owner) → businesses.
-// Unclaimed venues report actor = null and meta.claimed = false. The exact
+// "Who called it" for a creation: places don't persist the caller at insert
+// time (business-create-unit deliberately leaves the place unowned until an
+// ownership claim is approved), so the closest honest signal is the place's
+// current owner — resolved here via project_members(role=owner) → businesses.
+// Unclaimed places report actor = null and meta.claimed = false. The exact
 // claimant, when it exists, is its own ownership_claimed event.
 //
 // Auth: caller's JWT email must be in public.super_admins.
@@ -44,8 +44,8 @@ import {
 type Category = "atlas";
 
 type NotificationType =
-  | "atlas.venue_created"
-  | "atlas.venue_enriched"
+  | "atlas.place_created"
+  | "atlas.place_enriched"
   | "atlas.ownership_claimed";
 
 type Body = {
@@ -55,7 +55,7 @@ type Body = {
   limit?: number;
 };
 
-type VenueRef = {
+type PlaceRef = {
   id: string;
   slug: string | null;
   name: string;
@@ -70,9 +70,9 @@ type NotificationItem = {
   category: Category;
   type: NotificationType;
   occurredAt: string;
-  venue: VenueRef;
+  place: PlaceRef;
   // "Who" — owner display for creations, requester email for claims, "Atlas"
-  // for enrichments. null when genuinely unknown (e.g. unclaimed venue).
+  // for enrichments. null when genuinely unknown (e.g. unclaimed place).
   actor: string | null;
   // Free-text detail — the enrichment summary snippet. null otherwise.
   detail: string | null;
@@ -86,7 +86,7 @@ function one<T>(rel: T | T[] | null | undefined): T | null {
   return rel ?? null;
 }
 
-type VenueShape = {
+type PlaceShape = {
   id: string;
   slug: string | null;
   name: string | null;
@@ -95,12 +95,12 @@ type VenueShape = {
   google_place_id: string | null;
 };
 
-function venueRef(v: VenueShape | null): VenueRef {
+function placeRef(v: PlaceShape | null): PlaceRef {
   if (!v) return null;
   return {
     id: v.id,
     slug: v.slug,
-    name: v.name ?? "(unnamed venue)",
+    name: v.name ?? "(unnamed place)",
     address: v.address,
     categoryLabel: v.category_label,
     googlePlaceId: v.google_place_id,
@@ -142,14 +142,14 @@ Deno.serve(async (req) => {
     // final sort.
     const [createdRes, enrichedRes, claimsRes] = await Promise.all([
       admin
-        .from("venues")
+        .from("projects_view")
         .select(
           "id, slug, name, address, category_label, google_place_id, listing_type, status, created_at, enriched_at",
         )
         .order("created_at", { ascending: false })
         .limit(limit),
       admin
-        .from("venues")
+        .from("projects_view")
         .select(
           "id, slug, name, address, category_label, google_place_id, editorial_summary, description, details, enriched_at",
         )
@@ -157,26 +157,26 @@ Deno.serve(async (req) => {
         .order("enriched_at", { ascending: false })
         .limit(limit),
       admin
-        .from("venue_verifications")
+        .from("project_verifications")
         .select(
-          "id, venue_id, method, requester_email, status, created_at, venue:venues(id, slug, name, address, category_label, google_place_id)",
+          "id, project_id, method, requester_email, status, created_at, place:places(id, slug, name, address, category_label, google_place_id)",
         )
         .order("created_at", { ascending: false })
         .limit(limit),
     ]);
 
     if (createdRes.error) {
-      return json({ ok: false, error: `venues_created: ${createdRes.error.message}` }, 500);
+      return json({ ok: false, error: `places_created: ${createdRes.error.message}` }, 500);
     }
     if (enrichedRes.error) {
-      return json({ ok: false, error: `venues_enriched: ${enrichedRes.error.message}` }, 500);
+      return json({ ok: false, error: `places_enriched: ${enrichedRes.error.message}` }, 500);
     }
     if (claimsRes.error) {
       return json({ ok: false, error: `claims: ${claimsRes.error.message}` }, 500);
     }
 
     const createdRows = (createdRes.data ?? []) as Array<
-      VenueShape & {
+      PlaceShape & {
         listing_type: string | null;
         status: string | null;
         created_at: string;
@@ -184,21 +184,21 @@ Deno.serve(async (req) => {
       }
     >;
 
-    // Resolve the current owner for the created venues in one batched read.
-    // Most freshly-created venues are unclaimed, so this map is usually small.
-    const ownerByVenue = new Map<string, { email: string | null; name: string | null }>();
+    // Resolve the current owner for the created places in one batched read.
+    // Most freshly-created places are unclaimed, so this map is usually small.
+    const ownerByPlace = new Map<string, { email: string | null; name: string | null }>();
     const createdIds = createdRows.map((r) => r.id);
     if (createdIds.length > 0) {
       const { data: owners, error: ownersErr } = await admin
-        .from("venue_members")
-        .select("venue_id, business:businesses(email, full_name, first_name, last_name)")
+        .from("project_members")
+        .select("project_id, business:businesses(email, full_name, first_name, last_name)")
         .eq("role", "owner")
-        .in("venue_id", createdIds);
+        .in("project_id", createdIds);
       if (ownersErr) {
         return json({ ok: false, error: `owners: ${ownersErr.message}` }, 500);
       }
       for (const row of (owners ?? []) as Array<{
-        venue_id: string;
+        project_id: string;
         business:
           | { email: string | null; full_name: string | null; first_name: string | null; last_name: string | null }
           | Array<{ email: string | null; full_name: string | null; first_name: string | null; last_name: string | null }>
@@ -208,13 +208,13 @@ Deno.serve(async (req) => {
         const joined = [b?.first_name, b?.last_name].filter(Boolean).join(" ").trim();
         const fullName = b?.full_name?.trim() || null;
         const name = fullName || (joined.length > 0 ? joined : null);
-        ownerByVenue.set(row.venue_id, { email: b?.email ?? null, name });
+        ownerByPlace.set(row.project_id, { email: b?.email ?? null, name });
       }
     }
 
-    // ── atlas.venue_created ──────────────────────────────────────────────
+    // ── atlas.place_created ──────────────────────────────────────────────
     for (const v of createdRows) {
-      const owner = ownerByVenue.get(v.id);
+      const owner = ownerByPlace.get(v.id);
       const actor = owner
         ? owner.name
           ? owner.email
@@ -223,11 +223,11 @@ Deno.serve(async (req) => {
           : owner.email
         : null;
       items.push({
-        id: `atlas.venue_created:${v.id}`,
+        id: `atlas.place_created:${v.id}`,
         category: "atlas",
-        type: "atlas.venue_created",
+        type: "atlas.place_created",
         occurredAt: v.created_at,
-        venue: venueRef(v),
+        place: placeRef(v),
         actor,
         detail: null,
         meta: {
@@ -239,9 +239,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── atlas.venue_enriched ─────────────────────────────────────────────
+    // ── atlas.place_enriched ─────────────────────────────────────────────
     for (const v of (enrichedRes.data ?? []) as Array<
-      VenueShape & {
+      PlaceShape & {
         editorial_summary: string | null;
         description: string | null;
         details: unknown;
@@ -257,11 +257,11 @@ Deno.serve(async (req) => {
           ? Object.keys(v.details as Record<string, unknown>).length
           : 0;
       items.push({
-        id: `atlas.venue_enriched:${v.id}`,
+        id: `atlas.place_enriched:${v.id}`,
         category: "atlas",
-        type: "atlas.venue_enriched",
+        type: "atlas.place_enriched",
         occurredAt: v.enriched_at,
-        venue: venueRef(v),
+        place: placeRef(v),
         actor: "Atlas",
         detail: summary ? truncate(summary, 260) : null,
         meta: { detailsFields, hasSummary: !!summary },
@@ -271,27 +271,27 @@ Deno.serve(async (req) => {
     // ── atlas.ownership_claimed ──────────────────────────────────────────
     for (const c of (claimsRes.data ?? []) as Array<{
       id: string;
-      venue_id: string;
+      project_id: string;
       method: string | null;
       requester_email: string | null;
       status: string | null;
       created_at: string;
-      venue: VenueShape | VenueShape[] | null;
+      place: PlaceShape | PlaceShape[] | null;
     }>) {
       items.push({
         id: `atlas.ownership_claimed:${c.id}`,
         category: "atlas",
         type: "atlas.ownership_claimed",
         occurredAt: c.created_at,
-        venue: venueRef(one(c.venue)),
+        place: placeRef(one(c.place)),
         actor: c.requester_email ?? null,
         detail: null,
         meta: { method: c.method, status: c.status },
       });
     }
 
-    counts["atlas.venue_created"] = createdRows.length;
-    counts["atlas.venue_enriched"] = (enrichedRes.data ?? []).length;
+    counts["atlas.place_created"] = createdRows.length;
+    counts["atlas.place_enriched"] = (enrichedRes.data ?? []).length;
     counts["atlas.ownership_claimed"] = (claimsRes.data ?? []).length;
   }
 

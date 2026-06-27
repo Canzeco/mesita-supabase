@@ -3,7 +3,7 @@
 // Builds a dynamically-curated catalog: up to N rows, each with its own
 // LLM-proposed label/description/emoji + a cosine-ranked slice of the
 // candidate pool. Categories are NOT a prebuilt taxonomy — they're
-// proposed per request from the venue mix in the user's area plus user
+// proposed per request from the place mix in the user's area plus user
 // context (location, time, profile).
 //
 // Pipeline:
@@ -15,7 +15,7 @@
 //   4. Embed each intent_query in one batched OpenAI call.
 //   5. For each category, cosine-rank the candidate pool against its
 //      intent vec and slice off the top N.
-//   6. Cross-category dedupe so a venue appears in at most 2 buckets
+//   6. Cross-category dedupe so a place appears in at most 2 buckets
 //      (lets a really good place repeat once but not seven times).
 //
 // Auth: artificial caller — only invoked by natural-caller EFs (currently
@@ -31,7 +31,7 @@ import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
 import {
   EMBEDDING_DIMS,
-  embedAndPersistVenues,
+  embedAndPersistPlaces,
   embedBatch,
   rankByCosine,
   shouldEmbed,
@@ -41,7 +41,7 @@ import {
   type ConsumerProfile,
   fetchCandidatePool,
   stripInternal,
-  type VenueRow,
+  type PlaceRow,
 } from "../_shared/recommender-pool.ts";
 
 const CANDIDATE_POOL = 300;
@@ -50,7 +50,7 @@ const DEFAULT_MAX_CATEGORIES = 10;
 const DEFAULT_PER_CATEGORY = 10;
 const MAX_PER_CATEGORY_CAP = 20;
 const LAZY_EMBED_BATCH = 80;
-const MAX_VENUE_REUSE = 2;
+const MAX_PLACE_REUSE = 2;
 
 const CATEGORY_MODEL = "gpt-4o-mini";
 
@@ -76,7 +76,7 @@ type BuiltCategory = {
   label: string;
   description: string;
   emoji: string;
-  venues: Omit<VenueRow, "embedding" | "embedding_source_hash">[];
+  places: Omit<PlaceRow, "embedding" | "embedding_source_hash">[];
 };
 
 Deno.serve(async (req) => {
@@ -103,7 +103,7 @@ Deno.serve(async (req) => {
   const admin = adminClient(env);
 
   // ── 1. Candidate pool ──────────────────────────────────────────────
-  const poolRes = await fetchCandidatePool<VenueRow>(admin, {
+  const poolRes = await fetchCandidatePool<PlaceRow>(admin, {
     lat,
     lng,
     radiusKm,
@@ -121,7 +121,7 @@ Deno.serve(async (req) => {
   const needsEmbed = candidates.filter(shouldEmbed).slice(0, LAZY_EMBED_BATCH);
   let embeddedCount = 0;
   if (needsEmbed.length > 0 && OPENAI_KEY) {
-    const patched = await embedAndPersistVenues(
+    const patched = await embedAndPersistPlaces(
       needsEmbed,
       admin,
       OPENAI_KEY,
@@ -180,7 +180,7 @@ Deno.serve(async (req) => {
   for (let i = 0; i < proposed.length; i += 1) {
     const p = proposed[i];
     const vec = intentVecs[i];
-    let ranked: VenueRow[];
+    let ranked: PlaceRow[];
     if (vec && vec.length === EMBEDDING_DIMS) {
       ranked = rankByCosine(candidates, vec);
     } else {
@@ -191,11 +191,11 @@ Deno.serve(async (req) => {
       );
     }
 
-    const picked: VenueRow[] = [];
+    const picked: PlaceRow[] = [];
     for (const r of ranked) {
       if (picked.length >= perCategory) break;
       const used = usage.get(r.id) ?? 0;
-      if (used >= MAX_VENUE_REUSE) continue;
+      if (used >= MAX_PLACE_REUSE) continue;
       picked.push(r);
       usage.set(r.id, used + 1);
     }
@@ -205,7 +205,7 @@ Deno.serve(async (req) => {
       label: p.label,
       description: p.description,
       emoji: p.emoji,
-      venues: picked.map(stripInternal),
+      places: picked.map(stripInternal),
     });
   }
 
@@ -233,7 +233,7 @@ async function proposeCategories({
   maxCategories,
   apiKey,
 }: {
-  candidates: VenueRow[];
+  candidates: PlaceRow[];
   profile: ConsumerProfile | null;
   lat: number | null;
   lng: number | null;
@@ -241,7 +241,7 @@ async function proposeCategories({
   apiKey: string;
 }): Promise<ProposedCategory[]> {
   // We give the model a compact view of the pool so its categories are
-  // grounded in venues that actually exist (not generic taxonomy). Keep
+  // grounded in places that actually exist (not generic taxonomy). Keep
   // the payload modest — first 80 rows is plenty signal.
   const poolDigest = candidates.slice(0, 80).map((v) => ({
     name: v.name,
@@ -262,15 +262,15 @@ async function proposeCategories({
   };
 
   const system = [
-    "You are Mesita's catalog curator. You see a real-time slice of nearby venues and one user's context.",
+    "You are Mesita's catalog curator. You see a real-time slice of nearby places and one user's context.",
     "Propose up to N catalog rows that feel hand-curated for THIS user — not a generic taxonomy.",
     "Hard rules:",
     "  • Every category must be groundable in the pool (don't propose 'ramen' if there's no ramen).",
     "  • Labels must be specific and motivating: 'Polanco rooftops for golden hour' not 'Italian'.",
-    "  • Descriptions are one short sentence, written like a venue card.",
+    "  • Descriptions are one short sentence, written like a place card.",
     "  • Emoji must be a single character: 🌇 ✨ 🍷 ☕️ — not a sequence.",
     "  • intent_query is a SEMANTIC SEARCH PROMPT (one sentence, evocative) that will be embedded and",
-    "    matched against venue text. Write it as the kind of thing a search engine could rank against,",
+    "    matched against place text. Write it as the kind of thing a search engine could rank against,",
     "    e.g. 'cozy candlelit bistros perfect for a quiet weeknight date'.",
     "Return STRICT JSON only, shape:",
     `{ "categories": [{ "label": "...", "description": "...", "emoji": "x", "intent_query": "..." }, ...] }`,
@@ -316,8 +316,8 @@ async function proposeCategories({
 }
 
 // Used if the LLM proposal fails: bucket by Google primary category.
-function fallbackCategories(rows: VenueRow[], maxCategories: number): ProposedCategory[] {
-  const byCat = new Map<string, VenueRow[]>();
+function fallbackCategories(rows: PlaceRow[], maxCategories: number): ProposedCategory[] {
+  const byCat = new Map<string, PlaceRow[]>();
   for (const r of rows) {
     const c = (r.category ?? "").toLowerCase().trim();
     if (!c) continue;
@@ -330,9 +330,9 @@ function fallbackCategories(rows: VenueRow[], maxCategories: number): ProposedCa
     .map(([cat]) => ({
       key: slug(cat),
       label: cat.charAt(0).toUpperCase() + cat.slice(1),
-      description: `Top ${cat} venues nearby`,
+      description: `Top ${cat} places nearby`,
       emoji: "✨",
-      intent_query: `${cat} venues with great vibe and worth the visit`,
+      intent_query: `${cat} places with great vibe and worth the visit`,
     }));
 }
 

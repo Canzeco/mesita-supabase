@@ -1,4 +1,4 @@
-// Helpers shared by venue-onboarding EFs (lookup + email OTP).
+// Helpers shared by place-onboarding EFs (lookup + email OTP).
 
 // True when the email's domain matches the website's hostname, ignoring
 // "www." on either side. Subdomain matches count in both directions so

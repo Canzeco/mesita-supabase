@@ -1,7 +1,7 @@
 // One-time-code helpers shared by every ownership-verification EF.
 //
 // Why centralised: the phone/email OTP flows both generate a 6-digit
-// code, hash it, store the hash on the venue_verifications row, and
+// code, hash it, store the hash on the project_verifications row, and
 // compare on redemption. Four EFs (`business-send-phone-otp`,
 // `business-send-email-otp`, `business-verify-{phone,email}`) used to
 // reimplement the same primitives + flow control. The higher-level
@@ -35,7 +35,7 @@ export async function sha256Hex(input: string): Promise<string> {
 
 type OtpMethod = "ai_call" | "ai_email";
 
-// Drops any prior pending claim by this requester on this venue, then
+// Drops any prior pending claim by this requester on this place, then
 // inserts a fresh pending row with the codeHash baked into the payload.
 // Both send-OTP EFs use this identically — only the method tag and the
 // extra payload fields (phoneCalled vs emailSent, channel vs websiteUrl)
@@ -43,7 +43,7 @@ type OtpMethod = "ai_call" | "ai_email";
 export async function insertPendingOtpVerification(
   admin: SupabaseClient,
   args: {
-    venueId: string;
+    projectId: string;
     userId: string;
     requesterEmail: string;
     method: OtpMethod;
@@ -54,16 +54,16 @@ export async function insertPendingOtpVerification(
   },
 ): Promise<{ ok: true; verificationId: string } | { ok: false; response: Response }> {
   await admin
-    .from("venue_verifications")
+    .from("project_verifications")
     .delete()
-    .eq("venue_id", args.venueId)
+    .eq("project_id", args.projectId)
     .eq("requester_id", args.userId)
     .eq("status", "pending");
 
   const { data, error } = await admin
-    .from("venue_verifications")
+    .from("project_verifications")
     .insert({
-      venue_id: args.venueId,
+      project_id: args.projectId,
       requester_id: args.userId,
       method: args.method,
       payload: { ...args.payload, codeHash: args.codeHash },
@@ -105,8 +105,8 @@ export async function redeemOtpVerification(
   }
 
   const { data: verification, error: lookupError } = await admin
-    .from("venue_verifications")
-    .select("id, venue_id, requester_id, method, payload, status")
+    .from("project_verifications")
+    .select("id, project_id, requester_id, method, payload, status")
     .eq("id", args.verificationId)
     .maybeSingle();
   if (lookupError) {
@@ -173,7 +173,7 @@ export async function redeemOtpVerification(
     // shows "verified, awaiting approval". Status stays pending.
     const nextPayload = { ...payload, codeVerifiedAt: now };
     const { error: payloadError } = await admin
-      .from("venue_verifications")
+      .from("project_verifications")
       .update({ payload: nextPayload })
       .eq("id", args.verificationId);
     if (payloadError) {
@@ -182,12 +182,12 @@ export async function redeemOtpVerification(
         500,
       );
     }
-    return json({ ok: true, venueId: verification.venue_id, awaitingAdmin: true });
+    return json({ ok: true, projectId: verification.project_id, awaitingAdmin: true });
   }
 
   // Auto-approve: mark approved + grant ownership.
   const { error: updateError } = await admin
-    .from("venue_verifications")
+    .from("project_verifications")
     .update({
       status: "approved",
       decided_at: now,
@@ -202,17 +202,17 @@ export async function redeemOtpVerification(
     );
   }
 
-  const { error: memberError } = await admin.from("venue_members").insert({
-    venue_id: verification.venue_id,
+  const { error: memberError } = await admin.from("project_members").insert({
+    project_id: verification.project_id,
     business_id: args.userId,
     role: "owner",
   });
   if (memberError) {
     // Roll the approval back. A unique-violation here means a parallel
-    // claim won (the venue is already owned); surface it so the operator
+    // claim won (the place is already owned); surface it so the operator
     // can use the contact / report-fraud flow.
     await admin
-      .from("venue_verifications")
+      .from("project_verifications")
       .update({
         status: "pending",
         decided_at: null,
@@ -226,5 +226,5 @@ export async function redeemOtpVerification(
     );
   }
 
-  return json({ ok: true, venueId: verification.venue_id, awaitingAdmin: false });
+  return json({ ok: true, projectId: verification.project_id, awaitingAdmin: false });
 }

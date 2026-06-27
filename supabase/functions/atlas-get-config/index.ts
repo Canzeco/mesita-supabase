@@ -9,10 +9,10 @@
 //   • config     — the Atlas enrichment knobs from app_settings (loadAtlasConfig):
 //                  synthesis quality, gather/analyze/save image caps, vision
 //                  toggle, and the vision analysis/sorting prompts.
-//   • categories — the live venue_categories vocabulary (slug,label,section,
+//   • categories — the live place_categories vocabulary (slug,label,section,
 //                  sort_order). The Enricher picks place.category from these (or
 //                  'undefined' when none fits).
-//   • tags       — the live venue_tags vocabulary (slug,label_es,label_en,facet,
+//   • tags       — the live place_tags vocabulary (slug,label_es,label_en,facet,
 //                  section,sort_order). The Enricher picks place.tags (≤20) from
 //                  these slugs only.
 //
@@ -28,8 +28,8 @@ import { corsPreflight, json } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
 import { loadAtlasConfig } from "../_shared/atlas-config.ts";
-import { fetchVenueCategories } from "../_shared/categories.ts";
-import { fetchVenueTags } from "../_shared/tags.ts";
+import { fetchPlaceCategories } from "../_shared/categories.ts";
+import { fetchPlaceTags } from "../_shared/tags.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -44,13 +44,13 @@ Deno.serve(async (req) => {
 
   const admin = adminClient(envRes.env);
 
-  // All three are independent reads — fetch in parallel. fetchVenueCategories /
-  // fetchVenueTags return [] on error (graceful), loadAtlasConfig falls back to
+  // All three are independent reads — fetch in parallel. fetchPlaceCategories /
+  // fetchPlaceTags return [] on error (graceful), loadAtlasConfig falls back to
   // documented defaults, so a partial DB hiccup never hard-fails the Enricher init.
   const [config, categories, tags] = await Promise.all([
     loadAtlasConfig(admin),
-    fetchVenueCategories(admin),
-    fetchVenueTags(admin),
+    fetchPlaceCategories(admin),
+    fetchPlaceTags(admin),
   ]);
 
   return json({

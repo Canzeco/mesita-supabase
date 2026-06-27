@@ -2,7 +2,7 @@
 //
 // Thin facade for the business /add page picker. Resolves the caller's
 // user id (so the atlas caller can flag verified_partner_self vs _other
-// on already-owned venues) and forwards to atlas-suggest-places for the
+// on already-owned places) and forwards to atlas-suggest-places for the
 // actual Google+Mesita merge.
 //
 // JWT-protected: clients must send the Supabase anon JWT in Authorization.

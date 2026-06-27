@@ -2,9 +2,9 @@
 //
 // Super-admin approves or rejects a pending ownership verification.
 //
-//   approve  → verification.status='approved' + a venue_members row
+//   approve  → verification.status='approved' + a project_members row
 //              (role='owner', business_id=requester) is inserted. The
-//              venue itself is already active+web from
+//              place itself is already active+web from
 //              business-create-unit; this EF only grants membership.
 //   reject   → verification.status='rejected' with reject_reason. No
 //              membership change. The business can submit a fresh
@@ -66,11 +66,11 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Fetch the row so we can act on its venue_id + requester_id, and
+  // Fetch the row so we can act on its project_id + requester_id, and
   // reject double-decides.
   const { data: verification, error: lookupError } = await admin
-    .from("venue_verifications")
-    .select("id, venue_id, requester_id, status")
+    .from("project_verifications")
+    .select("id, project_id, requester_id, status")
     .eq("id", verificationId)
     .maybeSingle();
   if (lookupError) {
@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
 
   const now = new Date().toISOString();
   const { error: updateError } = await admin
-    .from("venue_verifications")
+    .from("project_verifications")
     .update({
       status: decision,
       decided_at: now,
@@ -112,19 +112,19 @@ Deno.serve(async (req) => {
   }
 
   if (decision === "approved") {
-    // Grant the requester ownership. The venue is already active+web;
+    // Grant the requester ownership. The place is already active+web;
     // membership is what gates business access on /unit/<id>/*.
-    const { error: memberError } = await admin.from("venue_members").insert({
-      venue_id: verification.venue_id,
+    const { error: memberError } = await admin.from("project_members").insert({
+      project_id: verification.project_id,
       business_id: verification.requester_id,
       role: "owner",
     });
     if (memberError) {
       // Roll the verification back. A unique-violation here means a
-      // parallel claim won (the venue is already owned); surface it
+      // parallel claim won (the place is already owned); surface it
       // and let the admin reject this row in a follow-up.
       await admin
-        .from("venue_verifications")
+        .from("project_verifications")
         .update({
           status: "pending",
           decided_at: null,

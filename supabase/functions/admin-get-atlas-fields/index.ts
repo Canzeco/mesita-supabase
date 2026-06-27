@@ -1,6 +1,6 @@
 // Supabase Edge Function — admin-get-atlas-fields
 //
-// Read-only Atlas vocabulary for the admin console: venue categories, tag
+// Read-only Atlas vocabulary for the admin console: place categories, tag
 // catalog, tag facets, and enforced field length limits.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -11,9 +11,9 @@ import {
   readEFEnv,
   requireSuperAdmin,
 } from "../_shared/auth.ts";
-import { fetchVenueCategories } from "../_shared/categories.ts";
+import { fetchPlaceCategories } from "../_shared/categories.ts";
 import { ATLAS_FIELD_LIMITS } from "../_shared/atlas-field-limits.ts";
-import { fetchVenueTags, TAG_FACETS } from "../_shared/tags.ts";
+import { fetchPlaceTags, TAG_FACETS } from "../_shared/tags.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -29,8 +29,8 @@ Deno.serve(async (req) => {
   if (!saRes.ok) return saRes.response;
 
   const [categories, tags] = await Promise.all([
-    fetchVenueCategories(admin),
-    fetchVenueTags(admin),
+    fetchPlaceCategories(admin),
+    fetchPlaceTags(admin),
   ]);
 
   return json({

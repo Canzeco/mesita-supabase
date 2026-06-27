@@ -1,7 +1,7 @@
 // Supabase Edge Function — business-verify-email-otp
 //
 // Phase 2 of the automatic-email path. The operator received the
-// 6-digit code at the venue's on-domain email (or saw it in the mock
+// 6-digit code at the place's on-domain email (or saw it in the mock
 // banner) and typed it into the UI. This EF hash-compares against
 // payload.codeHash and either:
 //

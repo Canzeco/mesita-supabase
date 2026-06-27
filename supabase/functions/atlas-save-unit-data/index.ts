@@ -5,18 +5,18 @@
 //   • places — the full Atlas profile (Google identity, geo, channels, signals,
 //     synthesis, photos)
 //   • units  — the owned Mesita entity (shared PK with the place), landing
-//     status='active', listing_type='web', and a caller-supplied adea_status
+//     status='active', listing_type='web', and a caller-supplied content_status
 //     (the async create path passes 'generating'; defaults to 'ready').
 //
-// Idempotent on google_place_id (409 venue_already_exists). Slug is made unique
+// Idempotent on google_place_id (409 place_already_exists). Slug is made unique
 // against the live catalog. Inserts are sequenced places→units (shared id); a
 // units failure compensates by deleting the just-written place so we never
 // leave an orphan profile. Media is NOT handled here — the caller invokes
 // atlas-save-place-media next with the media_assets get-enriched returned.
 //
-// Ownership (venue_members) is intentionally NOT created here — the caller
+// Ownership (project_members) is intentionally NOT created here — the caller
 // (business-create-unit) owns the businesses upsert; ownership only lands when
-// admin-decide-verification approves a claim. This agent is venue-only.
+// admin-decide-verification approves a claim. This agent is place-only.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
 // bearer. Mirrors how atlas-get-enriched-place / atlas-save-place-media are gated.
@@ -28,7 +28,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
-import { ensureUniqueSlug, slugify } from "../_shared/venue-slug.ts";
+import { ensureUniqueSlug, slugify } from "../_shared/place-slug.ts";
 
 // The places-shaped profile from atlas-get-enriched-place. Required spine:
 // google_place_id + name (the same fields fetchGoogleBasics guarantees).
@@ -36,7 +36,7 @@ type PlacePayload = Record<string, unknown> & {
   google_place_id?: string;
   name?: string;
 };
-type Body = { place?: PlacePayload; adea_status?: string };
+type Body = { place?: PlacePayload; content_status?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -58,18 +58,18 @@ Deno.serve(async (req) => {
   if (!googlePlaceId) return json({ ok: false, error: "place.google_place_id is required" }, 400);
   if (!name) return json({ ok: false, error: "place.name is required" }, 400);
 
-  // adea_status is caller-controlled: the synchronous create lands 'ready'; the
+  // content_status is caller-controlled: the synchronous create lands 'ready'; the
   // async create path lands 'generating' (the n8n Enricher flips it to 'ready'
   // later via atlas-update-unit-data). Defaults to 'ready' for back-compat.
   const ADEA_STATUSES = new Set(["queued", "generating", "ready", "failed"]);
-  const adeaRaw = (bodyRes.body.adea_status ?? "ready").toString().trim();
+  const adeaRaw = (bodyRes.body.content_status ?? "ready").toString().trim();
   const adeaStatus = ADEA_STATUSES.has(adeaRaw) ? adeaRaw : "ready";
 
   const admin = adminClient(envRes.env);
 
   // ── Idempotency: already onboarded? (read the joined view) ──
   const { data: existing } = await admin
-    .from("venues")
+    .from("projects_view")
     .select("id, slug, name, status, listing_type")
     .eq("google_place_id", googlePlaceId)
     .maybeSingle();
@@ -77,15 +77,15 @@ Deno.serve(async (req) => {
     return json(
       {
         ok: false,
-        code: "venue_already_exists",
-        error: "This venue is already on Mesita. If you manage it, contact support to claim ownership.",
+        code: "place_already_exists",
+        error: "This place is already on Mesita. If you manage it, contact support to claim ownership.",
         existing,
       },
       409,
     );
   }
 
-  // ── Unique slug against the live catalog (venues view exposes units.slug) ──
+  // ── Unique slug against the live catalog (places view exposes units.slug) ──
   const slug = await ensureUniqueSlug(admin, slugify(name));
 
   // ── 1) places (profile). Strip caller-supplied id/timestamps so the DB owns
@@ -99,15 +99,15 @@ Deno.serve(async (req) => {
   if (placeErr || !placeRow) {
     if (placeErr?.code === "23505" && /google_place_id/.test(placeErr.message)) {
       const after = await admin
-        .from("venues")
+        .from("projects_view")
         .select("id, slug, name, status, listing_type")
         .eq("google_place_id", googlePlaceId)
         .maybeSingle();
       return json(
         {
           ok: false,
-          code: "venue_already_exists",
-          error: "This venue is already on Mesita. If you manage it, contact support to claim ownership.",
+          code: "place_already_exists",
+          error: "This place is already on Mesita. If you manage it, contact support to claim ownership.",
           existing: after.data ?? null,
         },
         409,
@@ -116,16 +116,16 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `place_insert: ${placeErr?.message ?? "no row"}`, code: placeErr?.code ?? null }, 400);
   }
 
-  // ── 2) units (entity, shared PK). adea_status is caller-supplied (async create
+  // ── 2) units (entity, shared PK). content_status is caller-supplied (async create
   // → 'generating'; default 'ready'). ──
   const { data: unitRow, error: unitErr } = await admin
-    .from("units")
+    .from("projects")
     .insert({
       id: placeRow.id,
       slug,
       status: "active",
       listing_type: "web",
-      adea_status: adeaStatus,
+      content_status: adeaStatus,
     })
     .select("id, slug, status")
     .single();
@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
     await admin.from("places").delete().eq("id", placeRow.id);
     if (unitErr?.code === "23505" && /\bslug\b/.test(unitErr.message)) {
       return json(
-        { ok: false, code: "slug_already_taken", error: "A venue with this URL slug already exists. Try again." },
+        { ok: false, code: "slug_already_taken", error: "A place with this URL slug already exists. Try again." },
         409,
       );
     }

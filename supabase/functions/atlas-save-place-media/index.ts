@@ -2,7 +2,7 @@
 //
 // Receives gathered source image URLs + metadata from Atlas enrichment, stores
 // metadata rows immediately, then mirrors assets to Supabase Storage in the
-// background. Venue creation/enrichment should stay fast: runtime keeps source
+// background. Place creation/enrichment should stay fast: runtime keeps source
 // URLs, while this function persists durable media paths asynchronously.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -11,16 +11,16 @@ import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
 import { dedup } from "../_shared/parse-utils.ts";
 
-const IMAGE_BUCKET = "venue-images";
+const IMAGE_BUCKET = "place-images";
 const MAX_ASSETS = 120;
 const MAX_FETCH_BYTES = 12_000_000;
 const FETCH_TIMEOUT_MS = 15_000;
-const VENUE_PHOTOS_CAP = 50;
+const PLACE_PHOTOS_CAP = 50;
 
 type SourceKind = "google" | "website" | "instagram";
 
 type Body = {
-  venue_id?: string;
+  project_id?: string;
   assets?: Array<{
     source?: SourceKind;
     source_url?: string;
@@ -52,8 +52,8 @@ Deno.serve(async (req) => {
 
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
-  const venueId = typeof bodyRes.body.venue_id === "string" ? bodyRes.body.venue_id.trim() : "";
-  if (!venueId) return json({ ok: false, error: "venue_id is required" }, 400);
+  const projectId = typeof bodyRes.body.project_id === "string" ? bodyRes.body.project_id.trim() : "";
+  if (!projectId) return json({ ok: false, error: "project_id is required" }, 400);
 
   const assets = sanitiseAssets(bodyRes.body.assets ?? []);
   const preferredPhotoUrls = sanitiseUrls(bodyRes.body.preferred_photo_urls ?? []);
@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
 
   const admin = adminClient(envRes.env);
   const upsertRows = assets.map((a) => ({
-    venue_id: venueId,
+    project_id: projectId,
     source: a.source,
     source_url: a.source_url,
     status: "pending",
@@ -75,8 +75,8 @@ Deno.serve(async (req) => {
   }));
 
   const { error: upsertErr } = await admin
-    .from("venue_media_assets")
-    .upsert(upsertRows, { onConflict: "venue_id,source_url" });
+    .from("place_media_assets")
+    .upsert(upsertRows, { onConflict: "project_id,source_url" });
   if (upsertErr) {
     return json({ ok: false, error: `media_upsert: ${upsertErr.message}` }, 500);
   }
@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
   const task = processAssetsInBackground(
     admin,
     envRes.env.url,
-    venueId,
+    projectId,
     assets,
     preferredPhotoUrls,
   );
@@ -109,17 +109,17 @@ Deno.serve(async (req) => {
 async function processAssetsInBackground(
   admin: ReturnType<typeof adminClient>,
   supabaseUrl: string,
-  venueId: string,
+  projectId: string,
   assets: AssetRow[],
   preferredPhotoUrls: string[],
 ) {
   const mirroredBySource = new Map<string, string>();
 
   for (const asset of assets) {
-    const mirrored = await mirrorOne(admin, supabaseUrl, venueId, asset.source_url, asset.source);
+    const mirrored = await mirrorOne(admin, supabaseUrl, projectId, asset.source_url, asset.source);
     mirroredBySource.set(asset.source_url, mirrored.url);
     const { error } = await admin
-      .from("venue_media_assets")
+      .from("place_media_assets")
       .update({
         status: mirrored.ok ? "saved" : "failed",
         image_id: mirrored.imageId,
@@ -129,7 +129,7 @@ async function processAssetsInBackground(
         bytes: mirrored.bytes,
         last_error: mirrored.error,
       })
-      .eq("venue_id", venueId)
+      .eq("project_id", projectId)
       .eq("source_url", asset.source_url);
     if (error) {
       console.error("[atlas-save-place-media] asset_update:", error.message);
@@ -141,22 +141,22 @@ async function processAssetsInBackground(
     : assets.map((a) => a.source_url);
   const finalPhotos = dedup(
     preferred.map((url) => mirroredBySource.get(url) ?? url),
-  ).slice(0, VENUE_PHOTOS_CAP);
+  ).slice(0, PLACE_PHOTOS_CAP);
   if (finalPhotos.length === 0) return;
 
-  const { error: venueErr } = await admin
-    .from("venues")
+  const { error: placeErr } = await admin
+    .from("projects_view")
     .update({ photos: finalPhotos })
-    .eq("id", venueId);
-  if (venueErr) {
-    console.error("[atlas-save-place-media] venue_update:", venueErr.message);
+    .eq("id", projectId);
+  if (placeErr) {
+    console.error("[atlas-save-place-media] place_update:", placeErr.message);
   }
 }
 
 async function mirrorOne(
   admin: ReturnType<typeof adminClient>,
   supabaseUrl: string,
-  venueId: string,
+  projectId: string,
   sourceUrl: string,
   source: SourceKind,
 ): Promise<{

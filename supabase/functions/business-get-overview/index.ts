@@ -3,8 +3,8 @@
 // Authenticated. Returns *everything* the business / validator surfaces
 // need for the active unit in one round trip:
 //   - the signed-in user (id + email)
-//   - every venue they're a member of (sidebar picker)
-//   - the active venue's full row + recent tickets
+//   - every place they're a member of (sidebar picker)
+//   - the active place's full row + recent tickets
 //
 // Self-contained: own JWT verification, own DB reads via the service role,
 // never calls another Edge Function.
@@ -17,7 +17,7 @@ import {
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
-import { VENUE_BUSINESS_COLUMNS as VENUE_COLUMNS } from "../_shared/venue-columns.ts";
+import { PLACE_BUSINESS_COLUMNS as PLACE_COLUMNS } from "../_shared/place-columns.ts";
 
 type Body = { activeUnitId?: string; ticketsLimit?: number };
 
@@ -32,8 +32,8 @@ Deno.serve(async (req) => {
   const userId = authRes.user.id;
   const userEmail = authRes.user.email;
 
-  // Auth: any signed-in user. Super-admin elevation (skips venue_members
-  // and returns the requested venue) is granted when the caller's email
+  // Auth: any signed-in user. Super-admin elevation (skips project_members
+  // and returns the requested place) is granted when the caller's email
   // is in public.super_admins.
   const admin = adminClient(envRes.env);
   const isSuperAdmin = await checkSuperAdmin(admin, authRes.user);
@@ -44,10 +44,10 @@ Deno.serve(async (req) => {
   // them, only the active page does.
   const ticketsLimit = clampTicketsLimit(body.ticketsLimit);
 
-  // Super-admin path: skip venue_members. Require an explicit activeUnitId
+  // Super-admin path: skip project_members. Require an explicit activeUnitId
   // (the link generator always supplies one) and return a single-row list.
-  type VenueRow = Record<string, unknown> & { id: string };
-  let venues: VenueRow[];
+  type PlaceRow = Record<string, unknown> & { id: string };
+  let places: PlaceRow[];
   if (isSuperAdmin) {
     if (!requestedUnitId) {
       return json(
@@ -55,48 +55,48 @@ Deno.serve(async (req) => {
         400,
       );
     }
-    const venueRow = await admin
-      .from("venues")
-      .select(VENUE_COLUMNS)
+    const placeRow = await admin
+      .from("projects_view")
+      .select(PLACE_COLUMNS)
       .eq("id", requestedUnitId)
       .maybeSingle();
-    if (venueRow.error) {
-      return json({ ok: false, error: venueRow.error.message }, 500);
+    if (placeRow.error) {
+      return json({ ok: false, error: placeRow.error.message }, 500);
     }
-    if (!venueRow.data) {
-      return json({ ok: false, error: "Venue not found" }, 404);
+    if (!placeRow.data) {
+      return json({ ok: false, error: "Place not found" }, 404);
     }
     // Tag as owner so any downstream UI that gates on role still works —
-    // super-admin gets the broadest permission set the venue role enum
-    // can express. (The frontend MyVenue type only knows owner|business|staff.)
-    venues = [
-      { ...(venueRow.data as Record<string, unknown>), my_role: "owner" } as VenueRow,
+    // super-admin gets the broadest permission set the place role enum
+    // can express. (The frontend MyPlace type only knows owner|business|staff.)
+    places = [
+      { ...(placeRow.data as Record<string, unknown>), my_role: "owner" } as PlaceRow,
     ];
   } else {
-    // Pull every venue the caller is a member of, with the role on each row.
+    // Pull every place the caller is a member of, with the role on each row.
     const memberRows = await admin
-      .from("venue_members")
-      .select(`role, venue:venues(${VENUE_COLUMNS})`)
+      .from("project_members")
+      .select(`role, place:places(${PLACE_COLUMNS})`)
       .eq("business_id", userId)
       .order("created_at", { ascending: false });
     if (memberRows.error) {
       return json({ ok: false, error: memberRows.error.message }, 500);
     }
-    type MemberRow = { role: string; venue: Record<string, unknown> | null };
-    venues = ((memberRows.data ?? []) as MemberRow[])
-      .filter((r) => r.venue != null)
-      .map((r) => ({ ...r.venue!, my_role: r.role }) as VenueRow);
+    type MemberRow = { role: string; place: Record<string, unknown> | null };
+    places = ((memberRows.data ?? []) as MemberRow[])
+      .filter((r) => r.place != null)
+      .map((r) => ({ ...r.place!, my_role: r.role }) as PlaceRow);
   }
 
   // Pick the active unit. Honour the requested id when it matches a
-  // membership; otherwise fall back to the first venue.
-  const active = venues.length === 0
+  // membership; otherwise fall back to the first place.
+  const active = places.length === 0
     ? null
-    : (requestedUnitId && venues.find((v) => (v as { id: string }).id === requestedUnitId)) ||
-        venues[0];
+    : (requestedUnitId && places.find((v) => (v as { id: string }).id === requestedUnitId)) ||
+        places[0];
 
-  // Recent tickets for the active venue (skipped when ticketsLimit=0 or
-  // there's no active venue — saves a query the layout doesn't care about).
+  // Recent tickets for the active place (skipped when ticketsLimit=0 or
+  // there's no active place — saves a query the layout doesn't care about).
   let recentTickets: unknown[] = [];
   if (active && ticketsLimit > 0) {
     const activeId = (active as { id: string }).id;
@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
       .select(
         "id, kind, status, story_status, story_screenshot_url, story_submitted_at, story_verified_at, story_reject_reason, check_subtotal_cents, tip_cents, total_cents, redeem_cents, discount_percent, discount_cents, revealed_at, reservation_status, reservation_at, reservation_party_size, currency, created_at, paid_at, cancelled_at, cancel_reason, consumer:consumers(id, code, full_name)",
       )
-      .eq("venue_id", activeId)
+      .eq("project_id", activeId)
       .order("created_at", { ascending: false })
       .limit(ticketsLimit);
     if (tx.error) {
@@ -122,10 +122,10 @@ Deno.serve(async (req) => {
     user: { id: userId, email: userEmail },
     // Drives the business web's Topbar "Super-admin mode" banner.
     isSuperAdmin,
-    venues,
+    places,
     active: active
       ? {
-          venue: active,
+          place: active,
           recentTickets,
         }
       : null,

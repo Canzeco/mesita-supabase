@@ -1,7 +1,7 @@
 // Supabase Edge Function — consumer-list-tickets
 //
 // Authenticated. Returns the caller's tickets (consumer perspective), most
-// recent first, with the venue name joined for display. Self-contained:
+// recent first, with the place name joined for display. Self-contained:
 // own JWT verification, own DB read; never calls another Edge Function.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
   const { data, error } = await admin
     .from("tickets")
     .select(
-      "id, kind, status, story_status, story_screenshot_url, story_submitted_at, story_verified_at, story_reject_reason, check_subtotal_cents, tip_cents, total_cents, redeem_cents, discount_percent, discount_cents, revealed_at, reservation_status, reservation_at, reservation_party_size, currency, created_at, paid_at, cancelled_at, venue:venues(id, name, slug, photos, fiscal_type)",
+      "id, kind, status, story_status, story_screenshot_url, story_submitted_at, story_verified_at, story_reject_reason, check_subtotal_cents, tip_cents, total_cents, redeem_cents, discount_percent, discount_cents, revealed_at, reservation_status, reservation_at, reservation_party_size, currency, created_at, paid_at, cancelled_at, place:places(id, name, slug, photos, fiscal_type)",
     )
     .eq("consumer_id", userId)
     .order("created_at", { ascending: false })

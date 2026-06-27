@@ -105,7 +105,7 @@ export function friendlyGoogleError(
     case "google_bad_request":
       return `Google rejected the request: ${body.slice(0, 200)}`;
     case "google_not_found":
-      return "Google can't find that venue anymore — pick a different result.";
+      return "Google can't find that place anymore — pick a different result.";
     case "google_rate_limited":
       return "Too many requests in a short window. Wait a few seconds and try again.";
     case "google_unavailable":

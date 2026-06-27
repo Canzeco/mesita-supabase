@@ -17,7 +17,7 @@ export type StaffMessageIntent = {
     | "lookup_code"
     | "submit_bill"
     | "confirm_payment"
-    | "select_venue"
+    | "select_project"
     | "cancel"
     | "help"
     | "unknown";
@@ -26,7 +26,7 @@ export type StaffMessageIntent = {
   tip_cents: number | null;
   confirm: boolean | null;
   /** 0-based index when staff picks unit 1, 2, … */
-  venue_index: number | null;
+  place_index: number | null;
 };
 
 const EMPTY_INTENT: StaffMessageIntent = {
@@ -35,11 +35,11 @@ const EMPTY_INTENT: StaffMessageIntent = {
   check_subtotal_cents: null,
   tip_cents: null,
   confirm: null,
-  venue_index: null,
+  place_index: null,
 };
 
 const STATE_HINTS: Record<string, string> = {
-  selecting_venue:
+  selecting_project:
     "Staff must pick which restaurant unit they are working at (number or name).",
   idle: "Waiting for guest Mesita code (0000-0000). Bill amounts are not expected yet.",
   consumer_identified:
@@ -64,13 +64,13 @@ export async function parseStaffWhatsAppMessage(
 
   const system =
     "You parse WhatsApp messages from restaurant waitstaff using Mesita Ops (informal discount tickets, Mexico, Spanish/English mix). " +
-    'Return JSON only: {"intent":"lookup_code"|"submit_bill"|"confirm_payment"|"select_venue"|"cancel"|"help"|"unknown",' +
-    '"consumer_code":"0000-0000"|null,"check_subtotal_cents":number|null,"tip_cents":number|null,"confirm":boolean|null,"venue_index":number|null}. ' +
+    'Return JSON only: {"intent":"lookup_code"|"submit_bill"|"confirm_payment"|"select_project"|"cancel"|"help"|"unknown",' +
+    '"consumer_code":"0000-0000"|null,"check_subtotal_cents":number|null,"tip_cents":number|null,"confirm":boolean|null,"place_index":number|null}. ' +
     "Rules:\n" +
     "- consumer_code: 8 digits as 0000-0000; extract from messy text.\n" +
     "- submit_bill: subtotal and/or tip in PESOS as integer CENTS (850 pesos → 85000). Either field may be null if only one amount this turn.\n" +
     "- confirm_payment: staff collected money (sí, listo, ya cobré, pagado, ok, confirmado).\n" +
-    "- select_venue: picking unit from list (venue_index 0-based).\n" +
+    "- select_project: picking unit from list (place_index 0-based).\n" +
     "- cancel: cancelar, reset, stop.\n" +
     "- help: ayuda, ?, menú.\n" +
     "- Use RECENT CONVERSATION + pending bill draft: e.g. subtotal in an earlier message, tip only now.\n" +
@@ -131,7 +131,7 @@ function mergeIntent(
     "lookup_code",
     "submit_bill",
     "confirm_payment",
-    "select_venue",
+    "select_project",
     "cancel",
     "help",
     "unknown",
@@ -185,12 +185,12 @@ function mergeIntent(
     intent = "submit_bill";
   }
 
-  let venue_index: number | null = null;
-  if (raw.venue_index != null) {
-    const idx = Number(raw.venue_index);
-    if (Number.isInteger(idx) && idx >= 0) venue_index = idx;
+  let place_index: number | null = null;
+  if (raw.place_index != null) {
+    const idx = Number(raw.place_index);
+    if (Number.isInteger(idx) && idx >= 0) place_index = idx;
   }
-  if (venue_index == null) venue_index = fallback.venue_index;
+  if (place_index == null) place_index = fallback.place_index;
 
   let confirm: boolean | null = typeof raw.confirm === "boolean"
     ? raw.confirm
@@ -211,7 +211,7 @@ function mergeIntent(
     check_subtotal_cents,
     tip_cents,
     confirm,
-    venue_index,
+    place_index,
   };
 }
 
@@ -233,13 +233,13 @@ function heuristicParse(
     return { ...EMPTY_INTENT, intent: "cancel" };
   }
 
-  if (sessionState === "selecting_venue") {
+  if (sessionState === "selecting_project") {
     const numOnly = body.trim().match(/^(\d+)$/);
     if (numOnly) {
       return {
         ...EMPTY_INTENT,
-        intent: "select_venue",
-        venue_index: Number(numOnly[1]) - 1,
+        intent: "select_project",
+        place_index: Number(numOnly[1]) - 1,
       };
     }
   }

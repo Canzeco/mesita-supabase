@@ -1,13 +1,13 @@
 // Supabase Edge Function — business-delete-unit
 //
-// Authenticated. Deletes a venue (unit) the caller is an *owner* of, along
+// Authenticated. Deletes a place (unit) the caller is an *owner* of, along
 // with every dependent row. Self-contained: verifies the JWT, checks
-// venue_members membership + role itself, then deletes via service role.
+// project_members membership + role itself, then deletes via service role.
 // Does NOT call any other Edge Function.
 //
-// Cascade order matters: tickets reference venues with ON DELETE RESTRICT,
-// so they must be removed first. venue_members cascades automatically when
-// the venue is dropped.
+// Cascade order matters: tickets reference places with ON DELETE RESTRICT,
+// so they must be removed first. project_members cascades automatically when
+// the place is dropped.
 //
 // Local:  supabase functions serve business-delete-unit
 // Deploy: supabase functions deploy business-delete-unit
@@ -37,37 +37,37 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<DeleteBody>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const venueId = (body.id ?? "").toString().trim();
-  if (!venueId) return json({ ok: false, error: "id is required" }, 400);
+  const projectId = (body.id ?? "").toString().trim();
+  if (!projectId) return json({ ok: false, error: "id is required" }, 400);
 
   // Destructive operation — only owners (or super-admins) can delete.
   const admin = adminClient(envRes.env);
   const owner = await requireOwner(
     admin,
     authRes.user,
-    venueId,
+    projectId,
     "Only the owner can delete a unit",
   );
   if (!owner.ok) return owner.response;
 
-  // Cascade clean-up. tickets are ON DELETE RESTRICT against venues, so we
-  // drop them first. venue_members and venue_links cascade with the venue
+  // Cascade clean-up. tickets are ON DELETE RESTRICT against places, so we
+  // drop them first. project_members and place_links cascade with the place
   // row itself.
   const { error: ticketsErr } = await admin
     .from("tickets")
     .delete()
-    .eq("venue_id", venueId);
+    .eq("project_id", projectId);
   if (ticketsErr) {
     return json({ ok: false, error: `tickets_delete: ${ticketsErr.message}` }, 500);
   }
 
-  const { error: venueErr } = await admin
-    .from("venues")
+  const { error: placeErr } = await admin
+    .from("projects_view")
     .delete()
-    .eq("id", venueId);
-  if (venueErr) {
-    return json({ ok: false, error: `venue_delete: ${venueErr.message}` }, 500);
+    .eq("id", projectId);
+  if (placeErr) {
+    return json({ ok: false, error: `place_delete: ${placeErr.message}` }, 500);
   }
 
-  return json({ ok: true, id: venueId });
+  return json({ ok: true, id: projectId });
 });

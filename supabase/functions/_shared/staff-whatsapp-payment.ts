@@ -8,13 +8,13 @@ import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
 export async function resolveTicketOpener(
   admin: SupabaseClient,
-  venueId: string,
+  projectId: string,
   staffUserId: string,
 ): Promise<string> {
   const owner = await admin
-    .from("venue_members")
+    .from("project_members")
     .select("business_id")
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .eq("role", "owner")
     .limit(1)
     .maybeSingle();

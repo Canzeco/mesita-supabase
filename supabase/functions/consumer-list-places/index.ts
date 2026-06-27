@@ -1,6 +1,6 @@
 // Supabase Edge Function — consumer-list-places
 //
-// Public endpoint. Returns venues that are visible to consumers
+// Public endpoint. Returns places that are visible to consumers
 // (status in 'active', 'lead'). Self-contained: no calls to other functions.
 //
 // Local:  supabase functions serve consumer-list-places
@@ -10,7 +10,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { clampIntRange, corsPreflight, json, readJsonOr } from "../_shared/http.ts";
 import { readAnonEnv } from "../_shared/auth.ts";
-import { VENUE_PUBLIC_COLUMNS } from "../_shared/venue-columns.ts";
+import { PLACE_PUBLIC_COLUMNS } from "../_shared/place-columns.ts";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
   const envRes = readAnonEnv();
   if (!envRes.ok) return envRes.response;
 
-  // Anon client is sufficient: the venues RLS policy already restricts SELECT
+  // Anon client is sufficient: the places RLS policy already restricts SELECT
   // to status in ('active', 'lead') for anon + authenticated. This is the
   // single source of truth for what consumers are allowed to see.
   const supabase = createClient(envRes.env.url, envRes.env.anonKey);
@@ -45,8 +45,8 @@ Deno.serve(async (req) => {
   }
 
   const { data, error } = await supabase
-    .from("venues")
-    .select(VENUE_PUBLIC_COLUMNS)
+    .from("projects_view")
+    .select(PLACE_PUBLIC_COLUMNS)
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -54,5 +54,5 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: error.message }, 500);
   }
 
-  return json({ ok: true, venues: data ?? [] });
+  return json({ ok: true, places: data ?? [] });
 });

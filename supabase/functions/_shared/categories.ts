@@ -1,19 +1,19 @@
-// Shared helper — dynamic venue-category inference.
+// Shared helper — dynamic place-category inference.
 //
-// Mesita's category vocabulary lives in public.venue_categories (migration
+// Mesita's category vocabulary lives in public.place_categories (migration
 // 0061) and is intentionally editable: categories get added or removed over
 // time. So nothing here hardcodes the list. Every inference reads the live
 // table at run time, hands the candidate slugs to the classifier, and accepts
 // the answer only if it is one of those live slugs. Both the create path
 // (business-create-unit) and the enrich path (atlas-enrich-place) call this
-// so a venue's category is always a canonical slug, never free text.
+// so a place's category is always a canonical slug, never free text.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const CLASSIFIER_MODEL = "gpt-4o-mini";
 
-export type VenueCategory = {
+export type PlaceCategory = {
   slug: string;
   label: string;
   section: string;
@@ -21,7 +21,7 @@ export type VenueCategory = {
 };
 
 // Signals fed to the classifier. All optional except name — the more present,
-// the sharper the pick, but the venue name alone already yields a sane guess.
+// the sharper the pick, but the place name alone already yields a sane guess.
 export type CategorySignals = {
   name: string;
   address?: string | null;
@@ -35,18 +35,18 @@ export type CategorySignals = {
 // Reads the full, live category vocabulary ordered by sort_order. Returns []
 // on error so callers degrade gracefully (keep their prior behaviour) rather
 // than failing the whole create/enrich over a category lookup.
-export async function fetchVenueCategories(
+export async function fetchPlaceCategories(
   admin: SupabaseClient,
-): Promise<VenueCategory[]> {
+): Promise<PlaceCategory[]> {
   const { data, error } = await admin
-    .from("venue_categories")
+    .from("place_categories")
     .select("slug, label, section, sort_order")
     .order("sort_order", { ascending: true });
   if (error || !data) return [];
-  return data as VenueCategory[];
+  return data as PlaceCategory[];
 }
 
-// Picks the single best-matching category slug for a venue from the live list.
+// Picks the single best-matching category slug for a place from the live list.
 // Returns null when there's no OpenAI key, no categories, or the model errors.
 // The model is instructed to ALWAYS return the closest slug from the provided
 // list (never free text, never null). We still validate against the live slug
@@ -54,9 +54,9 @@ export async function fetchVenueCategories(
 //
 // The category list is passed in (the caller reads it once) so a single run
 // never hits the table twice.
-export async function inferVenueCategory(
+export async function inferPlaceCategory(
   openaiKey: string | undefined,
-  categories: VenueCategory[],
+  categories: PlaceCategory[],
   signals: CategorySignals,
 ): Promise<string | null> {
   if (!openaiKey || categories.length === 0) return null;
@@ -68,7 +68,7 @@ export async function inferVenueCategory(
   const catalog = categories
     .map((c) => `${c.slug} — ${c.label} [${c.section}]`)
     .join("\n");
-  const venueLines = [
+  const placeLines = [
     `Name: ${signals.name}`,
     signals.address ? `Address: ${signals.address}` : "",
     signals.googlePrimaryTypeDisplay
@@ -86,14 +86,14 @@ export async function inferVenueCategory(
     .join("\n");
 
   const systemContent =
-    "You classify a venue into EXACTLY ONE category from a fixed list. " +
+    "You classify a place into EXACTLY ONE category from a fixed list. " +
     'Respond with a single JSON object {"category":"<slug>"} where <slug> is ' +
     "copied verbatim from the list. Choose the MOST SIMILAR and most specific " +
-    "category for the venue's main offering. Always return one slug from the " +
+    "category for the place's main offering. Always return one slug from the " +
     "list, even when uncertain.";
   const userPrompt =
     `Categories (slug — label [section]):\n${catalog}\n\n` +
-    `Venue:\n${venueLines}\n\n` +
+    `Place:\n${placeLines}\n\n` +
     `Return {"category":"<one slug from the list>"}.`;
 
   try {

@@ -2,7 +2,7 @@
 //
 // Enqueues a staggered create for a Google Places `placeId`. Instead of running
 // the (expensive, synchronous) create pipeline inline, it inserts a row into
-// public.scheduled_unit_creations; the pg_cron poller picks due rows up and fires
+// public.scheduled_project_creations; the pg_cron poller picks due rows up and fires
 // the service-gated atlas-run-scheduled-create EF. exec_at defaults to now() (run
 // ASAP) but the caller may pass an ISO timestamp to defer.
 //
@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
   if (execAt) insert.exec_at = execAt;
 
   const { data: row, error } = await admin
-    .from("scheduled_unit_creations")
+    .from("scheduled_project_creations")
     .insert(insert)
     .select("id, exec_at")
     .single();

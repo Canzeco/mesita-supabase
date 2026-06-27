@@ -1,6 +1,6 @@
 // Supabase Edge Function — business-invite-waiter
 //
-// One pending invite per venue + phone. Re-invite resends WhatsApp on the same row.
+// One pending invite per place + phone. Re-invite resends WhatsApp on the same row.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
@@ -17,7 +17,7 @@ import { newInviteToken } from "../_shared/tokens.ts";
 import { readTwilioEnv } from "../_shared/twilio.ts";
 
 type Body = {
-  venueId?: string;
+  projectId?: string;
   channel?: "whatsapp" | "sms";
   phone?: string;
   redirectBase?: string;
@@ -37,28 +37,28 @@ Deno.serve(async (req) => {
   if (!authRes.ok) return authRes.response;
 
   const body = await readJsonOr<Body>(req, {});
-  const venueId = (body.venueId ?? "").trim();
+  const projectId = (body.projectId ?? "").trim();
   const channel = (body.channel ?? "whatsapp") as Body["channel"];
   const phone = normalizePhoneE164(body.phone);
   const redirectBase = (body.redirectBase ?? "").trim().replace(/\/$/, "");
-  if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
+  if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
   if (channel !== "whatsapp" && channel !== "sms") {
     return json({ ok: false, error: "channel must be whatsapp or sms" }, 400);
   }
 
   const admin = adminClient(envRes.env);
-  const membership = await requireMembership(admin, authRes.user, venueId);
+  const membership = await requireMembership(admin, authRes.user, projectId);
   if (!membership.ok) return membership.response;
 
-  const venueRes = await admin
-    .from("venues")
+  const placeRes = await admin
+    .from("projects_view")
     .select("name")
-    .eq("id", venueId)
+    .eq("id", projectId)
     .maybeSingle();
-  const venueName = venueRes.data?.name ?? "tu restaurante";
+  const placeName = placeRes.data?.name ?? "tu restaurante";
 
   if (phone) {
-    const onTeam = await isPhoneAlreadyStaffAtVenue(admin, venueId, phone);
+    const onTeam = await isPhoneAlreadyStaffAtPlace(admin, projectId, phone);
     if (onTeam) {
       return json(
         {
@@ -85,9 +85,9 @@ Deno.serve(async (req) => {
   let resent = false;
 
   if (phone) {
-    const existing = await findPendingStaffInviteForVenuePhone(
+    const existing = await findPendingStaffInviteForPlacePhone(
       admin,
-      venueId,
+      projectId,
       phone,
     );
     if (existing) {
@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
       resent = true;
     } else {
       const inserted = await insertStaffInvite(admin, {
-        venueId,
+        projectId,
         phone,
         channel,
         createdBy: authRes.user.id,
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
     }
   } else {
     const inserted = await insertStaffInvite(admin, {
-      venueId,
+      projectId,
       phone: null,
       channel,
       createdBy: authRes.user.id,
@@ -141,7 +141,7 @@ Deno.serve(async (req) => {
     admin,
     channel,
     phone,
-    venueName,
+    placeName,
     inviteToken: inviteRow.token,
   });
 
@@ -164,7 +164,7 @@ Deno.serve(async (req) => {
 async function insertStaffInvite(
   admin: SupabaseClient,
   opts: {
-    venueId: string;
+    projectId: string;
     phone: string | null;
     channel: string;
     createdBy: string;
@@ -187,7 +187,7 @@ async function insertStaffInvite(
   const insert = await admin
     .from("staff_invites")
     .insert({
-      venue_id: opts.venueId,
+      project_id: opts.projectId,
       token,
       phone: opts.phone,
       channel: opts.channel,
@@ -199,9 +199,9 @@ async function insertStaffInvite(
 
   if (insert.error) {
     if (opts.phone && insert.error.code === "23505") {
-      const existing = await findPendingStaffInviteForVenuePhone(
+      const existing = await findPendingStaffInviteForPlacePhone(
         admin,
-        opts.venueId,
+        opts.projectId,
         opts.phone,
       );
       if (existing) {
@@ -232,16 +232,16 @@ async function insertStaffInvite(
   return { ok: true, row: insert.data };
 }
 
-async function findPendingStaffInviteForVenuePhone(
+async function findPendingStaffInviteForPlacePhone(
   admin: SupabaseClient,
-  venueId: string,
+  projectId: string,
   phoneE164: string,
 ): Promise<{ id: string } | null> {
   const nowIso = new Date().toISOString();
   const { data, error } = await admin
     .from("staff_invites")
     .select("id, phone")
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .is("claimed_at", null)
     .gt("expires_at", nowIso)
     .not("phone", "is", null);
@@ -255,9 +255,9 @@ async function findPendingStaffInviteForVenuePhone(
   return null;
 }
 
-async function isPhoneAlreadyStaffAtVenue(
+async function isPhoneAlreadyStaffAtPlace(
   admin: SupabaseClient,
-  venueId: string,
+  projectId: string,
   phoneE164: string,
 ): Promise<boolean> {
   const digits = phoneE164.replace(/\D/g, "");
@@ -267,9 +267,9 @@ async function isPhoneAlreadyStaffAtVenue(
   if (error || !userId) return false;
 
   const { data: role } = await admin
-    .from("venue_roles")
+    .from("project_roles")
     .select("user_id")
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .eq("user_id", userId)
     .eq("role", "staff")
     .maybeSingle();
@@ -281,7 +281,7 @@ async function trySendWaiterInviteWhatsApp(opts: {
   admin: SupabaseClient;
   channel: Body["channel"];
   phone: string | null;
-  venueName: string;
+  placeName: string;
   inviteToken: string;
 }): Promise<{
   sent: boolean;
@@ -289,7 +289,7 @@ async function trySendWaiterInviteWhatsApp(opts: {
   messageSid: string | null;
   sendMode: "template" | "session" | null;
 }> {
-  const { admin, channel, phone, venueName, inviteToken } = opts;
+  const { admin, channel, phone, placeName, inviteToken } = opts;
   if (channel !== "whatsapp" || !phone) {
     if (channel === "whatsapp" && !phone) {
       return {
@@ -325,7 +325,7 @@ async function trySendWaiterInviteWhatsApp(opts: {
     admin,
     env: twilio.env,
     toPhoneE164: phone,
-    venueName,
+    placeName,
     inviteToken,
   });
   if (wa.ok) {

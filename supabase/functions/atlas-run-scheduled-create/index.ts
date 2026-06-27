@@ -3,7 +3,7 @@
 // The SERVICE-GATED internal create path the SQL scheduler poller invokes. It is
 // the headless twin of admin-create-unit: same ASYNC pipeline (early dedupe ->
 // fetchGoogleBasics (Google identity spine, category='undefined') ->
-// atlas-save-unit-data (places+units, adea_status='generating') ->
+// atlas-save-unit-data (places+units, content_status='generating') ->
 // triggerEnrichPlace (n8n webhook, fire-and-forget)), but gated by
 // requireInternalCaller instead of getAuthedUser+requireSuperAdmin, because the
 // poller is service-role with no end-user JWT and CANNOT call the JWT-gated
@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
   ) => {
     if (!scheduledId) return;
     await admin
-      .from("scheduled_unit_creations")
+      .from("scheduled_project_creations")
       .update({
         status,
         result: fields.result ?? null,
@@ -83,19 +83,19 @@ Deno.serve(async (req) => {
   };
 
   // ── Early dedupe (idempotency on google_place_id) ─────────────────────────
-  // placeId IS the venue's google_place_id. Reject already-onboarded venues
+  // placeId IS the place's google_place_id. Reject already-onboarded places
   // BEFORE spending any enrichment budget. atlas-save-unit-data dedupes again as
   // a race guard. A duplicate is terminal 'failed' for the queue row carrying the
-  // existing-venue code so the operator can see why.
+  // existing-place code so the operator can see why.
   const { data: existing } = await admin
-    .from("venues")
+    .from("projects_view")
     .select("id, slug, name, status, listing_type")
     .eq("google_place_id", placeId)
     .maybeSingle();
   if (existing) {
-    await finishRow("failed", { error: "venue_already_exists", result: { existing } });
+    await finishRow("failed", { error: "place_already_exists", result: { existing } });
     return json(
-      { ok: false, code: "venue_already_exists", error: "This venue is already on Mesita.", existing },
+      { ok: false, code: "place_already_exists", error: "This place is already on Mesita.", existing },
       409,
     );
   }
@@ -122,21 +122,21 @@ Deno.serve(async (req) => {
     category_label: null,
   };
 
-  // ── 2) Persist the minimal row — lands adea_status='generating' until the
+  // ── 2) Persist the minimal row — lands content_status='generating' until the
   // Enricher flips it to 'ready' via atlas-update-unit-data. No businesses
   // upsert — the scheduler creates an unowned listing. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,
     "atlas-run-scheduled-create",
     "atlas-save-unit-data",
-    { place, adea_status: "generating" },
+    { place, content_status: "generating" },
   );
   if (!saveRes.ok) {
     await finishRow("failed", { error: `save_unit_data: ${saveRes.error}` });
     return json({ ok: false, error: saveRes.error }, saveRes.status || 502);
   }
   const saved = saveRes.data;
-  const venue = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
+  const place = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
 
   // ── 3) Hand deep enrichment to the n8n Enricher (async). Fire-and-forget: the
   // webhook acks immediately, the workflow runs in n8n. A trigger failure NEVER
@@ -164,7 +164,7 @@ Deno.serve(async (req) => {
   };
 
   // ── Mark the queue row done — the unit was created and enrichment dispatched. ──
-  await finishRow("done", { result: { venue, enrichment } });
+  await finishRow("done", { result: { place, enrichment } });
 
-  return json({ ok: true, venue, enrichment, caller: callerRes.callerName }, 201);
+  return json({ ok: true, place, enrichment, caller: callerRes.callerName }, 201);
 });

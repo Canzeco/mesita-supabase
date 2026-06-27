@@ -1,7 +1,7 @@
 // Supabase Edge Function — admin-schedule-multiple-units-creation (admin caller)
 //
 // Bulk staggered create: takes an array of Google Places `placeIds` and enqueues
-// one scheduled_unit_creations row per id with exec_at = baseAt + i*staggerSeconds,
+// one scheduled_project_creations row per id with exec_at = baseAt + i*staggerSeconds,
 // so the poller drips them out over time instead of hammering the create pipeline
 // (and the underlying Google/Firecrawl/OpenAI budgets) all at once. A single bulk
 // INSERT — not N internal calls.
@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
 
   // Single bulk insert.
   const { data: inserted, error } = await admin
-    .from("scheduled_unit_creations")
+    .from("scheduled_project_creations")
     .insert(rows)
     .select("id, place_id, exec_at");
   if (error || !inserted) {

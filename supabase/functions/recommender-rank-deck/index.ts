@@ -25,7 +25,7 @@ import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
 import {
-  embedAndPersistVenues,
+  embedAndPersistPlaces,
   embedSingle,
   rankByCosine,
   shouldEmbed,
@@ -35,7 +35,7 @@ import {
   type ConsumerProfile,
   fetchCandidatePool,
   stripInternal,
-  type VenueRow,
+  type PlaceRow,
 } from "../_shared/recommender-pool.ts";
 
 const CANDIDATE_POOL = 200;
@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
   const admin = adminClient(env);
 
   // ── 1. Candidate pool ──────────────────────────────────────────────
-  const poolRes = await fetchCandidatePool<VenueRow>(admin, {
+  const poolRes = await fetchCandidatePool<PlaceRow>(admin, {
     lat,
     lng,
     radiusKm,
@@ -93,7 +93,7 @@ Deno.serve(async (req) => {
   const needsEmbed = candidates.filter(shouldEmbed).slice(0, LAZY_EMBED_BATCH);
   let embeddedCount = 0;
   if (needsEmbed.length > 0 && OPENAI_KEY) {
-    const patched = await embedAndPersistVenues(
+    const patched = await embedAndPersistPlaces(
       needsEmbed,
       admin,
       OPENAI_KEY,
@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
   const intent = composeIntent({ profile, lat, lng, candidates });
 
   // ── 4. Rank by embedding similarity (or fall back to partner-first) ──
-  let ranked: VenueRow[];
+  let ranked: PlaceRow[];
   if (OPENAI_KEY) {
     try {
       const intentVec = await embedSingle(intent, OPENAI_KEY);
@@ -152,7 +152,7 @@ Deno.serve(async (req) => {
 
 // Builds the one-line semantic query that gets embedded. The richer this
 // is, the better the ranking — but we keep it terse so the embedding
-// stays focused on the venue-shaped signal.
+// stays focused on the place-shaped signal.
 function composeIntent({
   profile,
   lat,
@@ -162,7 +162,7 @@ function composeIntent({
   profile: ConsumerProfile | null;
   lat: number | null;
   lng: number | null;
-  candidates: VenueRow[];
+  candidates: PlaceRow[];
 }): string {
   const parts: string[] = [];
   // Time-of-day handle. The Edge runtime is UTC; we don't know the
@@ -177,18 +177,18 @@ function composeIntent({
 
   if (profile?.country) parts.push(`a consumer from ${profile.country}`);
   if (profile?.tier === "premium") {
-    parts.push("a Mesita Premium member who values standout, high-quality venues");
+    parts.push("a Mesita Premium member who values standout, high-quality places");
   }
   if (lat != null && lng != null) parts.push(`within ${DEFAULT_RADIUS_KM}km of this location`);
 
   const topCats = topCategoriesIn(candidates, 3);
   if (topCats.length) parts.push(`mixing ${topCats.join(", ")}`);
 
-  parts.push("venues with great vibe and worth the visit");
+  parts.push("places with great vibe and worth the visit");
   return parts.join("; ");
 }
 
-function topCategoriesIn(rows: VenueRow[], k: number): string[] {
+function topCategoriesIn(rows: PlaceRow[], k: number): string[] {
   const counts = new Map<string, number>();
   for (const r of rows) {
     const c = (r.category ?? "").toLowerCase().trim();
@@ -205,13 +205,13 @@ function topCategoriesIn(rows: VenueRow[], k: number): string[] {
 // Trim helpers
 // ─────────────────────────────────────────────────────────────────────
 
-// Premium overlay: stable partition that floats partner venues above
+// Premium overlay: stable partition that floats partner places above
 // non-partners while preserving the relevance order inside each group. A
 // no-op for free / anonymous, so the deck only changes for Premium members.
-function applyTierBoost(rows: VenueRow[], tier: string | null): VenueRow[] {
+function applyTierBoost(rows: PlaceRow[], tier: string | null): PlaceRow[] {
   if (tier !== "premium") return rows;
-  const partners: VenueRow[] = [];
-  const rest: VenueRow[] = [];
+  const partners: PlaceRow[] = [];
+  const rest: PlaceRow[] = [];
   for (const r of rows) {
     if (r.listing_type === "partner") partners.push(r);
     else rest.push(r);
@@ -219,7 +219,7 @@ function applyTierBoost(rows: VenueRow[], tier: string | null): VenueRow[] {
   return [...partners, ...rest];
 }
 
-function fallbackRank(rows: VenueRow[]): VenueRow[] {
+function fallbackRank(rows: PlaceRow[]): PlaceRow[] {
   // Partner-first, then newest. Stable when OpenAI is down.
   return [...rows].sort((a, b) => {
     const ap = a.listing_type === "partner" ? 0 : 1;
@@ -230,10 +230,10 @@ function fallbackRank(rows: VenueRow[]): VenueRow[] {
 }
 
 // Cap the final deck so we don't return 50 identical "Italian" cards.
-function diversify(rows: VenueRow[], limit: number, perCategory: number): VenueRow[] {
-  const out: VenueRow[] = [];
+function diversify(rows: PlaceRow[], limit: number, perCategory: number): PlaceRow[] {
+  const out: PlaceRow[] = [];
   const seenCat = new Map<string, number>();
-  const tail: VenueRow[] = [];
+  const tail: PlaceRow[] = [];
   for (const r of rows) {
     if (out.length >= limit) break;
     const cat = (r.category ?? "").toLowerCase().trim();

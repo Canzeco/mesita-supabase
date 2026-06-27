@@ -1,6 +1,6 @@
-// Role catalog for the per-venue member tier. The DB enum
+// Role catalog for the per-place member tier. The DB enum
 // (public.member_role) includes a legacy 'staff' value used only by
-// venue_members rows created before venue_roles existed — the Team
+// project_members rows created before project_roles existed — the Team
 // surface speaks only owner / editor / viewer.
 //
 // This is intentionally distinct from the platform-level business role

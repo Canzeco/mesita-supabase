@@ -1,11 +1,11 @@
 // Supabase Edge Function — admin-search-places
 //
-// Super-admin venue search for the admin console's "Manage Single Unit"
-// venue picker. Takes a free-text query and returns matching Mesita venues
+// Super-admin place search for the admin console's "Manage Single Unit"
+// place picker. Takes a free-text query and returns matching Mesita places
 // (by name / slug, or an exact id paste). The operator picks one, and the
-// admin console then drives that venue through the existing business-* EFs
+// admin console then drives that place through the existing business-* EFs
 // (super-admin bypass in _shared/auth.ts grants access regardless of
-// venue_members).
+// project_members).
 //
 // Auth: caller's JWT email must be in public.super_admins.
 // verify_jwt = true gates non-bearer callers at the gateway.
@@ -51,15 +51,15 @@ Deno.serve(async (req) => {
   if (q.length === 0) {
     // Empty query — browse recent units for the catalog landing state.
     const { data, error } = await admin
-      .from("venues")
+      .from("projects_view")
       .select(cols)
       .order("updated_at", { ascending: false })
       .limit(limit);
     if (error) return json({ ok: false, error: `search_failed: ${error.message}` }, 500);
     rows = data ?? [];
   } else if (UUID_RE.test(q)) {
-    // Exact id paste — return that one venue.
-    const { data, error } = await admin.from("venues").select(cols).eq("id", q).maybeSingle();
+    // Exact id paste — return that one place.
+    const { data, error } = await admin.from("projects_view").select(cols).eq("id", q).maybeSingle();
     if (error) return json({ ok: false, error: `search_failed: ${error.message}` }, 500);
     rows = data ? [data] : [];
   } else if (q.length < 2) {
@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
     const escaped = safe.replace(/[%_\\]/g, (m) => `\\${m}`);
     const pattern = `%${escaped}%`;
     const { data, error } = await admin
-      .from("venues")
+      .from("projects_view")
       .select(cols)
       .or(`name.ilike."${pattern}",slug.ilike."${pattern}"`)
       .order("updated_at", { ascending: false })
@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
   }
 
   // Trim photos to the first thumbnail to keep the payload small.
-  const venues = (rows ?? []).map((v) => ({
+  const places = (rows ?? []).map((v) => ({
     id: v.id,
     slug: v.slug,
     name: v.name,
@@ -93,5 +93,5 @@ Deno.serve(async (req) => {
     photo: Array.isArray(v.photos) && v.photos.length > 0 ? v.photos[0] : null,
   }));
 
-  return json({ ok: true, venues });
+  return json({ ok: true, places });
 });

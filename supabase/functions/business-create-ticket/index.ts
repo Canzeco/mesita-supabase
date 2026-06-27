@@ -1,11 +1,11 @@
 // Supabase Edge Function — business-create-ticket
 //
 // Authenticated. The staff / validator opens a discount ticket against a
-// consumer at their venue. The body specifies which discount flow is run
+// consumer at their place. The body specifies which discount flow is run
 // (`kind`): dp / s_dp_sf (with story) and their reservation-prefixed variants.
 //
-//   1. Verifies the caller's JWT and venue membership.
-//   2. Loads the venue + consumer, validates input.
+//   1. Verifies the caller's JWT and place membership.
+//   2. Loads the place + consumer, validates input.
 //   3. Snapshots the discount percent + cents off the subtotal. Mesita never
 //      holds money — the discount is applied at the bill, paid off-rail.
 //   4. If the kind includes a story (S in the name), seeds story_status =
@@ -29,12 +29,12 @@ import {
   RESERVATION_KINDS,
   STORY_KINDS,
 } from "../_shared/ticket-kinds.ts";
-import { isConsumerFirstVisit, selectVenueRate } from "../_shared/membership.ts";
+import { isConsumerFirstVisit, selectprojectRate } from "../_shared/membership.ts";
 import { computeTicketBill } from "../_shared/business-ticket-billing.ts";
 import { closeTicketAndEnqueueReview } from "../_shared/ticket-informal.ts";
 
 type Body = {
-  venueId?: string;
+  projectId?: string;
   consumerCode?: string;
   kind?: string;
   /** Scan-only: link guest code without billing. Bill is submitted separately. */
@@ -63,11 +63,11 @@ Deno.serve(async (req) => {
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
 
-  const venueId = (body.venueId ?? "").toString().trim();
+  const projectId = (body.projectId ?? "").toString().trim();
   const consumerCode = (body.consumerCode ?? "").toString().trim().toUpperCase();
   const kind = (body.kind ?? "dp").toString().trim();
 
-  if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
+  if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
   if (!consumerCode) return json({ ok: false, error: "consumerCode is required" }, 400);
   if (!ACTIONABLE_KINDS.has(kind)) {
     return json(
@@ -83,23 +83,23 @@ Deno.serve(async (req) => {
   const admin = adminClient(envRes.env);
 
   // ── Membership ────────────────────────────────────────────────────────
-  const memberRes = await requireMembership(admin, authRes.user, venueId);
+  const memberRes = await requireMembership(admin, authRes.user, projectId);
   if (!memberRes.ok) return memberRes.response;
 
-  // ── Venue snapshot ──────────────────────────────────────────────────
-  const venueRow = await admin
-    .from("venues")
+  // ── Place snapshot ──────────────────────────────────────────────────
+  const placeRow = await admin
+    .from("projects_view")
     .select(
       "id, name, slug, photos, welcome_free_rate, welcome_premium_rate, free_rate, premium_rate, monthly_promo_cap, listing_type, status, fiscal_type",
     )
-    .eq("id", venueId)
+    .eq("id", projectId)
     .maybeSingle();
-  if (venueRow.error || !venueRow.data) {
-    return json({ ok: false, error: "Venue not found" }, 404);
+  if (placeRow.error || !placeRow.data) {
+    return json({ ok: false, error: "Place not found" }, 404);
   }
-  const venue = venueRow.data;
-  if (venue.status === "archived") {
-    return json({ ok: false, error: "Venue is archived" }, 409);
+  const place = placeRow.data;
+  if (place.status === "archived") {
+    return json({ ok: false, error: "Place is archived" }, 409);
   }
 
   // ── Consumer lookup ─────────────────────────────────────────────────
@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
     const insert = await admin
       .from("tickets")
       .insert({
-        venue_id: venueId,
+        project_id: projectId,
         consumer_id: consumerId,
         opened_by: validatorId,
         kind,
@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
       {
         ok: true,
         ticket: insert.data,
-        venue: { id: venue.id, name: venue.name, fiscal_type: venue.fiscal_type },
+        place: { id: place.id, name: place.name, fiscal_type: place.fiscal_type },
         consumer: {
           id: consumerId,
           code: consumerRow.data.code,
@@ -173,9 +173,9 @@ Deno.serve(async (req) => {
     );
   }
 
-  const firstVisit = await isConsumerFirstVisit(admin, consumerId, venueId);
-  const ratePercent = selectVenueRate(venue, consumerRow.data.tier_key, firstVisit);
-  const capPesos = venue.monthly_promo_cap;
+  const firstVisit = await isConsumerFirstVisit(admin, consumerId, projectId);
+  const ratePercent = selectprojectRate(place, consumerRow.data.tier_key, firstVisit);
+  const capPesos = place.monthly_promo_cap;
 
   const billRes = computeTicketBill({ subtotal, ratePercent, capPesos });
   if (!billRes.ok) {
@@ -248,7 +248,7 @@ Deno.serve(async (req) => {
   const insert = await admin
     .from("tickets")
     .insert({
-      venue_id: venueId,
+      project_id: projectId,
       consumer_id: consumerId,
       opened_by: validatorId,
       kind,
@@ -287,10 +287,10 @@ Deno.serve(async (req) => {
     status: "completed",
     resolved_at: now,
     payload: {
-      venue_id: venue.id,
-      venue_slug: venue.slug ?? null,
-      venue_name: venue.name,
-      venue_photo_url: venue.photos?.[0] ?? null,
+      project_id: place.id,
+      place_slug: place.slug ?? null,
+      place_name: place.name,
+      place_photo_url: place.photos?.[0] ?? null,
       ticket_kind: kind,
       check_subtotal_cents: snap.checkSubtotalCents,
       tip_cents: snap.tipCents,
@@ -306,17 +306,17 @@ Deno.serve(async (req) => {
 
   // Type A closes immediately — queue the consumer's review now.
   if (!requiresStory) {
-    await closeTicketAndEnqueueReview(admin, insert.data.id, consumerId, venue.id);
+    await closeTicketAndEnqueueReview(admin, insert.data.id, consumerId, place.id);
   }
 
   return json(
     {
       ok: true,
       ticket: insert.data,
-      venue: {
-        id: venue.id,
-        name: venue.name,
-        fiscal_type: venue.fiscal_type,
+      place: {
+        id: place.id,
+        name: place.name,
+        fiscal_type: place.fiscal_type,
       },
       consumer: {
         id: consumerId,

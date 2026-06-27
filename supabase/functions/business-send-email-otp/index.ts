@@ -1,16 +1,16 @@
 // Supabase Edge Function — business-send-email-otp
 //
 // Phase 1 of the automatic-email path for /add ownership verification.
-// Sends a 6-digit OTP to the venue's Firecrawl-discovered email — but
+// Sends a 6-digit OTP to the place's Firecrawl-discovered email — but
 // only when that email is **on-domain**, i.e. its host matches the
-// venue's own website_url. A gmail/hotmail/etc. address scraped from
+// place's own website_url. A gmail/hotmail/etc. address scraped from
 // the site doesn't qualify; the manual fallback covers those.
 //
 // On-domain rule: email host == website host (both stripped of "www.").
 // We also accept exact subdomain matches in either direction, so
 // "hola@reservas.casaluminar.mx" against website "casaluminar.mx" still
-// passes. That window is intentionally wide — a venue's own subdomain
-// is still the venue.
+// passes. That window is intentionally wide — a place's own subdomain
+// is still the place.
 //
 // Mock mode: no transactional email provider is wired yet, so the
 // plaintext code is returned in `mockCode`. The operator types it back
@@ -18,7 +18,7 @@
 // (Resend / Postmark / etc.) lands later without changing the contract.
 //
 // The email NEVER comes from the user. We always send to the email
-// stored on the venue row, captured at create time.
+// stored on the place row, captured at create time.
 //
 // Auth: any signed-in user. Pending-row dedup mirrors the phone path.
 
@@ -37,11 +37,11 @@ import {
   sha256Hex,
 } from "../_shared/otp.ts";
 import {
-  isVenueOtpMockMode,
-  mockVenueOtpEmail,
-} from "../_shared/venue-otp-mock.ts";
+  isPlaceOtpMockMode,
+  mockPlaceOtpEmail,
+} from "../_shared/place-otp-mock.ts";
 
-type Body = { venueId?: string; requesterEmail?: string };
+type Body = { projectId?: string; requesterEmail?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -58,10 +58,10 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const venueId = (body.venueId ?? "").trim();
-  if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
+  const projectId = (body.projectId ?? "").trim();
+  if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
 
-  const mockMode = isVenueOtpMockMode();
+  const mockMode = isPlaceOtpMockMode();
   const requesterEmail = resolveRequesterEmail({
     bodyEmail: body.requesterEmail,
     sessionEmail: authRes.user.emailLower,
@@ -81,50 +81,50 @@ Deno.serve(async (req) => {
 
   const admin = adminClient(envRes.env);
 
-  const { data: venue, error: venueError } = await admin
-    .from("venues")
+  const { data: place, error: placeError } = await admin
+    .from("projects_view")
     .select("id, email, website_url")
-    .eq("id", venueId)
+    .eq("id", projectId)
     .maybeSingle();
-  if (venueError || !venue) {
-    return json({ ok: false, error: "Venue not found" }, 404);
+  if (placeError || !place) {
+    return json({ ok: false, error: "Place not found" }, 404);
   }
-  if (!venue.email || !venue.website_url) {
+  if (!place.email || !place.website_url) {
     return json(
       {
         ok: false,
         code: "no_on_domain_email",
         error:
-          "This venue has no on-domain email on file — use the phone or manual fallback.",
+          "This place has no on-domain email on file — use the phone or manual fallback.",
       },
       409,
     );
   }
-  if (!isOnDomain(venue.email, venue.website_url)) {
+  if (!isOnDomain(place.email, place.website_url)) {
     return json(
       {
         ok: false,
         code: "email_not_on_domain",
         error:
-          "The venue's email isn't on the same domain as its website — use the manual fallback.",
+          "The place's email isn't on the same domain as its website — use the manual fallback.",
       },
       409,
     );
   }
 
   const { data: existingOwner } = await admin
-    .from("venue_members")
+    .from("project_members")
     .select("business_id")
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .eq("role", "owner")
     .maybeSingle();
   if (existingOwner) {
     return json(
       {
         ok: false,
-        code: "venue_already_owned",
+        code: "place_already_owned",
         error:
-          "This venue already has a verified owner. Use the contact / report-fraud flow instead.",
+          "This place already has a verified owner. Use the contact / report-fraud flow instead.",
       },
       409,
     );
@@ -133,16 +133,16 @@ Deno.serve(async (req) => {
   const code = randomSixDigits();
   const codeHash = await sha256Hex(code);
   const mockCode = mockMode ? code : null;
-  const sentTo = mockMode ? mockVenueOtpEmail() : venue.email;
+  const sentTo = mockMode ? mockPlaceOtpEmail() : place.email;
 
   const insertRes = await insertPendingOtpVerification(admin, {
-    venueId,
+    projectId,
     userId,
     requesterEmail,
     method: "ai_email",
     payload: {
-      emailSent: venue.email,
-      websiteUrl: venue.website_url,
+      emailSent: place.email,
+      websiteUrl: place.website_url,
       mockMode,
       displayEmail: sentTo,
     },
@@ -150,7 +150,7 @@ Deno.serve(async (req) => {
   });
   if (!insertRes.ok) return insertRes.response;
 
-  // Outbound email intentionally not implemented — venue inboxes are not emailed.
+  // Outbound email intentionally not implemented — place inboxes are not emailed.
 
   return json({
     ok: true,

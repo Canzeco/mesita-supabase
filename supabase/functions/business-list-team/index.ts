@@ -1,16 +1,16 @@
 // Supabase Edge Function — business-list-team
 //
-// Returns the active team of a venue in one round trip:
-//   - businesses : venue_members joined to businesses (email-pool roles)
-//   - waiters  : venue_roles joined to auth.users phones (phone-pool
+// Returns the active team of a place in one round trip:
+//   - businesses : project_members joined to businesses (email-pool roles)
+//   - waiters  : project_roles joined to auth.users phones (phone-pool
 //     staff)
 //   - pendingBusinessInvites
 //   - pendingWaiterInvites
-//   - myRole : caller's role on this venue (or "super_admin"), so the
+//   - myRole : caller's role on this place (or "super_admin"), so the
 //     UI doesn't have to derive owner-ness from the businesses list and
-//     gets the right answer for super-admins who skipped venue_members
+//     gets the right answer for super-admins who skipped project_members
 //
-// Auth: any signed-in member of the venue. Super-admins
+// Auth: any signed-in member of the place. Super-admins
 // (public.super_admins) bypass the membership check.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -24,7 +24,7 @@ import {
 } from "../_shared/auth.ts";
 import { phoneDigits } from "../_shared/phone.ts";
 
-type Body = { venueId?: string };
+type Body = { projectId?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -36,11 +36,11 @@ Deno.serve(async (req) => {
   if (!authRes.ok) return authRes.response;
 
   const body = await readJsonOr<Body>(req, {});
-  const venueId = (body.venueId ?? "").trim();
-  if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
+  const projectId = (body.projectId ?? "").trim();
+  if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
 
   const admin = adminClient(envRes.env);
-  const memberRes = await requireMembership(admin, authRes.user, venueId);
+  const memberRes = await requireMembership(admin, authRes.user, projectId);
   if (!memberRes.ok) return memberRes.response;
 
   const nowIso = new Date().toISOString();
@@ -49,27 +49,27 @@ Deno.serve(async (req) => {
   // for the waiter phone lookups below.
   const [memberRows, roleRows, pendingBusinessRows, pendingWaiterRows] = await Promise.all([
     admin
-      .from("venue_members")
+      .from("project_members")
       .select("id, role, created_at, business:businesses(id, full_name, email)")
-      .eq("venue_id", venueId)
+      .eq("project_id", projectId)
       .order("created_at", { ascending: true }),
     admin
-      .from("venue_roles")
+      .from("project_roles")
       .select("user_id, role, created_at")
-      .eq("venue_id", venueId)
+      .eq("project_id", projectId)
       .eq("role", "staff")
       .order("created_at", { ascending: true }),
     admin
-      .from("business_invites")
+      .from("account_invites")
       .select("id, email, role, token, created_at, expires_at")
-      .eq("venue_id", venueId)
+      .eq("project_id", projectId)
       .is("claimed_at", null)
       .gt("expires_at", nowIso)
       .order("created_at", { ascending: false }),
     admin
       .from("staff_invites")
       .select("id, phone, channel, token, created_at, expires_at")
-      .eq("venue_id", venueId)
+      .eq("project_id", projectId)
       .is("claimed_at", null)
       .gt("expires_at", nowIso)
       .order("created_at", { ascending: false }),
@@ -121,7 +121,7 @@ Deno.serve(async (req) => {
   );
 
   // `myRole` lets the client gate UI without re-deriving from the
-  // businesses list (super-admins aren't always in venue_members).
+  // businesses list (super-admins aren't always in project_members).
   const myRole = memberRes.membership.isSuperAdmin
     ? "super_admin"
     : memberRes.membership.role;
@@ -138,8 +138,8 @@ Deno.serve(async (req) => {
 
 // ─── Waiter phone hydration ─────────────────────────────────────────
 //
-// venue_roles only stores user_id; the phone lives on auth.users.
-// Until we add a phone column to venue_roles we have to read each
+// project_roles only stores user_id; the phone lives on auth.users.
+// Until we add a phone column to project_roles we have to read each
 // auth user — running them in parallel keeps the latency flat.
 
 type RoleRow = { user_id: string; role: string; created_at: string };

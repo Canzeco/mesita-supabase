@@ -18,16 +18,16 @@ export async function sendStaffInviteWhatsApp(opts: {
   admin?: SupabaseClient;
   env: TwilioEnv;
   toPhoneE164: string;
-  venueName: string;
+  placeName: string;
   inviteToken: string;
 }): Promise<
   | { ok: true; sid: string; mode: "template" | "session" }
   | { ok: false; error: string; mode: "none" }
 > {
-  const { admin, env, toPhoneE164, venueName } = opts;
+  const { admin, env, toPhoneE164, placeName } = opts;
   const from = env.whatsappFromStaff;
   const to = normaliseWhatsAppTo(toPhoneE164);
-  const body = buildStaffInviteWhatsAppBody({ venueName });
+  const body = buildStaffInviteWhatsAppBody({ placeName });
 
   const contentSid = readStaffInviteContentSid();
   if (contentSid) {
@@ -37,7 +37,7 @@ export async function sendStaffInviteWhatsApp(opts: {
       to,
       contentSid,
       contentVariables: {
-        "1": venueName.slice(0, 200),
+        "1": placeName.slice(0, 200),
       },
     });
     if (tpl.ok) {

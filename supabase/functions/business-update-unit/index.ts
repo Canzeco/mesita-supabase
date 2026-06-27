@@ -1,7 +1,7 @@
 // Supabase Edge Function — business-update-unit
 //
-// Authenticated. Updates editable fields on a venue the caller owns or
-// manages. Self-contained: verifies the JWT, checks venue_members membership
+// Authenticated. Updates editable fields on a place the caller owns or
+// manages. Self-contained: verifies the JWT, checks project_members membership
 // itself, validates input, writes via service role. Does NOT call any other
 // Edge Function.
 //
@@ -17,15 +17,15 @@ import {
   requireMembership,
 } from "../_shared/auth.ts";
 import { isEmailish } from "../_shared/input.ts";
-import { VENUE_BUSINESS_COLUMNS } from "../_shared/venue-columns.ts";
+import { PLACE_BUSINESS_COLUMNS } from "../_shared/place-columns.ts";
 import {
-  inferVenueCategory,
-  type VenueCategory,
+  inferPlaceCategory,
+  type PlaceCategory,
 } from "../_shared/categories.ts";
 import { ATLAS_FIELD_LIMITS } from "../_shared/atlas-field-limits.ts";
 
 const MAX_PHOTOS = ATLAS_FIELD_LIMITS.photos.max;
-const MAX_TAGS = ATLAS_FIELD_LIMITS.tagsPerVenue.max;
+const MAX_TAGS = ATLAS_FIELD_LIMITS.tagsPerPlace.max;
 const MAX_TAG_LEN = ATLAS_FIELD_LIMITS.tagSlugLength.max;
 const MAX_PR_WHATSAPP = ATLAS_FIELD_LIMITS.prWhatsappNumbers.max;
 const MAX_PR_INSTAGRAM = ATLAS_FIELD_LIMITS.prInstagramAccounts.max;
@@ -38,7 +38,7 @@ type UpdateBody = {
   category?: string | null;
   vibe?: string | null;
   price_level?: number | null;
-  // ISO 4217 code. Mesita defaults every venue to MXN; the business
+  // ISO 4217 code. Mesita defaults every place to MXN; the business
   // can switch to USD/EUR/etc. only when we extend coverage outside
   // Mexico. Kept as text so the EF doesn't hard-code an enum.
   currency?: string | null;
@@ -52,18 +52,18 @@ type UpdateBody = {
     | "informal_ultra";
   address?: string | null;
   closes_at?: string | null;
-  hours?: VenueHours | null;
+  hours?: PlaceHours | null;
   phone?: string | null;
   pitch?: string | null;
   story?: string | null;
   // Four per-tier promo rates (migration 0032). Welcome variants fire on a
-  // guest's first visit at the venue; the unprefixed variants apply on every
+  // guest's first visit at the place; the unprefixed variants apply on every
   // visit afterwards. DB constraint enforces the legal set {10, 20, 50, 70}.
   welcome_free_rate?: number | null;
   welcome_premium_rate?: number | null;
   free_rate?: number | null;
   premium_rate?: number | null;
-  // Venue-level monthly promo spend cap (migration 0038), in the venue's
+  // Place-level monthly promo spend cap (migration 0038), in the place's
   // currency. One of 200, 500, 1000, 2000 or null (no cap).
   monthly_promo_cap?: number | null;
   photos?: string[];
@@ -113,7 +113,7 @@ type DayKey =
   | "friday"
   | "saturday"
   | "sunday";
-type VenueHours = Partial<Record<DayKey, HoursRange[]>>;
+type PlaceHours = Partial<Record<DayKey, HoursRange[]>>;
 
 const DAY_KEYS: DayKey[] = [
   "monday",
@@ -146,7 +146,7 @@ type UrlField = (typeof URL_FIELDS)[number];
 
 const EDITABLE_STATUSES = new Set(["active", "paused", "archived"]);
 
-// Plan catalog the EF accepts — all five tiers in the venue_plan enum.
+// Plan catalog the EF accepts — all five tiers in the membership enum.
 // Ordered Free → Pro (formal/informal) → Ultra (formal/informal). The
 // mechanic is fixed by fiscal_type; Pro vs Ultra
 // only changes price + visibility tier. See business UI plans.ts for the
@@ -175,12 +175,12 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<UpdateBody>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const venueId = (body.id ?? "").toString().trim();
-  if (!venueId) return json({ ok: false, error: "id is required" }, 400);
+  const projectId = (body.id ?? "").toString().trim();
+  if (!projectId) return json({ ok: false, error: "id is required" }, 400);
 
-  // Auth: caller must be a member of this venue. Super-admins bypass via
+  // Auth: caller must be a member of this place. Super-admins bypass via
   // the super_admins allowlist baked into requireMembership.
-  const memberRes = await requireMembership(admin, authRes.user, venueId);
+  const memberRes = await requireMembership(admin, authRes.user, projectId);
   if (!memberRes.ok) return memberRes.response;
 
   // Build the update payload from the whitelist. Missing keys are not
@@ -189,7 +189,7 @@ Deno.serve(async (req) => {
   if ("name" in body) {
     const n = (body.name ?? "").toString().trim();
     if (!n) return json({ ok: false, error: "name cannot be empty" }, 400);
-    if (n.length > ATLAS_FIELD_LIMITS.venueName.max) {
+    if (n.length > ATLAS_FIELD_LIMITS.placeName.max) {
       return json({ ok: false, error: "name too long" }, 400);
     }
     update.name = n;
@@ -240,8 +240,8 @@ Deno.serve(async (req) => {
       );
     }
     // Mechanic-fiscal coupling: a formal plan only makes sense on a formal
-    // venue, and vice versa. We look up the current row to validate against
-    // the venue's fiscal_type (or the new fiscal_type the same request is
+    // place, and vice versa. We look up the current row to validate against
+    // the place's fiscal_type (or the new fiscal_type the same request is
     // trying to set, whichever wins).
     const incomingFiscal = (update.fiscal_type as string | undefined) ?? null;
     if (p.startsWith("formal_") && incomingFiscal === "informal") {
@@ -249,7 +249,7 @@ Deno.serve(async (req) => {
         {
           ok: false,
           code: "plan_fiscal_mismatch",
-          error: "Formal plans can't be picked while the venue is set to informal. Change fiscal_type first.",
+          error: "Formal plans can't be picked while the place is set to informal. Change fiscal_type first.",
         },
         409,
       );
@@ -259,7 +259,7 @@ Deno.serve(async (req) => {
         {
           ok: false,
           code: "plan_fiscal_mismatch",
-          error: "Informal plans can't be picked while the venue is set to formal. Change fiscal_type first.",
+          error: "Informal plans can't be picked while the place is set to formal. Change fiscal_type first.",
         },
         409,
       );
@@ -471,11 +471,11 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "No editable fields provided" }, 400);
   }
 
-  let { data: venue, error: updateError } = await admin
-    .from("venues")
+  let { data: place, error: updateError } = await admin
+    .from("projects_view")
     .update(update)
-    .eq("id", venueId)
-    .select(VENUE_BUSINESS_COLUMNS)
+    .eq("id", projectId)
+    .select(PLACE_BUSINESS_COLUMNS)
     .single();
 
   // Backward compatibility: in projects where category_label migration hasn't
@@ -485,22 +485,22 @@ Deno.serve(async (req) => {
     const retryUpdate = { ...update };
     delete retryUpdate.category_label;
     const retry = await admin
-      .from("venues")
+      .from("projects_view")
       .update(retryUpdate)
-      .eq("id", venueId)
-      .select(VENUE_BUSINESS_COLUMNS)
+      .eq("id", projectId)
+      .select(PLACE_BUSINESS_COLUMNS)
       .single();
-    venue = retry.data;
+    place = retry.data;
     updateError = retry.error;
   }
   if (updateError) {
     return json(
-      { ok: false, error: `venue_update: ${updateError.message}`, code: updateError.code ?? null },
+      { ok: false, error: `place_update: ${updateError.message}`, code: updateError.code ?? null },
       400,
     );
   }
 
-  return json({ ok: true, venue });
+  return json({ ok: true, place });
 });
 
 async function resolveCategoryInput(
@@ -516,12 +516,12 @@ async function resolveCategoryInput(
     return { ok: true, slug: null, label: null };
   }
   const { data, error } = await admin
-    .from("venue_categories")
+    .from("place_categories")
     .select("slug, label");
   if (error) {
     return { ok: false, error: `category_lookup: ${error.message}` };
   }
-  const categories = (data ?? []) as VenueCategory[];
+  const categories = (data ?? []) as PlaceCategory[];
   const needle = raw.trim().toLowerCase();
   const hit = categories.find(
     (c) => c.slug.toLowerCase() === needle || c.label.toLowerCase() === needle,
@@ -530,7 +530,7 @@ async function resolveCategoryInput(
 
   // NLP fallback: map free-form/Google category text to the closest Mesita
   // category slug instead of requiring exact text equality.
-  const inferredSlug = await inferVenueCategory(openaiKey, categories, {
+  const inferredSlug = await inferPlaceCategory(openaiKey, categories, {
     name: raw,
     googlePrimaryType: raw,
     googlePrimaryTypeDisplay: raw,
@@ -571,12 +571,12 @@ function clampInt(n: unknown, lo: number, hi: number): number | null {
 
 // "invalid" is the only failure sentinel so the caller can return a single
 // 400. Null means the business intentionally cleared their hours. Empty object
-// is permitted — the venue is open zero days.
-function sanitiseHours(v: unknown): VenueHours | null | "invalid" {
+// is permitted — the place is open zero days.
+function sanitiseHours(v: unknown): PlaceHours | null | "invalid" {
   if (v == null) return null;
   if (typeof v !== "object" || Array.isArray(v)) return "invalid";
   const input = v as Record<string, unknown>;
-  const out: VenueHours = {};
+  const out: PlaceHours = {};
   for (const day of DAY_KEYS) {
     if (!(day in input)) continue;
     const ranges = input[day];

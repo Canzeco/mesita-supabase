@@ -17,7 +17,7 @@ export type ComputeTicketBillInput = {
 };
 
 // Discounts only: the promo rate applies to the subtotal, the discount is
-// applied at the bill, and the consumer pays the venue directly. Mesita never
+// applied at the bill, and the consumer pays the place directly. Mesita never
 // holds a balance, so there is no tip line, redemption, or credit here.
 export function computeTicketBill(
   input: ComputeTicketBillInput,

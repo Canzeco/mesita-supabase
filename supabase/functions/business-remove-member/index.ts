@@ -1,15 +1,15 @@
 // Supabase Edge Function — business-remove-member
 //
-// Removes one team artefact from a venue. The `kind` discriminates:
+// Removes one team artefact from a place. The `kind` discriminates:
 //
-//   editor       → venue_members row (cannot remove last owner)
-//   waiter       → venue_roles row
-//   editorInvite → business_invites row (revoke pending email invite)
+//   editor       → project_members row (cannot remove last owner)
+//   waiter       → project_roles row
+//   editorInvite → account_invites row (revoke pending email invite)
 //   waiterInvite → staff_invites row (revoke pending waiter invite)
 //
 // Owners (and super-admins) can remove anyone. Editors and viewers
 // cannot remove other members but may remove themselves (handy "leave
-// venue" affordance) — except the last owner, who is pinned.
+// place" affordance) — except the last owner, who is pinned.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
@@ -20,7 +20,7 @@ import {
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
-import { isLastOwnerOfVenue } from "../_shared/venue-ownership.ts";
+import { isLastOwnerOfPlace } from "../_shared/place-ownership.ts";
 
 const KINDS = ["editor", "waiter", "editorInvite", "waiterInvite"] as const;
 type Kind = (typeof KINDS)[number];
@@ -48,16 +48,16 @@ Deno.serve(async (req) => {
   if (!target.ok) return target.response;
 
   // Authorization: self-removal is fine regardless of role; otherwise
-  // the caller must be an owner of the same venue (or super-admin).
+  // the caller must be an owner of the same place (or super-admin).
   if (!target.isSelfRemoval) {
-    const m = await checkMembership(admin, authRes.user, target.venueId);
+    const m = await checkMembership(admin, authRes.user, target.projectId);
     if (!m.isSuperAdmin && m.role !== "owner") {
       return json({ ok: false, error: "Not allowed to remove this member." }, 403);
     }
   }
 
   if (kind === "editor" && target.targetIsOwner) {
-    if (await isLastOwnerOfVenue(admin, target.venueId)) {
+    if (await isLastOwnerOfPlace(admin, target.projectId)) {
       return json(
         { ok: false, code: "last_owner", error: "Promote another owner first." },
         409,
@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
 type LoadedTarget =
   | {
       ok: true;
-      venueId: string;
+      projectId: string;
       isSelfRemoval: boolean;
       targetIsOwner: boolean;
     }
@@ -93,41 +93,41 @@ async function loadTarget(
   switch (kind) {
     case "editor": {
       const row = await admin
-        .from("venue_members")
-        .select("venue_id, business_id, role")
+        .from("project_members")
+        .select("project_id, business_id, role")
         .eq("id", id)
         .maybeSingle();
       if (row.error) return notFound(`member_read: ${row.error.message}`, 500);
       if (!row.data) return notFound("Member not found.", 404);
       return {
         ok: true,
-        venueId: row.data.venue_id,
+        projectId: row.data.project_id,
         isSelfRemoval: row.data.business_id === callerId,
         targetIsOwner: row.data.role === "owner",
       };
     }
     case "waiter": {
-      const [userId, venueIdFromKey] = id.split(":");
-      if (!userId || !venueIdFromKey) {
-        return notFound("id must be userId:venueId", 400);
+      const [userId, placeIdFromKey] = id.split(":");
+      if (!userId || !placeIdFromKey) {
+        return notFound("id must be userId:projectId", 400);
       }
       const row = await admin
-        .from("venue_roles")
-        .select("user_id, venue_id")
+        .from("project_roles")
+        .select("user_id, project_id")
         .eq("user_id", userId)
-        .eq("venue_id", venueIdFromKey)
+        .eq("project_id", placeIdFromKey)
         .maybeSingle();
       if (row.error) return notFound(`role_read: ${row.error.message}`, 500);
-      if (!row.data) return notFound("Waiter not found on this venue.", 404);
+      if (!row.data) return notFound("Waiter not found on this place.", 404);
       return {
         ok: true,
-        venueId: row.data.venue_id,
+        projectId: row.data.project_id,
         isSelfRemoval: false,
         targetIsOwner: false,
       };
     }
     case "editorInvite":
-      return await loadInvite(admin, "business_invites", id);
+      return await loadInvite(admin, "account_invites", id);
     case "waiterInvite":
       return await loadInvite(admin, "staff_invites", id);
   }
@@ -135,15 +135,15 @@ async function loadTarget(
 
 async function loadInvite(
   admin: SupabaseClient,
-  table: "business_invites" | "staff_invites",
+  table: "account_invites" | "staff_invites",
   id: string,
 ): Promise<LoadedTarget> {
-  const row = await admin.from(table).select("venue_id").eq("id", id).maybeSingle();
+  const row = await admin.from(table).select("project_id").eq("id", id).maybeSingle();
   if (row.error) return notFound(`invite_read: ${row.error.message}`, 500);
   if (!row.data) return notFound("Invite not found.", 404);
   return {
     ok: true,
-    venueId: row.data.venue_id,
+    projectId: row.data.project_id,
     isSelfRemoval: false,
     targetIsOwner: false,
   };
@@ -156,17 +156,17 @@ function notFound(error: string, status: number): { ok: false; response: Respons
 async function deleteTarget(admin: SupabaseClient, kind: Kind, id: string) {
   switch (kind) {
     case "editor":
-      return await admin.from("venue_members").delete().eq("id", id);
+      return await admin.from("project_members").delete().eq("id", id);
     case "waiter": {
-      const [userId, venueIdFromKey] = id.split(":");
+      const [userId, placeIdFromKey] = id.split(":");
       return await admin
-        .from("venue_roles")
+        .from("project_roles")
         .delete()
         .eq("user_id", userId)
-        .eq("venue_id", venueIdFromKey);
+        .eq("project_id", placeIdFromKey);
     }
     case "editorInvite":
-      return await admin.from("business_invites").delete().eq("id", id);
+      return await admin.from("account_invites").delete().eq("id", id);
     case "waiterInvite":
       return await admin.from("staff_invites").delete().eq("id", id);
   }

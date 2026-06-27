@@ -1,7 +1,7 @@
 // Supabase Edge Function — consumer-list-reservations (natural caller)
 //
 // Authenticated read of the caller's reservations. Returns booking
-// metadata joined with the venue summary — NO discount /
+// metadata joined with the place summary — NO discount /
 // money fields, because the entity split's contract is that the
 // reservation card never carries financial info. The (optional)
 // linked coupon is exposed by id only so the client can cross-
@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
   let q = admin
     .from("reservations")
     .select(
-      "id, reserved_at, party_size, status, notes, confirmed_at, completed_at, cancelled_at, coupon_id, created_at, venue:venues(id, slug, name, category, photos, address)",
+      "id, reserved_at, party_size, status, notes, confirmed_at, completed_at, cancelled_at, coupon_id, created_at, place:places(id, slug, name, category, photos, address)",
     )
     .eq("consumer_id", consumerId)
     .order("reserved_at", { ascending: scope === "past" ? false : true })

@@ -12,7 +12,7 @@
 // the same status codes the old seed used (409/422/502/503).
 
 import { classifyLinks } from "./channels.ts";
-import { slugify } from "./venue-slug.ts";
+import { slugify } from "./place-slug.ts";
 import { humanizeCategorySlug } from "./parse-utils.ts";
 import { ATLAS_FIELD_LIMITS } from "./atlas-field-limits.ts";
 
@@ -93,7 +93,7 @@ type GoogleDetails = {
 };
 
 // Flat, `places`-shaped identity spine. Unit-level fields (slug, status,
-// listing_type, adea_status, plan…) are intentionally absent — the save step
+// listing_type, content_status, plan…) are intentionally absent — the save step
 // generates the unique slug and applies entity defaults.
 export type GoogleBasics = {
   google_place_id: string;
@@ -196,7 +196,7 @@ export async function fetchGoogleBasics(
     ok: true,
     basics: {
       google_place_id: details.id ?? placeId,
-      name: name.slice(0, ATLAS_FIELD_LIMITS.venueName.max),
+      name: name.slice(0, ATLAS_FIELD_LIMITS.placeName.max),
       category: categorySlug,
       category_label: categoryLabel ?? humanizeCategorySlug(categorySlug ?? ""),
       price_level: priceLevelFromGoogle(details.priceLevel),

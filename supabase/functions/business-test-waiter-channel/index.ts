@@ -16,7 +16,7 @@ import {
 import { readTwilioEnv, sendWhatsAppText } from "../_shared/twilio.ts";
 
 type Body = {
-  venueId?: string;
+  projectId?: string;
   channel?: "whatsapp" | "sms";
   phone?: string;
 };
@@ -31,10 +31,10 @@ Deno.serve(async (req) => {
   if (!authRes.ok) return authRes.response;
 
   const body = await readJsonOr<Body>(req, {});
-  const venueId = (body.venueId ?? "").trim();
+  const projectId = (body.projectId ?? "").trim();
   const channel = (body.channel ?? "whatsapp") as Body["channel"];
   const phone = (body.phone ?? "").trim();
-  if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
+  if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
   if (channel !== "whatsapp" && channel !== "sms") {
     return json({ ok: false, error: "channel must be whatsapp or sms" }, 400);
   }
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
   }
 
   const admin = adminClient(envRes.env);
-  const membership = await requireMembership(admin, authRes.user, venueId);
+  const membership = await requireMembership(admin, authRes.user, projectId);
   if (!membership.ok) return membership.response;
 
   if (channel === "whatsapp") {

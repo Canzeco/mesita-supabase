@@ -1,6 +1,6 @@
 // Supabase Edge Function — atlas-suggest-places (artificial caller)
 //
-// Part of the Atlas namespace (venue intelligence + encyclopaedia).
+// Part of the Atlas namespace (place intelligence + encyclopaedia).
 // Proxies Google Places (New) Autocomplete + a Mesita-side name ILIKE
 // fallback in parallel, merges the two, and returns predictions tagged
 // with per-row status (`not_in_mesita`, `web_listed`,
@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
   }
 
   // Backfill status for predictions Google returned but the ILIKE
-  // fallback missed (e.g., "Strana San Pedro" vs the venue named just
+  // fallback missed (e.g., "Strana San Pedro" vs the place named just
   // "Strana"). Keys off placeId directly so the substring miss doesn't
   // matter.
   const orphanPlaceIds = Array.from(byPlaceId.values())
@@ -213,7 +213,7 @@ async function fetchMesitaPredictions(
   // Strana, Monterrey". Limit small — Google is the primary surface; this
   // is a fallback for the long-tail case where Google misses.
   const { data, error } = await admin
-    .from("venues")
+    .from("projects_view")
     .select("id, google_place_id, name, address")
     .ilike("name", `%${escapeIlike(input)}%`)
     .not("google_place_id", "is", null)
@@ -231,7 +231,7 @@ async function fetchMesitaPredictions(
   const rows = (data ?? []) as Row[];
   if (rows.length === 0) return [];
 
-  const statuses = await statusesForVenues(admin, rows, callerId);
+  const statuses = await statusesForPlaces(admin, rows, callerId);
   return rows.map<Prediction>((v) => ({
     placeId: v.google_place_id,
     mainText: v.name,
@@ -246,7 +246,7 @@ async function enrichByPlaceIds(
   callerId: string | null,
 ): Promise<Map<string, PredictionStatus>> {
   const { data, error } = await admin
-    .from("venues")
+    .from("projects_view")
     .select("id, google_place_id")
     .in("google_place_id", placeIds);
   if (error) {
@@ -254,37 +254,37 @@ async function enrichByPlaceIds(
     return new Map();
   }
   type Row = { id: string; google_place_id: string };
-  return statusesForVenues(admin, (data ?? []) as Row[], callerId);
+  return statusesForPlaces(admin, (data ?? []) as Row[], callerId);
 }
 
-// One owner-lookup pass over a venue-row set, returning the per-placeId
+// One owner-lookup pass over a place-row set, returning the per-placeId
 // PredictionStatus. `web_listed` for unowned rows;
 // `verified_partner_self/_other` for owned ones depending on whether the
 // caller (resolved by the natural EF before this call) is the owner.
-async function statusesForVenues(
+async function statusesForPlaces(
   admin: ReturnType<typeof createClient>,
   rows: Array<{ id: string; google_place_id: string }>,
   callerId: string | null,
 ): Promise<Map<string, PredictionStatus>> {
   if (rows.length === 0) return new Map();
   const { data, error } = await admin
-    .from("venue_members")
-    .select("venue_id, business_id")
-    .in("venue_id", rows.map((r) => r.id))
+    .from("project_members")
+    .select("project_id, business_id")
+    .in("project_id", rows.map((r) => r.id))
     .eq("role", "owner");
   if (error) {
     console.error("[atlas-suggest-places] owner lookup:", error.message);
   }
-  const ownerByVenue = new Map<string, string>();
+  const ownerByPlace = new Map<string, string>();
   for (const m of (data ?? []) as Array<{
-    venue_id: string;
+    project_id: string;
     business_id: string;
   }>) {
-    ownerByVenue.set(m.venue_id, m.business_id);
+    ownerByPlace.set(m.project_id, m.business_id);
   }
   const out = new Map<string, PredictionStatus>();
   for (const v of rows) {
-    const ownerId = ownerByVenue.get(v.id);
+    const ownerId = ownerByPlace.get(v.id);
     out.set(
       v.google_place_id,
       ownerId

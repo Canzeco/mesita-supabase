@@ -1,6 +1,6 @@
 // Supabase Edge Function — business-list-reservations
 //
-// Authenticated. Returns reservations for a venue the caller is a member
+// Authenticated. Returns reservations for a place the caller is a member
 // of, joined with the guest's display fields + plan (tier) for the
 // capacity view. NO financial fields — reservations never carry money
 // (the entity split keeps discounts on tickets, not bookings).
@@ -24,7 +24,7 @@ const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 200;
 
 type Scope = "upcoming" | "past" | "all";
-type Body = { venueId?: string; limit?: number; scope?: Scope };
+type Body = { projectId?: string; limit?: number; scope?: Scope };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -40,20 +40,20 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const venueId = (body.venueId ?? "").toString().trim();
-  if (!venueId) return json({ ok: false, error: "venueId is required" }, 400);
+  const projectId = (body.projectId ?? "").toString().trim();
+  if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
   const limit = clampIntRange(Number(body.limit ?? DEFAULT_LIMIT), 1, MAX_LIMIT);
   const scope: Scope =
     body.scope === "past" || body.scope === "all" ? body.scope : "upcoming";
 
   const admin = adminClient(envRes.env);
-  const memberRes = await requireMembership(admin, authRes.user, venueId);
+  const memberRes = await requireMembership(admin, authRes.user, projectId);
   if (!memberRes.ok) return memberRes.response;
 
   let q = admin
     .from("reservations")
     .select(RESERVATION_SELECT)
-    .eq("venue_id", venueId)
+    .eq("project_id", projectId)
     .order("reserved_at", { ascending: scope !== "past" })
     .limit(limit);
 

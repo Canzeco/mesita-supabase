@@ -5,12 +5,12 @@ import { phoneDigits, phonesMatch } from "./phone.ts";
 
 export type PendingStaffInvite = {
   id: string;
-  venue_id: string;
+  project_id: string;
   phone: string | null;
   claimed_at: string | null;
   expires_at: string;
   created_by: string;
-  venue_name: string;
+  place_name: string;
 };
 
 /** Guest/staff accept keywords (no links). */
@@ -55,22 +55,22 @@ export async function findPendingStaffInviteByToken(
   const { data, error } = await admin
     .from("staff_invites")
     .select(
-      "id, venue_id, phone, claimed_at, expires_at, created_by, venues(name)",
+      "id, project_id, phone, claimed_at, expires_at, created_by, places(name)",
     )
     .eq("token", t)
     .is("claimed_at", null)
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
   if (error || !data) return null;
-  const join = data.venues as unknown as { name: string } | null;
+  const join = data.places as unknown as { name: string } | null;
   return {
     id: data.id,
-    venue_id: data.venue_id,
+    project_id: data.project_id,
     phone: data.phone,
     claimed_at: data.claimed_at,
     expires_at: data.expires_at,
     created_by: data.created_by,
-    venue_name: join?.name ?? "your venue",
+    place_name: join?.name ?? "your place",
   };
 }
 
@@ -81,7 +81,7 @@ export async function findPendingStaffInviteForPhone(
   const { data, error } = await admin
     .from("staff_invites")
     .select(
-      "id, venue_id, phone, claimed_at, expires_at, created_by, venues(name)",
+      "id, project_id, phone, claimed_at, expires_at, created_by, places(name)",
     )
     .is("claimed_at", null)
     .gt("expires_at", new Date().toISOString())
@@ -91,15 +91,15 @@ export async function findPendingStaffInviteForPhone(
   for (const row of data) {
     if (!row.phone) continue;
     if (!phonesMatch(row.phone, phoneE164)) continue;
-    const join = row.venues as unknown as { name: string } | null;
+    const join = row.places as unknown as { name: string } | null;
     return {
       id: row.id,
-      venue_id: row.venue_id,
+      project_id: row.project_id,
       phone: row.phone,
       claimed_at: row.claimed_at,
       expires_at: row.expires_at,
       created_by: row.created_by,
-      venue_name: join?.name ?? "your venue",
+      place_name: join?.name ?? "your place",
     };
   }
 
@@ -135,7 +135,7 @@ export async function redeemStaffInvite(
   admin: SupabaseClient,
   opts: { invite: PendingStaffInvite; userId: string },
 ): Promise<
-  | { ok: true; venueId: string; venueName: string }
+  | { ok: true; projectId: string; placeName: string }
   | { ok: false; error: string; code: string }
 > {
   const { invite, userId } = opts;
@@ -146,20 +146,20 @@ export async function redeemStaffInvite(
     return { ok: false, error: "expired", code: "expired" };
   }
   const upsert = await admin
-    .from("venue_roles")
+    .from("project_roles")
     .upsert(
       {
         user_id: userId,
-        venue_id: invite.venue_id,
+        project_id: invite.project_id,
         role: "staff",
         invited_by: invite.created_by,
       },
-      { onConflict: "user_id,venue_id", ignoreDuplicates: false },
+      { onConflict: "user_id,project_id", ignoreDuplicates: false },
     )
-    .select("user_id, venue_id, role")
+    .select("user_id, project_id, role")
     .single();
   if (upsert.error) {
-    return { ok: false, error: upsert.error.message, code: "venue_roles" };
+    return { ok: false, error: upsert.error.message, code: "project_roles" };
   }
 
   const claim = await admin
@@ -188,12 +188,12 @@ export async function redeemStaffInvite(
     }
   }
 
-  return { ok: true, venueId: invite.venue_id, venueName: invite.venue_name };
+  return { ok: true, projectId: invite.project_id, placeName: invite.place_name };
 }
 
-export function buildStaffInviteAcceptedReply(venueName: string): string {
+export function buildStaffInviteAcceptedReply(placeName: string): string {
   return (
-    `Perfecto — ya quedaste en ${venueName}.\n\n` +
+    `Perfecto — ya quedaste en ${placeName}.\n\n` +
     `Cuando tengas un comensal, manda su código Mesita (0000-0000) y después la cuenta ` +
     `(por ejemplo SUBTOTAL 850 PROPINA 100). Cuando cobres, responde listo.\n\n` +
     `Escribe ayuda cuando quieras un recordatorio.`
