@@ -1,7 +1,7 @@
 // Supabase Edge Function — enricher-save-place-data (artificial caller / agent)
 //
 // The PERSIST half of the create pipeline. Takes the `place` JSON produced by
-// atlas-get-enriched-place (read-only) and writes it as the real rows:
+// fetchGoogleBasics at create time (read-only) and writes it as the real rows:
 //   • places — the full Atlas profile (Google identity, geo, channels, signals,
 //     synthesis, photos)
 //   • units  — the owned Mesita entity (shared PK with the place), landing
@@ -19,7 +19,7 @@
 // admin-decide-verification approves a claim. This agent is place-only.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Mirrors how atlas-get-enriched-place / enricher-store-place-images are gated.
+// bearer. Mirrors how enricher-store-place-images is gated.
 //
 // Local:  supabase functions serve enricher-save-place-data
 // Deploy: supabase functions deploy enricher-save-place-data
@@ -30,7 +30,7 @@ import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
 import { ensureUniqueSlug, slugify } from "../_shared/place-slug.ts";
 
-// The places-shaped profile from atlas-get-enriched-place. Required spine:
+// The places-shaped profile from fetchGoogleBasics. Required spine:
 // google_place_id + name (the same fields fetchGoogleBasics guarantees).
 type PlacePayload = Record<string, unknown> & {
   google_place_id?: string;

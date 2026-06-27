@@ -18,7 +18,7 @@
 // upsert here.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Mirrors atlas-get-enriched-place / enricher-save-place-data / enricher-store-place-images.
+// bearer. Mirrors enricher-save-place-data / enricher-store-place-images.
 //
 // Local:  supabase functions serve scheduler-run-project-creations
 // Deploy: supabase functions deploy scheduler-run-project-creations

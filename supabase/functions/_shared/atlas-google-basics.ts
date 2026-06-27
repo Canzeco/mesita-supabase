@@ -1,7 +1,7 @@
 // Shared — Google Places "basics" fetch.
 //
 // Extracted from the old atlas-seed-place so the create pipeline
-// (atlas-get-enriched-place) can build the identity spine in-memory without a
+// can build the identity spine in-memory without a
 // DB seed. Fetches Google Places BASICS ONLY (name, address, geo, category,
 // phone, hours, first photos, Google ratings/reviews, identity links) and
 // returns them as a flat `places`-shaped object. NO Firecrawl/Perplexity/

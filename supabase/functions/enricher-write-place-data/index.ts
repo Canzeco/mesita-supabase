@@ -3,7 +3,7 @@
 // The UPDATE half of the ASYNC enrich pipeline. The create path
 // (xxx-create-unit) inserts a MINIMAL units/places row (content_status='generating')
 // and then triggers the n8n Enricher. The Enricher recomputes the full profile
-// via atlas-get-enriched-place and calls THIS function to persist it onto the
+// via its native S1-S7 research and calls THIS function to persist it onto the
 // EXISTING row — an UPDATE keyed by project_id, not an INSERT.
 //
 // Twin of enricher-save-place-data, but:
@@ -13,7 +13,7 @@
 //     state ('failed', so a failed Enricher run doesn't strand at 'generating')
 //   • never touches id / slug / created_at — identity is owned by the create step
 //
-// The enriched `place` from atlas-get-enriched-place is the authoritative full
+// The enriched `place` from the n8n Enricher is the authoritative full
 // profile; only the keys it carries are written (columns it omits are left
 // untouched), so a wholesale UPDATE cannot wipe data the create step seeded.
 //
@@ -21,7 +21,7 @@
 // with the media_assets get-enriched returned.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Mirrors enricher-save-place-data / atlas-get-enriched-place gating.
+// bearer. Mirrors enricher-save-place-data gating.
 //
 // Local:  supabase functions serve enricher-write-place-data
 // Deploy: supabase functions deploy enricher-write-place-data
@@ -31,7 +31,7 @@ import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
 
-// The places-shaped profile from atlas-get-enriched-place. Required spine: name.
+// The places-shaped profile from the n8n Enricher. Required spine: name.
 type PlacePayload = Record<string, unknown> & {
   google_place_id?: string;
   name?: string;
