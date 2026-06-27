@@ -18,7 +18,7 @@
 // upsert here.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Mirrors atlas-get-enriched-place / enricher-save-place-data / enricher-save-place-media.
+// bearer. Mirrors atlas-get-enriched-place / enricher-save-place-data / enricher-store-place-images.
 //
 // Local:  supabase functions serve scheduler-run-project-creations
 // Deploy: supabase functions deploy scheduler-run-project-creations
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
   };
 
   // ── 2) Persist the minimal row — lands content_status='generating' until the
-  // Enricher flips it to 'ready' via enricher-update-place-data. No businesses
+  // Enricher flips it to 'ready' via enricher-write-place-data. No businesses
   // upsert — the scheduler creates an unowned listing. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,

@@ -8,7 +8,7 @@
 //
 // Flips the unit back to content_status='generating', then fires the n8n Enricher
 // webhook (fire-and-forget). The Enricher recomputes the full profile and
-// persists via enricher-update-place-data + enricher-save-place-media, flipping the unit
+// persists via enricher-write-place-data + enricher-store-place-images, flipping the unit
 // back to 'ready' when done.
 //
 // Body: { project_id: uuid }
@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
   }
 
   // Flip back to 'generating' so the UI shows the enriching state while the n8n
-  // Enricher re-runs; it flips to 'ready' on completion via enricher-update-place-data.
+  // Enricher re-runs; it flips to 'ready' on completion via enricher-write-place-data.
   await admin.from("projects").update({ content_status: "generating" }).eq("id", projectId);
 
   // Fire the n8n Enricher (fire-and-forget; a trigger failure leaves the unit at

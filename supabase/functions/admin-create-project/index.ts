@@ -103,7 +103,7 @@ Deno.serve(async (req) => {
   };
 
   // ── 2) Persist the minimal row — lands content_status='generating' until the
-  // Enricher flips it to 'ready' via enricher-update-place-data. No businesses
+  // Enricher flips it to 'ready' via enricher-write-place-data. No businesses
   // upsert — admin creates an unowned listing. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,

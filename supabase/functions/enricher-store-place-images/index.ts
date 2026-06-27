@@ -1,4 +1,4 @@
-// Supabase Edge Function — enricher-save-place-media (artificial caller / async)
+// Supabase Edge Function — enricher-store-place-images (artificial caller / async)
 //
 // Receives gathered source image URLs + metadata from Atlas enrichment, stores
 // metadata rows immediately, then mirrors assets to Supabase Storage in the
@@ -132,7 +132,7 @@ async function processAssetsInBackground(
       .eq("project_id", projectId)
       .eq("source_url", asset.source_url);
     if (error) {
-      console.error("[enricher-save-place-media] asset_update:", error.message);
+      console.error("[enricher-store-place-images] asset_update:", error.message);
     }
   }
 
@@ -149,7 +149,7 @@ async function processAssetsInBackground(
     .update({ photos: finalPhotos })
     .eq("id", projectId);
   if (placeErr) {
-    console.error("[enricher-save-place-media] place_update:", placeErr.message);
+    console.error("[enricher-store-place-images] place_update:", placeErr.message);
   }
 }
 

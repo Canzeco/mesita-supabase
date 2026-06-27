@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
   };
 
   // ── 2) Persist the minimal row — lands content_status='generating' until the
-  // Enricher flips it to 'ready' via enricher-update-place-data. ──
+  // Enricher flips it to 'ready' via enricher-write-place-data. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,
     "business-create-project",

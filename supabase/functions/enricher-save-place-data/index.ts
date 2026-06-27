@@ -12,14 +12,14 @@
 // against the live catalog. Inserts are sequenced places→units (shared id); a
 // units failure compensates by deleting the just-written place so we never
 // leave an orphan profile. Media is NOT handled here — the caller invokes
-// enricher-save-place-media next with the media_assets get-enriched returned.
+// enricher-store-place-images next with the media_assets get-enriched returned.
 //
 // Ownership (project_members) is intentionally NOT created here — the caller
 // (business-create-project) owns the businesses upsert; ownership only lands when
 // admin-decide-verification approves a claim. This agent is place-only.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Mirrors how atlas-get-enriched-place / enricher-save-place-media are gated.
+// bearer. Mirrors how atlas-get-enriched-place / enricher-store-place-images are gated.
 //
 // Local:  supabase functions serve enricher-save-place-data
 // Deploy: supabase functions deploy enricher-save-place-data
@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
 
   // content_status is caller-controlled: the synchronous create lands 'ready'; the
   // async create path lands 'generating' (the n8n Enricher flips it to 'ready'
-  // later via enricher-update-place-data). Defaults to 'ready' for back-compat.
+  // later via enricher-write-place-data). Defaults to 'ready' for back-compat.
   const ADEA_STATUSES = new Set(["queued", "generating", "ready", "failed"]);
   const adeaRaw = (bodyRes.body.content_status ?? "ready").toString().trim();
   const adeaStatus = ADEA_STATUSES.has(adeaRaw) ? adeaRaw : "ready";
