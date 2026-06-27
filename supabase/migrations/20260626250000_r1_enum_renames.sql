@@ -29,12 +29,18 @@ alter type public.ticket_status rename value 'pending_pay'     to 'pending_payme
 alter type public.member_role rename to member_role_old;
 create type public.member_role as enum ('owner', 'editor', 'viewer');
 
-alter table public.venue_members  alter column role drop default;
+-- Both venue_members.role AND business_invites.role carry a
+-- default 'editor'::member_role. A column default cannot be auto-cast across an
+-- enum TYPE swap, so BOTH defaults must be dropped before the type change and
+-- re-asserted after (business_invites was previously missed → 42804).
+alter table public.venue_members    alter column role drop default;
+alter table public.business_invites  alter column role drop default;
 alter table public.business_invites
   alter column role type public.member_role using role::text::public.member_role;
 alter table public.venue_members
   alter column role type public.member_role using role::text::public.member_role;
-alter table public.venue_members  alter column role set default 'editor'::public.member_role;
+alter table public.business_invites  alter column role set default 'editor'::public.member_role;
+alter table public.venue_members     alter column role set default 'editor'::public.member_role;
 
 drop type public.member_role_old;
 
