@@ -2,7 +2,7 @@
 //
 // Google Places autocomplete for the admin console's Create Single Unit
 // flow. Gates the request to super_admins, then forwards to
-// atlas-suggest-places for the Google + Mesita merge (existence +
+// enricher-suggest-places for the Google + Mesita merge (existence +
 // ownership flags on each prediction).
 //
 // Auth: caller's JWT email must be in public.super_admins.
@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
     predictions?: unknown[];
     error?: string;
     code?: string;
-  }>(env, "admin-suggest-places", "atlas-suggest-places", {
+  }>(env, "admin-suggest-places", "enricher-suggest-places", {
     input: body.input,
     sessionToken: body.sessionToken,
     // Admin surface — no self/other split; claimed rows show as _other.

@@ -5,7 +5,7 @@
 //   approve  → verification.status='approved' + a project_members row
 //              (role='owner', business_id=requester) is inserted. The
 //              place itself is already active+web from
-//              business-create-unit; this EF only grants membership.
+//              business-create-project; this EF only grants membership.
 //   reject   → verification.status='rejected' with reject_reason. No
 //              membership change. The business can submit a fresh
 //              request from /add.

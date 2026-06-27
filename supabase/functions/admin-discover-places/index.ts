@@ -1,7 +1,7 @@
 // Supabase Edge Function — admin-discover-places (natural caller)
 //
 // Thin facade for the admin bulk-search UI. Gates the request to
-// super_admins, then forwards the query batch to the atlas-discover-places
+// super_admins, then forwards the query batch to the enricher-discover-places
 // artificial caller for the actual Google fan-out + Mesita enrichment.
 //
 // Auth: caller's JWT email must be in public.super_admins. verify_jwt = true
@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
   const result = await invokeArtificialCaller(
     env,
     "admin-discover-places",
-    "atlas-discover-places",
+    "enricher-discover-places",
     body,
   );
   if (!result.ok) {

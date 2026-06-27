@@ -1,9 +1,9 @@
-// Shared Atlas place field limits — mirrored in business-update-unit and
+// Shared Atlas place field limits — mirrored in business-update-project and
 // the business Place editor. Surfaced read-only in admin-get-atlas-fields.
 
 export const ATLAS_FIELD_LIMITS = {
   placeName: { max: 80, note: "Business Place editor" },
-  description: { max: 2000, note: "About / description (business-update-unit)" },
+  description: { max: 2000, note: "About / description (business-update-project)" },
   tagsPerPlace: { max: 20, note: "Up to 20 tags per place (places.tags)" },
   tagCatalogSize: { max: 100, note: "Controlled tags in place_tags" },
   tagSlugLength: { max: 40, note: "Per-tag slug length cap" },

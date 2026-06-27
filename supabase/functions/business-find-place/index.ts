@@ -4,7 +4,7 @@
 // /add page can show the right UI without redirecting:
 //
 //   not_in_mesita            — no place row exists for this Place ID.
-//                              Caller can ask business-create-unit to
+//                              Caller can ask business-create-project to
 //                              generate one.
 //   web_listed_unclaimed     — place exists, listing_type='web', no
 //                              owner. Caller can submit a verification.

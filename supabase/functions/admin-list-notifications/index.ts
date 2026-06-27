@@ -22,7 +22,7 @@
 // client renders title/icon from `type`.
 //
 // "Who called it" for a creation: places don't persist the caller at insert
-// time (business-create-unit deliberately leaves the place unowned until an
+// time (business-create-project deliberately leaves the place unowned until an
 // ownership claim is approved), so the closest honest signal is the place's
 // current owner — resolved here via project_members(role=owner) → businesses.
 // Unclaimed places report actor = null and meta.claimed = false. The exact

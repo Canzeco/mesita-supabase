@@ -63,8 +63,8 @@ export function requireInternalCaller(
 // headers without supabase-js layering its own auth on top.
 export async function invokeArtificialCaller<T = unknown>(
   env: EFEnv,
-  callerName: string, // who the natural caller is, e.g. "consumer-recommend-deck"
-  artificialName: string, // who we're calling, e.g. "recommender-rank-deck"
+  callerName: string, // who the natural caller is, e.g. "consumer-recommend-swipe"
+  artificialName: string, // who we're calling, e.g. "recommender-rank-swipe"
   body: unknown,
 ): Promise<
   | { ok: true; data: T }

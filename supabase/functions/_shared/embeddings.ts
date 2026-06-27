@@ -6,7 +6,7 @@
 // loop, intent composition, diversity trim — lives in the `recommender-*`
 // artificial-caller EFs that import this module.
 //
-// Used by: consumer-recommend-deck, consumer-recommend-catalog, and any future
+// Used by: consumer-recommend-swipe, consumer-recommend-map, and any future
 // recommender-* artificial caller.
 
 import type { createClient } from "jsr:@supabase/supabase-js@2";

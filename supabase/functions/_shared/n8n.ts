@@ -50,7 +50,7 @@ export async function triggerN8nWorkflow(
 
 // Convenience wrapper for the place enricher workflow (enricher-enrich-place).
 // Sends { project_id, placeId } — the workflow enriches placeId in FULL and
-// persists onto project_id via atlas-update-unit-data + atlas-save-place-media.
+// persists onto project_id via enricher-update-project-data + enricher-save-place-media.
 export function triggerEnrichPlace(
   projectId: string,
   placeId: string,
