@@ -1,4 +1,4 @@
-// Supabase Edge Function — enricher-save-project-data (artificial caller / agent)
+// Supabase Edge Function — enricher-save-place-data (artificial caller / agent)
 //
 // The PERSIST half of the create pipeline. Takes the `place` JSON produced by
 // atlas-get-enriched-place (read-only) and writes it as the real rows:
@@ -21,8 +21,8 @@
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
 // bearer. Mirrors how atlas-get-enriched-place / enricher-save-place-media are gated.
 //
-// Local:  supabase functions serve enricher-save-project-data
-// Deploy: supabase functions deploy enricher-save-project-data
+// Local:  supabase functions serve enricher-save-place-data
+// Deploy: supabase functions deploy enricher-save-place-data
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
 
   // content_status is caller-controlled: the synchronous create lands 'ready'; the
   // async create path lands 'generating' (the n8n Enricher flips it to 'ready'
-  // later via enricher-update-project-data). Defaults to 'ready' for back-compat.
+  // later via enricher-update-place-data). Defaults to 'ready' for back-compat.
   const ADEA_STATUSES = new Set(["queued", "generating", "ready", "failed"]);
   const adeaRaw = (bodyRes.body.content_status ?? "ready").toString().trim();
   const adeaStatus = ADEA_STATUSES.has(adeaRaw) ? adeaRaw : "ready";

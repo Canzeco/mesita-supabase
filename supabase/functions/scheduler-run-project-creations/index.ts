@@ -3,7 +3,7 @@
 // The SERVICE-GATED internal create path the SQL scheduler poller invokes. It is
 // the headless twin of admin-create-project: same ASYNC pipeline (early dedupe ->
 // fetchGoogleBasics (Google identity spine, category='undefined') ->
-// enricher-save-project-data (places+units, content_status='generating') ->
+// enricher-save-place-data (places+units, content_status='generating') ->
 // triggerEnrichPlace (n8n webhook, fire-and-forget)), but gated by
 // requireInternalCaller instead of getAuthedUser+requireSuperAdmin, because the
 // poller is service-role with no end-user JWT and CANNOT call the JWT-gated
@@ -14,11 +14,11 @@
 // already marked the row 'running' + bumped attempts before firing this call.
 //
 // Like admin-create-project, the scheduler creates an UNOWNED listing
-// (listing_type='web' is set by enricher-save-project-data); there is NO businesses
+// (listing_type='web' is set by enricher-save-place-data); there is NO businesses
 // upsert here.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Mirrors atlas-get-enriched-place / enricher-save-project-data / enricher-save-place-media.
+// bearer. Mirrors atlas-get-enriched-place / enricher-save-place-data / enricher-save-place-media.
 //
 // Local:  supabase functions serve scheduler-run-project-creations
 // Deploy: supabase functions deploy scheduler-run-project-creations
@@ -32,7 +32,7 @@ import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
 
 type Body = { placeId?: string; scheduled_id?: string };
 
-// enricher-save-project-data response.
+// enricher-save-place-data response.
 type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
 
 const CHANNEL_KEYS = [
@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
 
   // ── Early dedupe (idempotency on google_place_id) ─────────────────────────
   // placeId IS the place's google_place_id. Reject already-onboarded places
-  // BEFORE spending any enrichment budget. enricher-save-project-data dedupes again as
+  // BEFORE spending any enrichment budget. enricher-save-place-data dedupes again as
   // a race guard. A duplicate is terminal 'failed' for the queue row carrying the
   // existing-place code so the operator can see why.
   const { data: existing } = await admin
@@ -123,12 +123,12 @@ Deno.serve(async (req) => {
   };
 
   // ── 2) Persist the minimal row — lands content_status='generating' until the
-  // Enricher flips it to 'ready' via enricher-update-project-data. No businesses
+  // Enricher flips it to 'ready' via enricher-update-place-data. No businesses
   // upsert — the scheduler creates an unowned listing. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,
     "scheduler-run-project-creations",
-    "enricher-save-project-data",
+    "enricher-save-place-data",
     { place, content_status: "generating" },
   );
   if (!saveRes.ok) {

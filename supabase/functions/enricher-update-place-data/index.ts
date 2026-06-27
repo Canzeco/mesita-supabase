@@ -1,4 +1,4 @@
-// Supabase Edge Function — enricher-update-project-data (artificial caller / agent)
+// Supabase Edge Function — enricher-update-place-data (artificial caller / agent)
 //
 // The UPDATE half of the ASYNC enrich pipeline. The create path
 // (xxx-create-unit) inserts a MINIMAL units/places row (content_status='generating')
@@ -6,7 +6,7 @@
 // via atlas-get-enriched-place and calls THIS function to persist it onto the
 // EXISTING row — an UPDATE keyed by project_id, not an INSERT.
 //
-// Twin of enricher-save-project-data, but:
+// Twin of enricher-save-place-data, but:
 //   • UPDATEs `places` by id (the unit/place shared PK) instead of inserting
 //   • requires the row to already exist (404 unit_not_found if not)
 //   • flips units.content_status → 'ready' (default) or a caller-supplied terminal
@@ -21,10 +21,10 @@
 // with the media_assets get-enriched returned.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Mirrors enricher-save-project-data / atlas-get-enriched-place gating.
+// bearer. Mirrors enricher-save-place-data / atlas-get-enriched-place gating.
 //
-// Local:  supabase functions serve enricher-update-project-data
-// Deploy: supabase functions deploy enricher-update-project-data
+// Local:  supabase functions serve enricher-update-place-data
+// Deploy: supabase functions deploy enricher-update-place-data
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";

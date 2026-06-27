@@ -17,7 +17,7 @@
 //                  these slugs only.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer + X-Internal-Caller header. Mirrors enricher-update-project-data /
+// bearer + X-Internal-Caller header. Mirrors enricher-update-place-data /
 // enricher-save-place-media gating. GET or POST (no body needed).
 //
 // Local:  supabase functions serve enricher-get-config

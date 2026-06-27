@@ -169,13 +169,13 @@ verify_jwt = false
 # as places + units rows (shared PK, status='active'), with a caller-supplied
 # content_status (async create → 'generating'), idempotent on google_place_id.
 # Internal-only; the create/schedule callers invoke it with the service-role bearer.
-[functions.enricher-save-project-data]
+[functions.enricher-save-place-data]
 verify_jwt = false
 
 # UPDATE half of the ASYNC enrich pipeline — writes the enriched profile onto the
 # existing places/units row (UPDATE by id; flips content_status → 'ready'/'failed').
 # Internal-only; invoked by the n8n Enricher with the service-role bearer.
-[functions.enricher-update-project-data]
+[functions.enricher-update-place-data]
 verify_jwt = false
 
 # Read-only init endpoint for the n8n Enricher — returns { config, categories[],
