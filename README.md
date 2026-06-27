@@ -108,12 +108,12 @@ AI voice for **phone reservations** on a **dedicated** Twilio number — not the
 | Prefix | Auth | Purpose |
 |---|---|---|
 | `admin-*` | email + MFA | Super-admin console |
-| `business-*` | email | Venues, tickets, team, verification |
+| `business-*` | email | Places, tickets, team, verification |
 | `consumer-*` | phone OTP | Discovery, tickets, **reservations**, profile |
 | `staff-*` | phone OTP | Waiter post-invite |
 | `twilio-whatsapp-*` | Twilio signature | Inbound WA + delivery status |
 | `stripe-handle-webhook` | Stripe signature | Subscriptions |
-| `atlas-*` / `recommender-*` | internal | Venue intelligence (service role) |
+| `atlas-*` / `recommender-*` | internal | Place intelligence (service role) |
 
 Reward ticket sequences (scan, billing, story, payment, review, cashback) are documented in [docs/TICKET_SEQUENCES.md](docs/TICKET_SEQUENCES.md). They orchestrate in **business-** / **consumer-** / **staff-** functions; Twilio sends the messages.
 
@@ -141,8 +141,8 @@ supabase functions deploy <name> [<name> ...]
 
 ## Schema highlights
 
-- **`venues`** — catalog (`lead | active | paused | archived`)
-- **`venue_members` / `venue_roles`** — business and staff access
+- **`places`** — catalog (`lead | active | paused | archived`)
+- **`project_members` / `project_roles`** — business and staff access
 - **`tickets`** — reward tickets (discount/cashback × story/no-story)
 - **`reservations`** — consumer bookings (MVP)
 - **`staff_invites` / `business_invites`** — token invites
@@ -169,7 +169,7 @@ RLS: clients read only what they may see; writes go through Edge Functions.
 | Repo | Role |
 |---|---|
 | `mesita-web-consumer` | Diner app |
-| `mesita-web-business` | Venue dashboard |
+| `mesita-web-business` | Place dashboard |
 | `mesita-web-admin` | Internal admin |
 | **mesita-supabase** | **Backend + integrations** |
 

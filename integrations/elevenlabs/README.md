@@ -7,7 +7,7 @@ ElevenLabs **Agents** + Twilio native import for AI phone reservations. Not used
 ```
 Caller → dedicated Twilio number → ElevenLabs agent
                                         ↓ webhook
-                              Supabase EF (venue context, availability)
+                              Supabase EF (place context, availability)
 ```
 
 **Do not import WhatsApp numbers (`4968`, `8794`) into ElevenLabs** — they are owned by Supabase webhooks.

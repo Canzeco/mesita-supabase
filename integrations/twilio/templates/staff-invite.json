@@ -3,7 +3,7 @@
   "language": "es",
   "category": "UTILITY",
   "variables": {
-    "1": "Venue name"
+    "1": "Place name"
   },
   "types": {
     "twilio/text": {

@@ -18,7 +18,7 @@ Source of truth for consumer, staff (WhatsApp), and business-console flows.
 
 ### Story sequence
 
-1. Consumer posts IG story tagging Mesita and the venue.
+1. Consumer posts IG story tagging Mesita and the place.
 2. ~~Consumer submits the story screenshot in the Mesita app~~ (removed).
 3. Bot automatically identifies tag and updates ticket state.
 4. Bot evaluates the story and sends a confirmation request to the waiter.

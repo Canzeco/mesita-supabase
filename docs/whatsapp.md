@@ -70,8 +70,8 @@ WhatsApp message fees go through **Twilio** (Twilio fee + Meta pass-through on t
 
 ## Staff WhatsApp — one active unit per phone
 
-- Only **team staff** (`venue_roles.role = staff`) can use Mesita Ops for Type A tickets.
-- **One WhatsApp number → one active venue at a time.** Escribe **cambiar unidad** para cambiar.
+- Only **team staff** (`project_roles.role = staff`) can use Mesita Ops for Type A tickets.
+- **One WhatsApp number → one active place at a time.** Escribe **cambiar unidad** para cambiar.
 
 Session state: `staff_whatsapp_sessions`.
 
@@ -82,7 +82,7 @@ Transcript (last 20 messages per phone) for LLM context: `staff_whatsapp_message
 1. Staff sends guest **code** → verified in WhatsApp.
 2. Staff sends **subtotal + tip** (one or several messages).
 3. Edge function creates ticket + row in `consumer_pay_notifications` (`kind: bill`).
-4. **Consumer** sees it on **Mesita app → Pay → QR and Tickets** (Realtime on `consumer_pay_notifications`; ticket card shows venue photo, total reward, passive Pay step / Review).
+4. **Consumer** sees it on **Mesita app → Pay → QR and Tickets** (Realtime on `consumer_pay_notifications`; ticket card shows place photo, total reward, passive Pay step / Review).
 5. Guest pays at the table; staff replies **listo** (or taps **Paid received** in the business console) when cash/terminal is collected.
 
 Staff coach replies are **static** (no LLM rewrite) so WhatsApp never invents amounts or codes. Optional WhatsApp text to the guest phone is secondary; the app Pay notification is the source of truth.
