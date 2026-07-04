@@ -1,4 +1,10 @@
-// Supabase Edge Function — recommender-rank-map (artificial caller)
+// In-process ranking pipeline for the consumer catalog (map) view.
+//
+// Absorbed from the former `recommender-rank-map` artificial-caller EF
+// (MESITA-54): the HTTP hop was a synchronous 1:1 forward with a single
+// natural caller, so per the actor-origin grammar the pipeline now runs
+// in-process inside `consumer-web-recommend-map`. Any future surface that
+// needs the same ranking imports this module — no endpoint required.
 //
 // Builds a dynamically-curated catalog: up to N rows, each with its own
 // LLM-proposed label/description/emoji + a cosine-ranked slice of the
@@ -17,35 +23,23 @@
 //      intent vec and slice off the top N.
 //   6. Cross-category dedupe so a place appears in at most 2 buckets
 //      (lets a really good place repeat once but not seven times).
-//
-// Auth: artificial caller — only invoked by natural-caller EFs (currently
-// consumer-web-recommend-map) over the internal-call channel. verify_jwt
-// is disabled at the gateway; the EF itself enforces the service-role
-// bearer via requireInternalCaller.
-//
-// Deploy: supabase functions deploy recommender-rank-map
 
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
-import { adminClient, readEFEnv } from "../_shared/auth.ts";
-import { requireInternalCaller } from "../_shared/internal.ts";
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import {
   EMBEDDING_DIMS,
   embedAndPersistPlaces,
   embedBatch,
   rankByCosine,
   shouldEmbed,
-} from "../_shared/embeddings.ts";
+} from "./embeddings.ts";
 import {
-  clampPositive,
   type ConsumerProfile,
   fetchCandidatePool,
   stripInternal,
   type PlaceRow,
-} from "../_shared/recommender-pool.ts";
+} from "./recommender-pool.ts";
 
 const CANDIDATE_POOL = 300;
-const DEFAULT_RADIUS_KM = 25;
 const DEFAULT_MAX_CATEGORIES = 10;
 const DEFAULT_PER_CATEGORY = 10;
 const MAX_PER_CATEGORY_CAP = 20;
@@ -54,13 +48,13 @@ const MAX_PLACE_REUSE = 2;
 
 const CATEGORY_MODEL = "gpt-4o-mini";
 
-type Body = {
-  lat?: number | null;
-  lng?: number | null;
-  radiusKm?: number;
-  maxCategories?: number;
-  perCategory?: number;
-  profile?: ConsumerProfile | null;
+export type RankMapInput = {
+  lat: number | null;
+  lng: number | null;
+  radiusKm: number;
+  maxCategories: number;
+  perCategory: number;
+  profile: ConsumerProfile | null;
 };
 
 type ProposedCategory = {
@@ -79,28 +73,30 @@ type BuiltCategory = {
   places: Omit<PlaceRow, "embedding" | "embedding_source_hash">[];
 };
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return corsPreflight();
-  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
+export type RankMapResult =
+  | {
+    ok: true;
+    categories: BuiltCategory[];
+    summary: {
+      candidates: number;
+      embedded?: number;
+      categoryCount?: number;
+      caller?: string;
+    };
+  }
+  | { ok: false; error: string };
 
-  const envRes = readEFEnv();
-  if (!envRes.ok) return envRes.response;
-  const env = envRes.env;
-
-  const callerRes = requireInternalCaller(req, env);
-  if (!callerRes.ok) return callerRes.response;
-
-  const OPENAI_KEY = Deno.env.get("OPENAI_KEY");
-
-  const body = await readJsonOr<Body>(req, {});
-  const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
-  const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
-  const radiusKm = clampPositive(body.radiusKm, DEFAULT_RADIUS_KM, 200);
-  const maxCategories = clampInt(body.maxCategories, DEFAULT_MAX_CATEGORIES, 1, 12);
-  const perCategory = clampInt(body.perCategory, DEFAULT_PER_CATEGORY, 1, MAX_PER_CATEGORY_CAP);
-  const profile = body.profile ?? null;
-
-  const admin = adminClient(env);
+// Runs the full catalog-ranking pipeline in-process. `callerName` labels the
+// embedding backfill + summary for observability (pass the natural EF name).
+export async function rankMapCatalog(
+  admin: SupabaseClient,
+  openaiKey: string | undefined,
+  callerName: string,
+  input: RankMapInput,
+): Promise<RankMapResult> {
+  const { lat, lng, radiusKm, profile } = input;
+  const maxCategories = clampInt(input.maxCategories, DEFAULT_MAX_CATEGORIES, 1, 12);
+  const perCategory = clampInt(input.perCategory, DEFAULT_PER_CATEGORY, 1, MAX_PER_CATEGORY_CAP);
 
   // ── 1. Candidate pool ──────────────────────────────────────────────
   const poolRes = await fetchCandidatePool<PlaceRow>(admin, {
@@ -110,23 +106,18 @@ Deno.serve(async (req) => {
     poolSize: CANDIDATE_POOL,
   });
   if (!poolRes.ok) {
-    return json({ ok: false, error: `candidate_pool: ${poolRes.error}` }, 500);
+    return { ok: false, error: `candidate_pool: ${poolRes.error}` };
   }
   const candidates = poolRes.rows;
   if (candidates.length === 0) {
-    return json({ ok: true, categories: [], summary: { candidates: 0 } });
+    return { ok: true, categories: [], summary: { candidates: 0 } };
   }
 
   // ── 2. Lazy embedding backfill ─────────────────────────────────────
   const needsEmbed = candidates.filter(shouldEmbed).slice(0, LAZY_EMBED_BATCH);
   let embeddedCount = 0;
-  if (needsEmbed.length > 0 && OPENAI_KEY) {
-    const patched = await embedAndPersistPlaces(
-      needsEmbed,
-      admin,
-      OPENAI_KEY,
-      "recommender-rank-map",
-    );
+  if (needsEmbed.length > 0 && openaiKey) {
+    const patched = await embedAndPersistPlaces(needsEmbed, admin, openaiKey, callerName);
     embeddedCount = patched.size;
     for (const c of candidates) {
       const p = patched.get(c.id);
@@ -139,7 +130,7 @@ Deno.serve(async (req) => {
 
   // ── 3. Propose dynamic categories with an LLM ──────────────────────
   let proposed: ProposedCategory[];
-  if (OPENAI_KEY) {
+  if (openaiKey) {
     try {
       proposed = await proposeCategories({
         candidates,
@@ -147,10 +138,10 @@ Deno.serve(async (req) => {
         lat,
         lng,
         maxCategories,
-        apiKey: OPENAI_KEY,
+        apiKey: openaiKey,
       });
     } catch (err) {
-      console.error("[recommender-rank-map] propose failed:", err);
+      console.error(`[${callerName}] propose failed:`, err);
       proposed = fallbackCategories(candidates, maxCategories);
     }
   } else {
@@ -158,16 +149,16 @@ Deno.serve(async (req) => {
   }
 
   if (proposed.length === 0) {
-    return json({ ok: true, categories: [], summary: { candidates: candidates.length } });
+    return { ok: true, categories: [], summary: { candidates: candidates.length } };
   }
 
   // ── 4. Batch-embed all intent queries in ONE OpenAI call ───────────
   let intentVecs: number[][];
-  if (OPENAI_KEY) {
+  if (openaiKey) {
     try {
-      intentVecs = await embedBatch(proposed.map((c) => c.intent_query), OPENAI_KEY);
+      intentVecs = await embedBatch(proposed.map((c) => c.intent_query), openaiKey);
     } catch (err) {
-      console.error("[recommender-rank-map] intent embed failed:", err);
+      console.error(`[${callerName}] intent embed failed:`, err);
       intentVecs = [];
     }
   } else {
@@ -187,7 +178,7 @@ Deno.serve(async (req) => {
       // No vec → simple text-match fallback so the row still shows up.
       ranked = candidates.filter((v) =>
         (v.category ?? "").toLowerCase().includes(p.label.toLowerCase().split(" ")[0]) ||
-        (v.vibe ?? "").toLowerCase().includes(p.label.toLowerCase().split(" ")[0]),
+        (v.vibe ?? "").toLowerCase().includes(p.label.toLowerCase().split(" ")[0])
       );
     }
 
@@ -209,17 +200,17 @@ Deno.serve(async (req) => {
     });
   }
 
-  return json({
+  return {
     ok: true,
     categories,
     summary: {
       candidates: candidates.length,
       embedded: embeddedCount,
       categoryCount: categories.length,
-      caller: callerRes.callerName,
+      caller: callerName,
     },
-  });
-});
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Category proposal (LLM)

@@ -1,4 +1,4 @@
-// Supabase Edge Function — scheduler-run-project-creations (artificial caller / agent)
+// Supabase Edge Function — supabase-cron-run-project-creations (artificial caller / agent)
 //
 // The SERVICE-GATED internal create path the SQL scheduler poller invokes. It is
 // the headless twin of admin-web-create-project: same ASYNC pipeline (early dedupe ->
@@ -20,8 +20,8 @@
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
 // bearer. Mirrors enricher-save-place-data / enricher-store-place-images.
 //
-// Local:  supabase functions serve scheduler-run-project-creations
-// Deploy: supabase functions deploy scheduler-run-project-creations
+// Local:  supabase functions serve supabase-cron-run-project-creations
+// Deploy: supabase functions deploy supabase-cron-run-project-creations
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -30,7 +30,11 @@ import { invokeArtificialCaller, requireInternalCaller } from "../_shared/intern
 import { triggerEnrichPlace } from "../_shared/n8n.ts";
 import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
 
-type Body = { placeId?: string; scheduled_id?: string };
+// `googlePlaceId` is the Google Place ID of the place to create (MESITA-51
+// addendum 9: `placeId` is reserved for place-row UUIDs platform-wide, so
+// the Google semantic moves to a distinct key on this new slug). The legacy
+// `placeId` key is still accepted as a fallback for manual invocations.
+type Body = { googlePlaceId?: string; placeId?: string; scheduled_id?: string };
 
 // enricher-save-place-data response.
 type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
@@ -56,9 +60,9 @@ Deno.serve(async (req) => {
   // Parse input.
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
-  const placeId = (bodyRes.body.placeId ?? "").toString().trim();
+  const placeId = (bodyRes.body.googlePlaceId ?? bodyRes.body.placeId ?? "").toString().trim();
   const scheduledId = (bodyRes.body.scheduled_id ?? "").toString().trim() || null;
-  if (!placeId) return json({ ok: false, error: "placeId is required" }, 400);
+  if (!placeId) return json({ ok: false, error: "googlePlaceId is required" }, 400);
 
   const admin = adminClient(env);
 
@@ -83,7 +87,7 @@ Deno.serve(async (req) => {
   };
 
   // ── Early dedupe (idempotency on google_place_id) ─────────────────────────
-  // placeId IS the place's google_place_id. Reject already-onboarded places
+  // The input IS the place's google_place_id. Reject already-onboarded places
   // BEFORE spending any enrichment budget. enricher-save-place-data dedupes again as
   // a race guard. A duplicate is terminal 'failed' for the queue row carrying the
   // existing-place code so the operator can see why.
@@ -127,7 +131,7 @@ Deno.serve(async (req) => {
   // upsert — the scheduler creates an unowned listing. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,
-    "scheduler-run-project-creations",
+    "supabase-cron-run-project-creations",
     "enricher-save-place-data",
     { place, content_status: "generating" },
   );

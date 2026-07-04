@@ -1,18 +1,22 @@
 // Supabase Edge Function — consumer-web-recommend-map (natural caller)
 //
-// Thin facade for the consumer catalog view. Resolves the caller's profile
-// (anonymous OK) and forwards to the recommender-rank-map artificial
-// caller for the actual ranking pipeline. Everything ranking-related lives
-// in the artificial caller so any future surface — business, admin,
-// scheduled refresh — can reuse the same pipeline.
+// Consumer catalog view. Resolves the caller's profile (anonymous OK) and
+// runs the catalog-ranking pipeline in-process via
+// _shared/recommender-rank-map.ts. The pipeline used to live behind the
+// recommender-rank-map artificial-caller EF; the HTTP hop was a synchronous
+// 1:1 forward, so it was absorbed here (MESITA-54). Any future surface —
+// business, admin, scheduled refresh — imports the same _shared module.
 //
 // Local:  supabase functions serve consumer-web-recommend-map
 // Deploy: supabase functions deploy consumer-web-recommend-map
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
-import { getOptionalAuthedUser, readEFEnv } from "../_shared/auth.ts";
-import { invokeArtificialCaller } from "../_shared/internal.ts";
+import { adminClient, getOptionalAuthedUser, readEFEnv } from "../_shared/auth.ts";
+import { clampPositive, type ConsumerProfile } from "../_shared/recommender-pool.ts";
+import { rankMapCatalog } from "../_shared/recommender-rank-map.ts";
+
+const DEFAULT_RADIUS_KM = 25;
 
 type Body = {
   lat?: number;
@@ -20,14 +24,6 @@ type Body = {
   radiusKm?: number;
   maxCategories?: number;
   perCategory?: number;
-};
-
-type ConsumerProfile = {
-  full_name: string | null;
-  country: string | null;
-  birthday: string | null;
-  sex: string | null;
-  tier?: string | null;
 };
 
 Deno.serve(async (req) => {
@@ -55,22 +51,23 @@ Deno.serve(async (req) => {
   }
 
   const body = await readJsonOr<Body>(req, {});
+  const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
+  const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
+  const radiusKm = clampPositive(body.radiusKm, DEFAULT_RADIUS_KM, 200);
 
-  const ranked = await invokeArtificialCaller<{
-    ok: boolean;
-    categories?: unknown[];
-    summary?: unknown;
-    error?: string;
-  }>(env, "consumer-web-recommend-map", "recommender-rank-map", {
-    lat: body.lat,
-    lng: body.lng,
-    radiusKm: body.radiusKm,
-    maxCategories: body.maxCategories,
-    perCategory: body.perCategory,
+  const admin = adminClient(env);
+  const OPENAI_KEY = Deno.env.get("OPENAI_KEY");
+
+  const ranked = await rankMapCatalog(admin, OPENAI_KEY, "consumer-web-recommend-map", {
+    lat,
+    lng,
+    radiusKm,
+    maxCategories: Number(body.maxCategories),
+    perCategory: Number(body.perCategory),
     profile,
   });
   if (!ranked.ok) {
     return json({ ok: false, error: ranked.error }, 502);
   }
-  return json(ranked.data);
+  return json(ranked);
 });

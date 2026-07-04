@@ -1,9 +1,10 @@
 // Candidate-pool query shared by every recommender pipeline.
 //
-// Recommender EFs (consumer-web-recommend-swipe, consumer-web-recommend-map, and
-// the new recommender-* artificial callers) all start the same way: pull a
-// bounded set of active places — by bounding-box if the caller has a
-// location, otherwise newest-first — then hand the rows to the ranker.
+// Recommender pipelines (_shared/recommender-rank-swipe.ts and
+// _shared/recommender-rank-map.ts, run in-process by the
+// consumer-web-recommend-* EFs) all start the same way: pull a bounded set
+// of active places — by bounding-box if the caller has a location,
+// otherwise newest-first — then hand the rows to the ranker.
 // Keeping the SELECT in one place means new columns flow into every
 // recommender without per-EF edits.
 
@@ -18,7 +19,7 @@ const RECOMMENDER_PLACE_COLUMNS =
   PLACE_PUBLIC_COLUMNS + ", embedding, embedding_source_hash";
 
 // Shape of a candidate place row as projected by RECOMMENDER_PLACE_COLUMNS.
-// Both rankers (recommender-rank-swipe, recommender-rank-map) cast the
+// Both rankers (recommender-rank-swipe.ts, recommender-rank-map.ts) cast the
 // candidate pool to this type. The trailing `embedding` /
 // `embedding_source_hash` are ranker-internal and get stripped by
 // stripInternal before the row crosses back over the wire to the client.
