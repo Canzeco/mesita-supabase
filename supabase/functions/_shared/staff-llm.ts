@@ -8,6 +8,7 @@ import {
   normalizeLlmBillCents,
   parseBillParts,
 } from "./staff-bill-draft.ts";
+import { toCents } from "./money.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const MODEL = "gpt-4o-mini";
@@ -309,11 +310,4 @@ export function isCasualStaffMessage(body: string): boolean {
   if (!t) return true;
   return /^(hi|hello|hey|hola|buenas|buenos|qué tal|que tal|good morning|good afternoon|ok|vale|gracias|thanks)\b/i
     .test(t);
-}
-
-function toCents(v: unknown): number | null {
-  if (v == null) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.trunc(n);
 }

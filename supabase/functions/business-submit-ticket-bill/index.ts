@@ -19,6 +19,7 @@ import { computeTicketBill } from "../_shared/business-ticket-billing.ts";
 import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
 import { isConsumerFirstVisit, selectprojectRate } from "../_shared/membership.ts";
 import { placeInstagramHandleForPayload } from "../_shared/ticket-informal.ts";
+import { toCents } from "../_shared/money.ts";
 
 type Body = {
   ticketId?: string;
@@ -182,11 +183,3 @@ Deno.serve(async (req) => {
   // The review is queued only when staff confirm payment (business-mark-ticket-paid).
   return json({ ok: true, ticket: update.data });
 });
-
-function toCents(v: unknown): number | null {
-  if (v == null) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  if (n < 0) return null;
-  return Math.trunc(n);
-}
