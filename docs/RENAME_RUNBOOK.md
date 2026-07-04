@@ -31,6 +31,6 @@ Supabase has no native bucket rename — do it as: create `place-images` (public
 
 ## Cross-repo sync (same window)
 - `mesita-supabase`: all migrations + EF renames.
-- web `mesita-web-admin`/`-business`/`-consumer` + Expo mobile: EF slug literals + bucket URLs (B-1, B-2). Mobile still on `consumer-get-venue`/`consumer-list-venues` — migrate or keep aliases.
+- web `mesita-web-admin`/`-business`/`-consumer` + Expo mobile: EF slug literals + bucket URLs (B-1, B-2). ~~Mobile still on `consumer-get-venue`/`consumer-list-venues`~~ — superseded 2026-07-04: the mobile repo no longer exists and both venue-slug EFs are on the AUDIT-2026-07-03.md delete runbook.
 - `mesita-n8n`: Enricher → `enricher-*` slugs (B-6).
 - Notion (Enricher DB, Components DB, Categories DB): reflect enricher/scheduler + project/place terms.

@@ -1,4 +1,5 @@
-// Redeem staff_invites — shared by staff-accept-invite (web) and Ops WhatsApp.
+// Redeem staff_invites — consumed by the Ops WhatsApp flow
+// (twilio-whatsapp-inbound via _shared/staff-invite-whatsapp.ts).
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { phoneDigits, phonesMatch } from "./phone.ts";

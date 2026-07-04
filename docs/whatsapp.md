@@ -41,7 +41,7 @@ Local scripts: `.env.twilio.local` (see `.env.twilio.local.example`).
 | Asset | Path |
 |---|---|
 | Content template (`twilio/text`) | `integrations/twilio/templates/staff-invite.json` |
-| Session + template body | `supabase/functions/_shared/staff-invite-message.ts` |
+| Invite message copy | `supabase/functions/_shared/staff-invite-message.ts` |
 
 **Setup:**
 

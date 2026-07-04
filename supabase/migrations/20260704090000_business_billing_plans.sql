@@ -109,6 +109,8 @@ begin
     public.project_subscriptions,
     public.stripe_events,
     public.reservations,
+    public.coupons,
+    public.saved_places,
     public.tickets,
     public.project_verifications,
     public.account_invites,

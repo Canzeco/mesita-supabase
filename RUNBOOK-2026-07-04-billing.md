@@ -2,10 +2,12 @@
 
 Business place plans (Promote `pro` $100 MXN/mo, Ultra `ultra` $5,000 MXN/mo)
 become real monthly Stripe subscriptions, and consumer Premium drops to
-$100 MXN/mo. The repo side is merged; the cloud steps below are blocked by
-the auto-mode guard and need a human run — same situation as
-`AUDIT-2026-07-03.md` (whose two migrations are still pending and apply
-first by version order).
+$100 MXN/mo. The repo side is on this branch; the cloud steps below are
+blocked by the auto-mode guard and need a human run.
+
+(The 2026-07-03 audit has since landed on main — cron fix applied, dead cloud
+EFs deleted, and the saved_places/coupons drop was withdrawn, so those tables
+stay. This migration's `admin_reset_database` keeps them in the truncate list.)
 
 All commands from `mesita-supabase/`:
 
@@ -15,11 +17,9 @@ All commands from `mesita-supabase/`:
 supabase db push --include-all
 ```
 
-Applies, in order: `20260703120000_fix_scheduler_cron_name`,
-`20260703121000_drop_saved_places_coupons` (both from the audit), then
-`20260704090000_business_billing_plans` (business_plans +
-project_subscriptions tables, premium reseed at $100, admin reset function
-updated).
+Applies `20260704090000_business_billing_plans` (business_plans +
+project_subscriptions tables, premium reseed at $100, admin_reset_database
+updated to add project_subscriptions while keeping coupons/saved_places).
 
 ## 2. Deploy the billing Edge Functions
 

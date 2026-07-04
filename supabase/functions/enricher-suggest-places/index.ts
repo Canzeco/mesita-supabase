@@ -5,7 +5,10 @@
 // fallback in parallel, merges the two, and returns predictions tagged
 // with per-row status (`not_in_mesita`, `web_listed`,
 // `verified_partner_other`, `verified_partner_self`) so the UI can render
-// the right badge.
+// the right badge. On-Mesita rows (any status other than `not_in_mesita`)
+// additionally carry `mesitaId` + `mesitaSlug` (projects_view id + slug)
+// so clients can navigate straight to the place row instead of
+// re-matching predictions by name; Google-only predictions omit both.
 //
 // The Google key never leaves Supabase — natural-caller EFs (currently
 // business-suggest-places, and any future consumer- or admin- surface)
@@ -17,7 +20,7 @@
 // Deploy: supabase functions deploy enricher-suggest-places
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
@@ -50,6 +53,12 @@ type Prediction = {
   mainText: string;
   secondaryText: string;
   status: PredictionStatus;
+  // Present only on on-Mesita rows (status !== "not_in_mesita"):
+  // projects_view id + slug so clients can navigate directly to the
+  // place instead of fuzzy-matching by name. Google-only predictions
+  // omit both.
+  mesitaId?: string;
+  mesitaSlug?: string;
 };
 
 Deno.serve(async (req) => {
@@ -106,12 +115,23 @@ Deno.serve(async (req) => {
   // Merge: Mesita-side hits take precedence (status wins for matching
   // placeId), then any remaining Google entries follow. Google's
   // structured text is nicer, so we keep its mainText/secondaryText but
-  // graft Mesita's status on top when the placeId is in both sources.
+  // graft Mesita's status (+ mesitaId/mesitaSlug) on top when the
+  // placeId is in both sources.
   const byPlaceId = new Map<string, Prediction>();
   for (const p of mesitaPreds) byPlaceId.set(p.placeId, p);
   for (const p of googlePreds) {
     const existing = byPlaceId.get(p.placeId);
-    byPlaceId.set(p.placeId, existing ? { ...p, status: existing.status } : p);
+    byPlaceId.set(
+      p.placeId,
+      existing
+        ? {
+            ...p,
+            status: existing.status,
+            mesitaId: existing.mesitaId,
+            mesitaSlug: existing.mesitaSlug,
+          }
+        : p,
+    );
   }
 
   // Backfill status for predictions Google returned but the ILIKE
@@ -122,11 +142,11 @@ Deno.serve(async (req) => {
     .filter((p) => p.status === "not_in_mesita")
     .map((p) => p.placeId);
   if (orphanPlaceIds.length > 0) {
-    const statusByPlaceId = await enrichByPlaceIds(admin, orphanPlaceIds, callerUserId);
-    for (const [placeId, status] of statusByPlaceId) {
+    const mesitaByPlaceId = await enrichByPlaceIds(admin, orphanPlaceIds, callerUserId);
+    for (const [placeId, mesita] of mesitaByPlaceId) {
       const existing = byPlaceId.get(placeId);
       if (!existing) continue;
-      byPlaceId.set(placeId, { ...existing, status });
+      byPlaceId.set(placeId, { ...existing, ...mesita });
     }
   }
 
@@ -205,7 +225,7 @@ async function fetchGooglePredictions(
 // ── Mesita-side fallback ──────────────────────────────────────────────
 
 async function fetchMesitaPredictions(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseClient,
   input: string,
   callerId: string | null,
 ): Promise<Prediction[]> {
@@ -214,7 +234,7 @@ async function fetchMesitaPredictions(
   // is a fallback for the long-tail case where Google misses.
   const { data, error } = await admin
     .from("projects_view")
-    .select("id, google_place_id, name, address")
+    .select("id, slug, google_place_id, name, address")
     .ilike("name", `%${escapeIlike(input)}%`)
     .not("google_place_id", "is", null)
     .limit(8);
@@ -224,6 +244,7 @@ async function fetchMesitaPredictions(
   }
   type Row = {
     id: string;
+    slug: string;
     google_place_id: string;
     name: string;
     address: string | null;
@@ -237,24 +258,36 @@ async function fetchMesitaPredictions(
     mainText: v.name,
     secondaryText: v.address ?? "Already on Mesita",
     status: statuses.get(v.google_place_id) ?? "web_listed",
+    mesitaId: v.id,
+    mesitaSlug: v.slug,
   }));
 }
 
 async function enrichByPlaceIds(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseClient,
   placeIds: string[],
   callerId: string | null,
-): Promise<Map<string, PredictionStatus>> {
+): Promise<Map<string, Pick<Prediction, "status" | "mesitaId" | "mesitaSlug">>> {
   const { data, error } = await admin
     .from("projects_view")
-    .select("id, google_place_id")
+    .select("id, slug, google_place_id")
     .in("google_place_id", placeIds);
   if (error) {
     console.error("[enricher-suggest-places] placeId enrichment:", error.message);
     return new Map();
   }
-  type Row = { id: string; google_place_id: string };
-  return statusesForPlaces(admin, (data ?? []) as Row[], callerId);
+  type Row = { id: string; slug: string; google_place_id: string };
+  const rows = (data ?? []) as Row[];
+  const statuses = await statusesForPlaces(admin, rows, callerId);
+  const out = new Map<string, Pick<Prediction, "status" | "mesitaId" | "mesitaSlug">>();
+  for (const r of rows) {
+    out.set(r.google_place_id, {
+      status: statuses.get(r.google_place_id) ?? "web_listed",
+      mesitaId: r.id,
+      mesitaSlug: r.slug,
+    });
+  }
+  return out;
 }
 
 // One owner-lookup pass over a place-row set, returning the per-placeId
@@ -262,7 +295,7 @@ async function enrichByPlaceIds(
 // `verified_partner_self/_other` for owned ones depending on whether the
 // caller (resolved by the natural EF before this call) is the owner.
 async function statusesForPlaces(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseClient,
   rows: Array<{ id: string; google_place_id: string }>,
   callerId: string | null,
 ): Promise<Map<string, PredictionStatus>> {

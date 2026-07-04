@@ -57,7 +57,7 @@ import { sendStaffWhatsAppReply } from "./staff-whatsapp-messages.ts";
 import { sendWhatsAppText, type TwilioEnv } from "./twilio.ts";
 
 export type { StaffAccess, StaffIdentity, StaffPlace } from "./staff-whatsapp-types.ts";
-export { resolveStaffAccess, resolveStaffIdentity } from "./staff-whatsapp-access.ts";
+export { resolveStaffAccess } from "./staff-whatsapp-access.ts";
 
 export async function handleStaffInboundMessage(opts: {
   admin: SupabaseClient;

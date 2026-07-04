@@ -2,17 +2,20 @@
 //
 // Powers admin.mesita.ai/global-performance → Notifications view. The
 // console is intentionally NOT realtime: the operator pulls a fresh feed
-// with the Refresh button, and this EF recomputes the feed from source
-// tables on every call.
+// (manual Refresh + light client polling), and this EF recomputes the feed
+// from source tables on every call.
 //
-// v1 ships a single category — **atlas** — with three event types, all
-// *derived* (there is no dedicated events/notifications table; we read the
-// timestamps the product already writes):
+// One category so far — **atlas** — with four event types. Three are
+// *derived* (we read the timestamps the product already writes); the fourth
+// reads the dedicated per-step events table the n8n Enricher appends to:
 //
 //   atlas.place_created      a new row in public.places
-//   atlas.place_enriched     a place whose Atlas profile pass completed
+//   atlas.place_enriched     a place whose Enricher pass completed
 //                            (enriched_at stamped) — carries the textual
 //                            summary the enricher synthesised
+//   atlas.enrichment_step    one Enricher pipeline step finished (or failed) —
+//                            read from public.place_enrichment_events, written
+//                            by enricher-report-step as the n8n run progresses
 //   atlas.ownership_claimed  someone submitted an ownership proof
 //                            (public.project_verifications) for a place
 //
@@ -20,6 +23,12 @@
 // verifications, consumers…) slot in without a client rewrite: each item
 // is { id, category, type, occurredAt, place, actor, detail, meta } and the
 // client renders title/icon from `type`.
+//
+// Filters: `category` narrows to a category; `types` narrows to specific
+// event types server-side (skips whole source reads — step events flood the
+// feed, so the client can ask for just what it shows); `projectId` narrows
+// every source to one place; `q` is a case-insensitive place-name substring
+// filter applied after the merge (the per-source window is already capped).
 //
 // "Who called it" for a creation: places don't persist the caller at insert
 // time (business-create-project deliberately leaves the place unowned until an
@@ -46,12 +55,26 @@ type Category = "atlas";
 type NotificationType =
   | "atlas.place_created"
   | "atlas.place_enriched"
+  | "atlas.enrichment_step"
   | "atlas.ownership_claimed";
+
+const ALL_TYPES: NotificationType[] = [
+  "atlas.place_created",
+  "atlas.place_enriched",
+  "atlas.enrichment_step",
+  "atlas.ownership_claimed",
+];
 
 type Body = {
   // "all" (or omitted) returns every category. A specific category narrows
   // the feed server-side.
   category?: Category | "all" | null;
+  // Narrow to specific event types server-side (empty/omitted = all types).
+  types?: string[] | null;
+  // Narrow every source to a single place (the places/projects shared PK).
+  projectId?: string | null;
+  // Case-insensitive place-name substring filter (applied post-merge).
+  q?: string | null;
   limit?: number;
 };
 
@@ -71,10 +94,10 @@ type NotificationItem = {
   type: NotificationType;
   occurredAt: string;
   place: PlaceRef;
-  // "Who" — owner display for creations, requester email for claims, "Atlas"
-  // for enrichments. null when genuinely unknown (e.g. unclaimed place).
+  // "Who" — owner display for creations, requester email for claims,
+  // "Enricher" for enrichment events. null when genuinely unknown.
   actor: string | null;
-  // Free-text detail — the enrichment summary snippet. null otherwise.
+  // Free-text detail — the enrichment summary snippet / step detail line.
   detail: string | null;
   meta: Record<string, unknown>;
 };
@@ -132,37 +155,82 @@ Deno.serve(async (req) => {
   const limit = clampIntRange(body.limit ?? 60, 1, 200);
   const category = body.category ?? "all";
   const wantAtlas = category === "all" || category === "atlas";
+  const typesFilter = (Array.isArray(body.types) ? body.types : [])
+    .filter((t): t is NotificationType => ALL_TYPES.includes(t as NotificationType));
+  const wantType = (t: NotificationType) =>
+    wantAtlas && (typesFilter.length === 0 || typesFilter.includes(t));
+  const projectId = (body.projectId ?? "").toString().trim() || null;
+  const q = (body.q ?? "").toString().trim().toLowerCase() || null;
 
   const items: NotificationItem[] = [];
-  const counts: Record<string, number> = {};
 
   if (wantAtlas) {
     // Pull a window per source then merge-sort-slice. Each source is capped
     // at `limit` so a flood in one type can't starve the others before the
-    // final sort.
-    const [createdRes, enrichedRes, claimsRes] = await Promise.all([
-      admin
-        .from("projects_view")
-        .select(
-          "id, slug, name, address, category_label, google_place_id, listing_type, status, created_at, enriched_at",
-        )
-        .order("created_at", { ascending: false })
-        .limit(limit),
-      admin
-        .from("projects_view")
-        .select(
-          "id, slug, name, address, category_label, google_place_id, editorial_summary, description, details, enriched_at",
-        )
-        .not("enriched_at", "is", null)
-        .order("enriched_at", { ascending: false })
-        .limit(limit),
-      admin
-        .from("project_verifications")
-        .select(
-          "id, project_id, method, requester_email, status, created_at, place:places(id, slug, name, address, category_label, google_place_id)",
-        )
-        .order("created_at", { ascending: false })
-        .limit(limit),
+    // final sort. Sources whose type the caller filtered out are skipped
+    // entirely.
+    const createdQuery = wantType("atlas.place_created")
+      ? (() => {
+        let qb = admin
+          .from("projects_view")
+          .select(
+            "id, slug, name, address, category_label, google_place_id, listing_type, status, created_at, enriched_at",
+          )
+          .order("created_at", { ascending: false })
+          .limit(limit);
+        if (projectId) qb = qb.eq("id", projectId);
+        return qb;
+      })()
+      : Promise.resolve({ data: null, error: null });
+
+    const enrichedQuery = wantType("atlas.place_enriched")
+      ? (() => {
+        let qb = admin
+          .from("projects_view")
+          .select(
+            "id, slug, name, address, category_label, google_place_id, editorial_summary, description, details, enriched_at",
+          )
+          .not("enriched_at", "is", null)
+          .order("enriched_at", { ascending: false })
+          .limit(limit);
+        if (projectId) qb = qb.eq("id", projectId);
+        return qb;
+      })()
+      : Promise.resolve({ data: null, error: null });
+
+    const stepsQuery = wantType("atlas.enrichment_step")
+      ? (() => {
+        let qb = admin
+          .from("place_enrichment_events")
+          .select(
+            "id, project_id, step, step_name, status, detail, meta, created_at, place:places(id, slug, name, address, category_label, google_place_id)",
+          )
+          .order("created_at", { ascending: false })
+          .limit(limit);
+        if (projectId) qb = qb.eq("project_id", projectId);
+        return qb;
+      })()
+      : Promise.resolve({ data: null, error: null });
+
+    const claimsQuery = wantType("atlas.ownership_claimed")
+      ? (() => {
+        let qb = admin
+          .from("project_verifications")
+          .select(
+            "id, project_id, method, requester_email, status, created_at, place:places(id, slug, name, address, category_label, google_place_id)",
+          )
+          .order("created_at", { ascending: false })
+          .limit(limit);
+        if (projectId) qb = qb.eq("project_id", projectId);
+        return qb;
+      })()
+      : Promise.resolve({ data: null, error: null });
+
+    const [createdRes, enrichedRes, stepsRes, claimsRes] = await Promise.all([
+      createdQuery,
+      enrichedQuery,
+      stepsQuery,
+      claimsQuery,
     ]);
 
     if (createdRes.error) {
@@ -170,6 +238,9 @@ Deno.serve(async (req) => {
     }
     if (enrichedRes.error) {
       return json({ ok: false, error: `places_enriched: ${enrichedRes.error.message}` }, 500);
+    }
+    if (stepsRes.error) {
+      return json({ ok: false, error: `enrichment_steps: ${stepsRes.error.message}` }, 500);
     }
     if (claimsRes.error) {
       return json({ ok: false, error: `claims: ${claimsRes.error.message}` }, 500);
@@ -262,9 +333,38 @@ Deno.serve(async (req) => {
         type: "atlas.place_enriched",
         occurredAt: v.enriched_at,
         place: placeRef(v),
-        actor: "Atlas",
+        actor: "Enricher",
         detail: summary ? truncate(summary, 260) : null,
         meta: { detailsFields, hasSummary: !!summary },
+      });
+    }
+
+    // ── atlas.enrichment_step ────────────────────────────────────────────
+    for (const e of (stepsRes.data ?? []) as Array<{
+      id: string;
+      project_id: string;
+      step: string;
+      step_name: string;
+      status: string;
+      detail: string | null;
+      meta: Record<string, unknown> | null;
+      created_at: string;
+      place: PlaceShape | PlaceShape[] | null;
+    }>) {
+      items.push({
+        id: `atlas.enrichment_step:${e.id}`,
+        category: "atlas",
+        type: "atlas.enrichment_step",
+        occurredAt: e.created_at,
+        place: placeRef(one(e.place)),
+        actor: "Enricher",
+        detail: e.detail,
+        meta: {
+          step: e.step,
+          stepName: e.step_name,
+          status: e.status,
+          ...(e.meta && typeof e.meta === "object" ? e.meta : {}),
+        },
       });
     }
 
@@ -289,24 +389,30 @@ Deno.serve(async (req) => {
         meta: { method: c.method, status: c.status },
       });
     }
-
-    counts["atlas.place_created"] = createdRows.length;
-    counts["atlas.place_enriched"] = (enrichedRes.data ?? []).length;
-    counts["atlas.ownership_claimed"] = (claimsRes.data ?? []).length;
   }
 
-  // Newest first across every type, then cap to the requested window.
-  items.sort((a, b) =>
+  // Place-name substring filter, then newest-first across every type, then cap
+  // to the requested window. Counts reflect the filtered set so the client's
+  // pills stay consistent with what is shown.
+  const filtered = q
+    ? items.filter((i) => (i.place?.name ?? "").toLowerCase().includes(q))
+    : items;
+
+  const counts: Record<string, number> = {};
+  for (const i of filtered) counts[i.type] = (counts[i.type] ?? 0) + 1;
+
+  filtered.sort((a, b) =>
     a.occurredAt < b.occurredAt ? 1 : a.occurredAt > b.occurredAt ? -1 : 0,
   );
-  const notifications = items.slice(0, limit);
+  const notifications = filtered.slice(0, limit);
 
   return json({
     ok: true,
     notifications,
     counts,
     categories: ["atlas"],
-    total: items.length,
+    types: ALL_TYPES,
+    total: filtered.length,
     generatedAt: new Date().toISOString(),
   });
 });

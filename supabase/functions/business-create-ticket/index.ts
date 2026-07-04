@@ -32,6 +32,7 @@ import {
 import { isConsumerFirstVisit, selectprojectRate } from "../_shared/membership.ts";
 import { computeTicketBill } from "../_shared/business-ticket-billing.ts";
 import { closeTicketAndEnqueueReview } from "../_shared/ticket-informal.ts";
+import { toCents } from "../_shared/money.ts";
 
 type Body = {
   projectId?: string;
@@ -327,11 +328,3 @@ Deno.serve(async (req) => {
     201,
   );
 });
-
-function toCents(v: unknown): number | null {
-  if (v == null) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  if (n < 0) return null;
-  return Math.trunc(n);
-}
