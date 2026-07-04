@@ -178,22 +178,14 @@ verify_jwt = true
 [functions.consumer-web-recommend-swipe]
 verify_jwt = true
 
-# --- Artificial callers (recommender-*) ---
-#
-# Internal-only services with no end user. Natural-caller EFs invoke them
-# with the service-role bearer + an X-Internal-Caller header; the gateway
-# is open (verify_jwt = false) and authentication happens inside the EF
-# via _shared/internal.ts → requireInternalCaller. Never exposed to the
-# web — clients call the natural-caller EFs which delegate here.
-
-[functions.recommender-rank-swipe]
-verify_jwt = false
-
-[functions.recommender-rank-map]
-verify_jwt = false
+# The former recommender-rank-map / recommender-rank-swipe artificial
+# callers were absorbed into consumer-web-recommend-* as in-process
+# _shared/recommender-rank-*.ts modules (MESITA-54) — the HTTP hop was a
+# synchronous 1:1 forward that didn't earn its cost. Their cloud slugs
+# stay live until the MESITA-59 cleanup.
 
 # Staggered scheduler: consumer/admin enqueue a scheduled_project_creations row; the
-# pg_cron poller drips due rows to the service-gated scheduler-run-project-creations.
+# pg_cron poller drips due rows to the service-gated supabase-cron-run-project-creations.
 [functions.consumer-web-schedule-project-creation]
 verify_jwt = true
 
@@ -281,8 +273,10 @@ verify_jwt = true
 verify_jwt = true
 
 # Staggered scheduler: consumer/admin enqueue a scheduled_project_creations row; the
-# pg_cron poller drips due rows to the service-gated scheduler-run-project-creations.
-[functions.scheduler-run-project-creations]
+# pg_cron poller drips due rows to this service-gated EF. supabase-cron is
+# the actor-origin: the platform's own pg_cron poller originates the call
+# with the service bearer; requireInternalCaller gates it inside the EF.
+[functions.supabase-cron-run-project-creations]
 verify_jwt = false
 
 [functions.business-web-update-project]
@@ -362,8 +356,18 @@ verify_jwt = true
 # Each EF re-checks the caller's JWT email against public.super_admins
 # before doing anything privileged.
 
-# Tiny session-check used by the admin + business app shells.
+# Tiny session-check used by the admin + business app shells. Superseded by
+# the per-caller *-get-identity doors below (MESITA-54); stays live until
+# both shells flip to their own endpoints, then MESITA-59 deletes it.
 [functions.auth-get-identity]
+verify_jwt = true
+
+# Per-caller identity doors over _shared/identity.ts (the endpoint name IS
+# the ACL). Same contract as auth-get-identity.
+[functions.admin-web-get-identity]
+verify_jwt = true
+
+[functions.business-web-get-identity]
 verify_jwt = true
 
 # Ownership-verification queue surface for super-admins.

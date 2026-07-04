@@ -1,9 +1,15 @@
-// Supabase Edge Function — recommender-rank-swipe (artificial caller)
+// In-process ranking pipeline for the consumer swipe view.
+//
+// Absorbed from the former `recommender-rank-swipe` artificial-caller EF
+// (MESITA-54): the HTTP hop was a synchronous 1:1 forward with a single
+// natural caller, so per the actor-origin grammar the pipeline now runs
+// in-process inside `consumer-web-recommend-swipe`. Any future surface that
+// needs the same ranking imports this module — no endpoint required.
 //
 // Pure ranking pipeline. Takes a location + optional consumer profile and
 // returns a curated 50-card deck for the consumer swipe view. Anonymous
-// requests are valid — discovery is public until sign-up, so the natural
-// caller passes profile=null when there's no session.
+// requests are valid — discovery is public until sign-up, so the caller
+// passes profile=null when there's no session.
 //
 // Pipeline:
 //   1. Pull a bounded candidate pool by bounding-box radius (cheap).
@@ -13,66 +19,57 @@
 //      + time of day + dominant categories in the pool.
 //   4. Embed the intent once and ORDER BY cosine.
 //   5. Diversify (no >4 cards in the same category) + trim to limit.
-//
-// Auth: artificial caller — only invoked by natural-caller EFs over the
-// internal-call channel. verify_jwt is disabled at the gateway; the EF
-// itself enforces the service-role bearer via requireInternalCaller.
-//
-// Deploy:    supabase functions deploy recommender-rank-swipe
 
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
-import { adminClient, readEFEnv } from "../_shared/auth.ts";
-import { requireInternalCaller } from "../_shared/internal.ts";
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import {
   embedAndPersistPlaces,
   embedSingle,
   rankByCosine,
   shouldEmbed,
-} from "../_shared/embeddings.ts";
+} from "./embeddings.ts";
 import {
-  clampPositive,
   type ConsumerProfile,
   fetchCandidatePool,
   stripInternal,
   type PlaceRow,
-} from "../_shared/recommender-pool.ts";
+} from "./recommender-pool.ts";
 
 const CANDIDATE_POOL = 200;
 const MAX_PER_CATEGORY = 4;
-const DEFAULT_LIMIT = 50;
 const DEFAULT_RADIUS_KM = 25;
 const LAZY_EMBED_BATCH = 50;
 
-type Body = {
-  lat?: number | null;
-  lng?: number | null;
-  radiusKm?: number;
-  limit?: number;
-  profile?: ConsumerProfile | null;
+export type RankSwipeInput = {
+  lat: number | null;
+  lng: number | null;
+  radiusKm: number;
+  limit: number;
+  profile: ConsumerProfile | null;
 };
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return corsPreflight();
-  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
+export type RankSwipeResult =
+  | {
+    ok: true;
+    deck: Omit<PlaceRow, "embedding" | "embedding_source_hash">[];
+    summary: {
+      candidates: number;
+      embedded: number;
+      intent?: string;
+      caller?: string;
+    };
+  }
+  | { ok: false; error: string };
 
-  const envRes = readEFEnv();
-  if (!envRes.ok) return envRes.response;
-  const env = envRes.env;
-
-  const callerRes = requireInternalCaller(req, env);
-  if (!callerRes.ok) return callerRes.response;
-
-  const OPENAI_KEY = Deno.env.get("OPENAI_KEY");
-
-  const body = await readJsonOr<Body>(req, {});
-  const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
-  const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
-  const radiusKm = clampPositive(body.radiusKm, DEFAULT_RADIUS_KM, 200);
-  const limit = clampPositive(body.limit, DEFAULT_LIMIT, 50);
-  const profile = body.profile ?? null;
-
-  const admin = adminClient(env);
+// Runs the full swipe-deck ranking pipeline in-process. `callerName` labels
+// the embedding backfill + summary for observability (pass the natural EF
+// name).
+export async function rankSwipeDeck(
+  admin: SupabaseClient,
+  openaiKey: string | undefined,
+  callerName: string,
+  input: RankSwipeInput,
+): Promise<RankSwipeResult> {
+  const { lat, lng, radiusKm, limit, profile } = input;
 
   // ── 1. Candidate pool ──────────────────────────────────────────────
   const poolRes = await fetchCandidatePool<PlaceRow>(admin, {
@@ -82,23 +79,18 @@ Deno.serve(async (req) => {
     poolSize: CANDIDATE_POOL,
   });
   if (!poolRes.ok) {
-    return json({ ok: false, error: `candidate_pool: ${poolRes.error}` }, 500);
+    return { ok: false, error: `candidate_pool: ${poolRes.error}` };
   }
   const candidates = poolRes.rows;
   if (candidates.length === 0) {
-    return json({ ok: true, deck: [], summary: { candidates: 0, embedded: 0 } });
+    return { ok: true, deck: [], summary: { candidates: 0, embedded: 0 } };
   }
 
   // ── 2. Lazy embedding backfill ─────────────────────────────────────
   const needsEmbed = candidates.filter(shouldEmbed).slice(0, LAZY_EMBED_BATCH);
   let embeddedCount = 0;
-  if (needsEmbed.length > 0 && OPENAI_KEY) {
-    const patched = await embedAndPersistPlaces(
-      needsEmbed,
-      admin,
-      OPENAI_KEY,
-      "recommender-rank-swipe",
-    );
+  if (needsEmbed.length > 0 && openaiKey) {
+    const patched = await embedAndPersistPlaces(needsEmbed, admin, openaiKey, callerName);
     embeddedCount = patched.size;
     for (const c of candidates) {
       const p = patched.get(c.id);
@@ -114,12 +106,12 @@ Deno.serve(async (req) => {
 
   // ── 4. Rank by embedding similarity (or fall back to partner-first) ──
   let ranked: PlaceRow[];
-  if (OPENAI_KEY) {
+  if (openaiKey) {
     try {
-      const intentVec = await embedSingle(intent, OPENAI_KEY);
+      const intentVec = await embedSingle(intent, openaiKey);
       ranked = rankByCosine(candidates, intentVec);
     } catch (err) {
-      console.error("[recommender-rank-swipe] intent embed failed:", err);
+      console.error(`[${callerName}] intent embed failed:`, err);
       ranked = fallbackRank(candidates);
     }
   } else {
@@ -134,17 +126,17 @@ Deno.serve(async (req) => {
   const boosted = applyTierBoost(ranked, profile?.tier ?? null);
   const deck = diversify(boosted, limit, MAX_PER_CATEGORY);
 
-  return json({
+  return {
     ok: true,
     deck: deck.map(stripInternal),
     summary: {
       candidates: candidates.length,
       embedded: embeddedCount,
       intent,
-      caller: callerRes.callerName,
+      caller: callerName,
     },
-  });
-});
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Intent composition

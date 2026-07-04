@@ -3,7 +3,7 @@
 // Enqueues a staggered create for a Google Places `placeId`. Instead of running
 // the (expensive, synchronous) create pipeline inline, it inserts a row into
 // public.scheduled_project_creations; the pg_cron poller picks due rows up and fires
-// the service-gated scheduler-run-project-creations EF. exec_at defaults to now() (run
+// the service-gated supabase-cron-run-project-creations EF. exec_at defaults to now() (run
 // ASAP) but the caller may pass an ISO timestamp to defer.
 //
 // Gating: a signed-in consumer session (getAuthedUser). No DB write happens from
