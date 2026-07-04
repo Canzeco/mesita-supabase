@@ -1,5 +1,8 @@
 # Mesita — Supabase Audit & Minimization (2026-06-26, v2)
 
+> **Superseded in part by [`AUDIT-2026-07-03.md`](../AUDIT-2026-07-03.md)** (usage audit, EF prune
+> rounds 1–5). Where the two disagree, the 2026-07-03 doc wins.
+
 Project `yjalywfzdelacdzccpgb` · PostgreSQL 17 · EF-only data access · refreshed after Track B (async create→enrich + n8n Enricher) and the audit-driven minimization.
 
 > This supersedes the v1 PDF audit. The PDF's counts were partly stale (it listed **11** extensions; only **9** are installed — no `pgsodium`/`pg_graphql`).
@@ -32,7 +35,7 @@ Project `yjalywfzdelacdzccpgb` · PostgreSQL 17 · EF-only data access · refres
 **Phase 4 — RLS hardening** (`20260626230000`): revoked `find_user_id_by_phone` + `venues_view_*` EXECUTE from PUBLIC/anon/authenticated (SEC-1/SEC-2 HIGH); granted phone lookup to `service_role`.
 
 ## Kept deliberately (flagged, not cruft)
-- EFs `admin-enrich-place` (manual async re-enrich lever), `admin-grant-membership`, `business-find-consumer` — real implementations, 0 callers only because their UI/ops trigger isn't wired yet. Per the "parked building blocks" rule, kept.
+- ~~EFs `admin-enrich-place`, `admin-grant-membership`, `business-find-consumer`~~ — superseded: the 2026-07-03 audit permanently deleted admin-enrich-place and business-find-consumer and put admin-grant-membership on the cloud delete list.
 - All 11 RLS-on/no-policy tables — intentional deny-all (service-role/EF-only); **not** false-negatives.
 - `supabase_realtime` publication streams only `consumer_pay_notifications`, which is FK-bound to a ticket → rule-compliant (a ticket stream, not a notifications bus). Unchanged.
 
