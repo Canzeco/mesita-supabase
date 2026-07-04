@@ -2,19 +2,25 @@
 
 This repo is part of the **Mesita** multi-repo workspace. Every AI coding agent working
 here — Cursor, Codex, Claude Code, Claude Cowork, subagents, scheduled cloud agents —
-follows the same orchestration protocol: **SWARM v2** (a blackboard system: agents never
+follows the same orchestration protocol: **SWARM v3** (a blackboard system: agents never
 talk to each other; they coordinate through the Linear work ledger and git).
 
-## SWARM v2 — orchestration (Linear)
+## SWARM v3 — orchestration (Linear)
 
 Work ledger: **Linear**, workspace `canzeco`, team **Mesita**, issue key `MESITA-`.
 Full protocol: https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus-operandi-442de3edc517
 
 - **Pato never opens Linear.** You are the interface; Linear is the database. Never ask
   him to check or update it — summarize in chat instead.
-- **If it writes to a repo or a cloud service, it has an issue.** Ad-hoc request → silently
-  create the issue (title, repo label, footprint = paths you expect to touch), claim it,
-  work it. Pure Q&A needs no issue. Don't narrate the bookkeeping.
+- **If it writes to a repo or a cloud service, it has an issue — and every issue lives in
+  a project.** Ad-hoc request → silently create/attach the project, create the issue
+  (title, repo label, footprint = paths you expect to touch), claim it, work it. Pure Q&A
+  needs no issue. Don't narrate the bookkeeping.
+- **Projects = goals, not sessions.** One project = one outcome, named after the outcome,
+  linking its Notion spec. New goal → new project by default, but check existing projects
+  first and attach if the goal continues one. Sessions may span several projects; several
+  sessions may share one. One-off chores → the standing **Ops & maintenance** project.
+  Keep project status current; mark Completed when the outcome ships.
 - **Boot** (before touching any repo): resume your own open claims; scan `needs-human`
   issues and surface a one-line summary to Pato if any exist.
 - **Pick:** highest-priority unblocked Todo without `needs-human` whose footprint doesn't
