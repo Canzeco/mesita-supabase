@@ -1,6 +1,6 @@
 // Supabase Edge Function — auth-get-identity
 //
-// Tiny session-check called by the admin web's app shell. Returns the
+// Tiny session-check called by the admin and business app shells. Returns the
 // caller's email + whether their email is in public.super_admins. The
 // shell uses it to either render the admin surface or a friendly "your
 // account isn't on the super-admin list" empty state.
