@@ -153,6 +153,17 @@ export function adminClient(env: EFEnv): SupabaseClient {
   });
 }
 
+// ─── Anon client ────────────────────────────────────────────────────
+
+// RLS-scoped anonymous client for PUBLIC read EFs (catalog, place detail,
+// tag/category vocabularies). Row visibility rests entirely on the anon
+// RLS policies — this client can never read past them. Counterpart to
+// `adminClient`; pairs with `readAnonEnv`. (EFEnv is structurally
+// assignable to AnonEnv, so full-env EFs can call this too.)
+export function anonClient(env: AnonEnv): SupabaseClient {
+  return createClient(env.url, env.anonKey);
+}
+
 // ─── Membership ─────────────────────────────────────────────────────
 
 // Mirrors the public.member_role enum (see migration 0025). 'staff' is

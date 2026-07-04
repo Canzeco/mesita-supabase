@@ -5,9 +5,8 @@
 // so the business browser never reads the DB directly.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsPreflight, json } from "../_shared/http.ts";
-import { readAnonEnv } from "../_shared/auth.ts";
+import { anonClient, readAnonEnv } from "../_shared/auth.ts";
 import { fetchPlaceCategories } from "../_shared/categories.ts";
 
 Deno.serve(async (req) => {
@@ -19,7 +18,7 @@ Deno.serve(async (req) => {
   const envRes = readAnonEnv();
   if (!envRes.ok) return envRes.response;
 
-  const supabase = createClient(envRes.env.url, envRes.env.anonKey);
+  const supabase = anonClient(envRes.env);
   const categories = await fetchPlaceCategories(supabase);
 
   return json({ ok: true, categories });
