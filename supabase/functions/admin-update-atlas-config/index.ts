@@ -24,9 +24,6 @@ import {
 } from "../_shared/auth.ts";
 
 type Body = {
-  // Sourcing
-  sourceTierCeiling?: number;
-  sourceOverrides?: Record<string, unknown>;
   // Data depth
   websiteCrawlMaxPages?: number;
   // Image funnel — GATHER (pull per source, ≤10)
@@ -52,18 +49,6 @@ function intInRange(v: unknown, min: number, max: number): number | null {
   if (typeof v !== "number" || !Number.isInteger(v)) return null;
   if (v < min || v > max) return null;
   return v;
-}
-
-// A clean { string: boolean } map only — guards the jsonb override column
-// against arbitrary nested payloads.
-function boolMap(v: unknown): Record<string, boolean> | null {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
-  const out: Record<string, boolean> = {};
-  for (const [k, val] of Object.entries(v)) {
-    if (typeof val !== "boolean") return null;
-    out[k] = val;
-  }
-  return out;
 }
 
 Deno.serve(async (req) => {
@@ -111,31 +96,6 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: "gatherInstagramPosts must be an integer 0-30" }, 400);
     }
     patch.atlas_gather_instagram_posts = n;
-  }
-
-  // ── Sourcing ──────────────────────────────────────────────────────────
-  // ADEA steps span S0–S6. S0 (Google/Mesita spine + the Cognition brain) is
-  // always on and not a ceiling value; the source ceiling selects depth 1–5.
-  if (body.sourceTierCeiling !== undefined) {
-    const n = intInRange(body.sourceTierCeiling, 1, 5);
-    if (n === null) {
-      return json(
-        { ok: false, error: "sourceTierCeiling must be an integer 1-5" },
-        400,
-      );
-    }
-    patch.atlas_source_tier_ceiling = n;
-  }
-
-  if (body.sourceOverrides !== undefined) {
-    const map = boolMap(body.sourceOverrides);
-    if (map === null) {
-      return json(
-        { ok: false, error: "sourceOverrides must be a { string: boolean } map" },
-        400,
-      );
-    }
-    patch.atlas_source_overrides = map;
   }
 
   // ── Data depth ────────────────────────────────────────────────────────
@@ -251,7 +211,7 @@ Deno.serve(async (req) => {
     .update(patch)
     .eq("id", 1)
     .select(
-      "atlas_source_tier_ceiling, atlas_source_overrides, atlas_website_crawl_max_pages, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, updated_at",
+      "atlas_website_crawl_max_pages, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, updated_at",
     )
     .single();
   if (error) {
@@ -263,8 +223,6 @@ Deno.serve(async (req) => {
 
   return json({
     ok: true,
-    atlasSourceTierCeiling: data.atlas_source_tier_ceiling,
-    atlasSourceOverrides: data.atlas_source_overrides,
     atlasWebsiteCrawlMaxPages: data.atlas_website_crawl_max_pages,
     atlasGatherGoogleImages: data.atlas_gather_google_images,
     atlasGatherWebsiteImages: data.atlas_gather_website_images,
