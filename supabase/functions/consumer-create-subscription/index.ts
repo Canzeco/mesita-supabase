@@ -20,6 +20,11 @@ import Stripe from "npm:stripe@17";
 import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
 import { getTierConfig } from "../_shared/membership.ts";
+import {
+  ensureWholeCatalog,
+  resolvePlanPrice,
+  STRIPE_API_VERSION,
+} from "../_shared/stripe-billing.ts";
 
 type Body = { successUrl?: string; cancelUrl?: string };
 
@@ -77,7 +82,7 @@ Deno.serve(async (req) => {
           stripe_subscription_id: mockSubId,
           stripe_customer_id: `mock_cus_${consumerId}`,
           status: "active",
-          price_cents: premium?.price_cents ?? 20000,
+          price_cents: premium?.price_cents ?? 10000,
           currency: premium?.currency ?? "MXN",
           current_period_end: periodEnd,
           cancel_at_period_end: false,
@@ -105,10 +110,17 @@ Deno.serve(async (req) => {
   }
 
   // ── REAL Stripe mode ──────────────────────────────────────────────────────
-  if (!premium?.stripe_price_id) {
+  const stripe = new Stripe(stripeKey, { apiVersion: STRIPE_API_VERSION });
+
+  // Self-provisioning: resolves (and if needed creates) the $-current monthly
+  // Premium price in the connected Stripe account, so a fresh account or a
+  // price change never needs a dashboard step.
+  const resolved = await resolvePlanPrice(admin, stripe, "consumer_premium");
+  if (!resolved) {
     return json({ ok: false, error: "Premium price not configured" }, 500);
   }
-  const stripe = new Stripe(stripeKey, { apiVersion: "2025-03-31.basil" as Stripe.StripeConfig["apiVersion"] });
+  // Materialize the rest of the catalog in the background (best effort).
+  void ensureWholeCatalog(admin, stripe);
 
   // Reuse an existing Stripe customer id if we've seen this consumer before.
   const { data: existing } = await admin
@@ -131,8 +143,11 @@ Deno.serve(async (req) => {
     mode: "subscription",
     customer: customerId,
     client_reference_id: consumerId,
-    line_items: [{ price: premium.stripe_price_id, quantity: 1 }],
-    subscription_data: { metadata: { consumer_id: consumerId } },
+    line_items: [{ price: resolved.priceId, quantity: 1 }],
+    metadata: { consumer_id: consumerId, mesita_kind: "consumer" },
+    subscription_data: {
+      metadata: { consumer_id: consumerId, mesita_kind: "consumer" },
+    },
     success_url: successUrl,
     cancel_url: cancelUrl,
   });
@@ -142,8 +157,8 @@ Deno.serve(async (req) => {
       consumer_id: consumerId,
       stripe_customer_id: customerId,
       status: "incomplete",
-      price_cents: premium.price_cents,
-      currency: premium.currency,
+      price_cents: resolved.priceCents,
+      currency: resolved.currency,
     },
     { onConflict: "stripe_subscription_id", ignoreDuplicates: true },
   );

@@ -44,12 +44,9 @@ type UpdateBody = {
   currency?: string | null;
   status?: "active" | "paused" | "archived";
   fiscal_type?: "formal" | "informal";
-  plan?:
-    | "free"
-    | "formal_pro"
-    | "formal_ultra"
-    | "informal_pro"
-    | "informal_ultra";
+  // NOTE: `plan` is deliberately NOT editable here. Plan changes are billing
+  // and go through business-change-subscription (Stripe), so a client can't
+  // grant itself Promote/Ultra with a plain profile update.
   address?: string | null;
   closes_at?: string | null;
   hours?: PlaceHours | null;
@@ -145,19 +142,6 @@ const URL_FIELDS = [
 type UrlField = (typeof URL_FIELDS)[number];
 
 const EDITABLE_STATUSES = new Set(["active", "paused", "archived"]);
-
-// Plan catalog the EF accepts — all five tiers in the membership enum.
-// Ordered Free → Pro (formal/informal) → Ultra (formal/informal). The
-// mechanic is fixed by fiscal_type; Pro vs Ultra
-// only changes price + visibility tier. See business UI plans.ts for the
-// picker catalog this is the server-side counterpart of.
-const VALID_PLANS = new Set([
-  "free",
-  "formal_pro",
-  "formal_ultra",
-  "informal_pro",
-  "informal_ultra",
-]);
 const OPENAI_KEY = Deno.env.get("OPENAI_KEY");
 
 Deno.serve(async (req) => {
@@ -229,42 +213,16 @@ Deno.serve(async (req) => {
     update.fiscal_type = f;
   }
   if ("plan" in body) {
-    const p = body.plan;
-    if (!p || !VALID_PLANS.has(p)) {
-      return json(
-        {
-          ok: false,
-          error: "plan must be one of free | formal_pro | formal_ultra | informal_pro | informal_ultra",
-        },
-        400,
-      );
-    }
-    // Mechanic-fiscal coupling: a formal plan only makes sense on a formal
-    // place, and vice versa. We look up the current row to validate against
-    // the place's fiscal_type (or the new fiscal_type the same request is
-    // trying to set, whichever wins).
-    const incomingFiscal = (update.fiscal_type as string | undefined) ?? null;
-    if (p.startsWith("formal_") && incomingFiscal === "informal") {
-      return json(
-        {
-          ok: false,
-          code: "plan_fiscal_mismatch",
-          error: "Formal plans can't be picked while the place is set to informal. Change fiscal_type first.",
-        },
-        409,
-      );
-    }
-    if (p.startsWith("informal_") && incomingFiscal === "formal") {
-      return json(
-        {
-          ok: false,
-          code: "plan_fiscal_mismatch",
-          error: "Informal plans can't be picked while the place is set to formal. Change fiscal_type first.",
-        },
-        409,
-      );
-    }
-    update.plan = p;
+    // Plan is billing, not profile: reject instead of silently ignoring so a
+    // stale client learns the contract moved to business-change-subscription.
+    return json(
+      {
+        ok: false,
+        code: "plan_via_billing",
+        error: "plan is managed by business-change-subscription (Stripe), not by profile updates.",
+      },
+      400,
+    );
   }
   if ("address" in body) update.address = optString(body.address, 300);
   if ("closes_at" in body) {

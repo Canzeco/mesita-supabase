@@ -2,19 +2,27 @@
 //
 // Public endpoint (verify_jwt disabled at the gateway). Security rests
 // entirely on Stripe signature verification with STRIPE_WEBHOOK_SECRET — an
-// unsigned or mis-signed request is rejected. This is the ONLY writer that
-// flips a consumer to/from Premium on the back of the paid door.
+// unsigned or mis-signed request is rejected.
+//
+// One endpoint, two billing surfaces, discriminated by metadata:
+//   • consumer_id  → consumer Premium ($100 MXN/mo). The ONLY writer that
+//     flips a consumer to/from Premium on the back of the paid door.
+//   • project_id   → place plans (Promote/Ultra). The ONLY writer that flips
+//     projects.plan on the back of the paid door.
 //
 // Idempotency: Stripe retries deliveries. We record every processed event id
 // in public.stripe_events and no-op on replays.
 //
-// Tier precedence rule: a subscription lapse only downgrades a consumer whose
-// tier_origin is 'subscription'. We never strip Premium earned via Instagram
-// or invitation just because a card failed.
+// Tier/plan precedence rule: a subscription lapse only downgrades an
+// entitlement that came through the paid door. A consumer's Premium earned
+// via Instagram or invitation is never stripped because a card failed — and
+// a place plan granted outside billing is only lowered when it matches the
+// plan the lapsed subscription was paying for.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe@17";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
+import { STRIPE_API_VERSION, STRIPE_CATALOG } from "../_shared/stripe-billing.ts";
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
@@ -29,7 +37,7 @@ Deno.serve(async (req) => {
   if (!stripeKey || !webhookSecret) {
     return new Response("Stripe not configured", { status: 500 });
   }
-  const stripe = new Stripe(stripeKey, { apiVersion: "2025-03-31.basil" as Stripe.StripeConfig["apiVersion"] });
+  const stripe = new Stripe(stripeKey, { apiVersion: STRIPE_API_VERSION });
 
   const sig = req.headers.get("stripe-signature");
   if (!sig) return new Response("Missing signature", { status: 400 });
@@ -65,17 +73,29 @@ Deno.serve(async (req) => {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        const consumerId =
-          session.client_reference_id ??
-          (session.metadata?.consumer_id as string | undefined) ??
-          null;
         const subscriptionId =
           typeof session.subscription === "string"
             ? session.subscription
             : session.subscription?.id ?? null;
-        if (consumerId && subscriptionId) {
+        if (!subscriptionId) break;
+
+        // Business checkout sessions always carry project_id metadata;
+        // consumer ones carry consumer_id (or client_reference_id).
+        const projectId =
+          (session.metadata?.project_id as string | undefined) ?? null;
+        if (projectId) {
           const sub = await stripe.subscriptions.retrieve(subscriptionId);
-          await reconcileSubscription(admin, stripe, consumerId, sub);
+          await reconcileProjectSubscription(admin, projectId, sub);
+          break;
+        }
+
+        const consumerId =
+          session.client_reference_id ??
+          (session.metadata?.consumer_id as string | undefined) ??
+          null;
+        if (consumerId) {
+          const sub = await stripe.subscriptions.retrieve(subscriptionId);
+          await reconcileConsumerSubscription(admin, consumerId, sub);
         }
         break;
       }
@@ -83,9 +103,18 @@ Deno.serve(async (req) => {
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
+
+        const projectId =
+          (sub.metadata?.project_id as string | undefined) ??
+          (await resolveProjectId(admin, sub));
+        if (projectId) {
+          await reconcileProjectSubscription(admin, projectId, sub);
+          break;
+        }
+
         const consumerId = await resolveConsumerId(admin, stripe, sub);
         if (consumerId) {
-          await reconcileSubscription(admin, stripe, consumerId, sub);
+          await reconcileConsumerSubscription(admin, consumerId, sub);
         }
         break;
       }
@@ -95,6 +124,9 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     console.error(`[stripe-handle-webhook] handler error (${event.type}):`, err);
+    // Roll back the dedupe marker so Stripe's retry re-processes this event
+    // instead of hitting the replay short-circuit and dropping it forever.
+    await admin.from("stripe_events").delete().eq("event_id", event.id);
     return new Response("Handler error", { status: 500 });
   }
 
@@ -103,6 +135,8 @@ Deno.serve(async (req) => {
     headers: { "Content-Type": "application/json" },
   });
 });
+
+// ─── Consumer side ──────────────────────────────────────────────────────────
 
 // Maps a Stripe subscription back to a Mesita consumer via metadata, falling
 // back to the customer's metadata.
@@ -135,14 +169,12 @@ async function resolveConsumerId(
 }
 
 // Upserts the local subscription mirror and applies the tier side-effect.
-async function reconcileSubscription(
+async function reconcileConsumerSubscription(
   admin: ReturnType<typeof adminClient>,
-  _stripe: Stripe,
   consumerId: string,
   sub: Stripe.Subscription,
 ): Promise<void> {
-  const status = sub.status; // active, past_due, canceled, unpaid, incomplete…
-  const localStatus = mapStatus(status);
+  const localStatus = mapStatus(sub.status);
   const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
   const periodEnd = sub.current_period_end
     ? new Date(sub.current_period_end * 1000).toISOString()
@@ -150,7 +182,24 @@ async function reconcileSubscription(
   const priceCents = sub.items.data[0]?.price.unit_amount ?? null;
   const currency = (sub.items.data[0]?.price.currency ?? "mxn").toUpperCase();
 
-  await admin
+  const isLive = localStatus === "active" || localStatus === "past_due";
+
+  if (isLive) {
+    // Keep the one-live invariant: retire any OTHER live row for this consumer
+    // (e.g. a leftover mock_<consumerId> row from the demo toggle) so the
+    // incoming subscription can't collide with consumer_subscriptions_one_live.
+    const retire = await admin
+      .from("consumer_subscriptions")
+      .update({ status: "canceled" })
+      .eq("consumer_id", consumerId)
+      .neq("stripe_subscription_id", sub.id)
+      .in("status", ["active", "past_due"]);
+    if (retire.error) {
+      throw new Error(`consumer_retire_prior_live: ${retire.error.message}`);
+    }
+  }
+
+  const mirror = await admin
     .from("consumer_subscriptions")
     .upsert(
       {
@@ -165,11 +214,13 @@ async function reconcileSubscription(
       },
       { onConflict: "stripe_subscription_id" },
     );
+  if (mirror.error) {
+    throw new Error(`consumer_subscription_mirror: ${mirror.error.message}`);
+  }
 
-  const isLive = localStatus === "active" || localStatus === "past_due";
   if (isLive) {
     // Grant Premium via the subscription door.
-    await admin
+    const grant = await admin
       .from("consumers")
       .update({
         tier_key: "premium",
@@ -178,10 +229,11 @@ async function reconcileSubscription(
         tier_expires_at: periodEnd,
       })
       .eq("id", consumerId);
+    if (grant.error) throw new Error(`consumer_grant: ${grant.error.message}`);
   } else {
     // Lapsed/cancelled: only downgrade if Premium came through the paid door.
     // An Instagram/invitation Premium is left untouched.
-    await admin
+    const revoke = await admin
       .from("consumers")
       .update({
         tier_key: "free",
@@ -190,6 +242,137 @@ async function reconcileSubscription(
       })
       .eq("id", consumerId)
       .eq("tier_origin", "subscription");
+    if (revoke.error) throw new Error(`consumer_revoke: ${revoke.error.message}`);
+  }
+}
+
+// ─── Business side ──────────────────────────────────────────────────────────
+
+// Maps a Stripe subscription back to a Mesita project via our own mirror
+// table (subscription metadata was already checked by the caller).
+async function resolveProjectId(
+  admin: ReturnType<typeof adminClient>,
+  sub: Stripe.Subscription,
+): Promise<string | null> {
+  const { data: bySub } = await admin
+    .from("project_subscriptions")
+    .select("project_id")
+    .eq("stripe_subscription_id", sub.id)
+    .maybeSingle();
+  if (bySub?.project_id) return bySub.project_id as string;
+
+  const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+  const { data: byCustomer } = await admin
+    .from("project_subscriptions")
+    .select("project_id")
+    .eq("stripe_customer_id", customerId)
+    .limit(1)
+    .maybeSingle();
+  return (byCustomer?.project_id as string | undefined) ?? null;
+}
+
+// Resolves which Mesita plan a Stripe subscription pays for: subscription
+// metadata first, then the price id against business_plans, then the price
+// lookup_key against the static catalog.
+async function resolvePlanKey(
+  admin: ReturnType<typeof adminClient>,
+  sub: Stripe.Subscription,
+): Promise<string | null> {
+  const fromMeta = sub.metadata?.plan_key as string | undefined;
+  if (fromMeta === "pro" || fromMeta === "ultra") return fromMeta;
+
+  const price = sub.items.data[0]?.price ?? null;
+  if (!price) return null;
+
+  const { data } = await admin
+    .from("business_plans")
+    .select("key")
+    .eq("stripe_price_id", price.id)
+    .maybeSingle();
+  if (data?.key) return data.key as string;
+
+  const byLookup = STRIPE_CATALOG.find(
+    (e) => e.lookupKey === price.lookup_key && e.table === "business_plans",
+  );
+  return byLookup?.rowKey ?? null;
+}
+
+// Upserts the project's subscription mirror and applies the plan side-effect.
+async function reconcileProjectSubscription(
+  admin: ReturnType<typeof adminClient>,
+  projectId: string,
+  sub: Stripe.Subscription,
+): Promise<void> {
+  const localStatus = mapStatus(sub.status);
+  const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+  const periodEnd = sub.current_period_end
+    ? new Date(sub.current_period_end * 1000).toISOString()
+    : null;
+  const priceCents = sub.items.data[0]?.price.unit_amount ?? null;
+  const currency = (sub.items.data[0]?.price.currency ?? "mxn").toUpperCase();
+
+  const planKey = await resolvePlanKey(admin, sub);
+  if (!planKey) {
+    console.error(
+      `[stripe-handle-webhook] no plan_key resolvable for subscription ${sub.id} (project ${projectId})`,
+    );
+    return;
+  }
+
+  const isLive = localStatus === "active" || localStatus === "past_due";
+
+  if (isLive) {
+    // Keep the one-live invariant: retire any OTHER live row for this project
+    // (e.g. a leftover mock_<projectId> row from the demo toggle) so the
+    // incoming subscription can't collide with project_subscriptions_one_live.
+    const retire = await admin
+      .from("project_subscriptions")
+      .update({ status: "canceled" })
+      .eq("project_id", projectId)
+      .neq("stripe_subscription_id", sub.id)
+      .in("status", ["active", "past_due"]);
+    if (retire.error) {
+      throw new Error(`project_retire_prior_live: ${retire.error.message}`);
+    }
+  }
+
+  const mirror = await admin
+    .from("project_subscriptions")
+    .upsert(
+      {
+        project_id: projectId,
+        plan_key: planKey,
+        stripe_customer_id: customerId,
+        stripe_subscription_id: sub.id,
+        status: localStatus,
+        price_cents: priceCents,
+        currency,
+        current_period_end: periodEnd,
+        cancel_at_period_end: sub.cancel_at_period_end ?? false,
+      },
+      { onConflict: "stripe_subscription_id" },
+    );
+  if (mirror.error) {
+    throw new Error(`project_subscription_mirror: ${mirror.error.message}`);
+  }
+
+  if (isLive) {
+    // Grant the paid plan.
+    const grant = await admin
+      .from("projects")
+      .update({ plan: planKey })
+      .eq("id", projectId);
+    if (grant.error) throw new Error(`project_grant: ${grant.error.message}`);
+  } else {
+    // Lapsed/cancelled: only lower the plan when it matches what this
+    // subscription was paying for. A plan granted through another door
+    // (admin, partnership) is left untouched.
+    const revoke = await admin
+      .from("projects")
+      .update({ plan: "free" })
+      .eq("id", projectId)
+      .eq("plan", planKey);
+    if (revoke.error) throw new Error(`project_revoke: ${revoke.error.message}`);
   }
 }
 
