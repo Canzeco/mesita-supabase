@@ -9,7 +9,7 @@
 //     redirect lands on the post-checkout page. No money moves.
 //
 //   • REAL — creates a Stripe Checkout Session and returns its hosted URL.
-//     Tier is NOT granted here; the Stripe webhook (stripe-handle-webhook)
+//     Tier is NOT granted here; the Stripe webhook (stripe-webhook-handle-event)
 //     flips it once payment clears.
 //
 // Body: { successUrl?: string, cancelUrl?: string }

@@ -5,7 +5,7 @@
 // time. So nothing here hardcodes the list. Every inference reads the live
 // table at run time, hands the candidate slugs to the classifier, and accepts
 // the answer only if it is one of those live slugs. Both the create path
-// (business-create-project) and the enrich path (the Enricher) call this
+// (business-web-create-project) and the enrich path (the Enricher) call this
 // so a place's category is always a canonical slug, never free text.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";

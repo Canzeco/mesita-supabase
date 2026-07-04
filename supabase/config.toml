@@ -98,7 +98,7 @@ s3_access_key = "env(S3_ACCESS_KEY)"
 s3_secret_key = "env(S3_SECRET_KEY)"
 
 # Per-function overrides. Naming rule: <caller>-<verb>-<noun> (e.g.
-# business-create-project, consumer-list-tickets). All functions verify the
+# business-web-create-project, consumer-list-tickets). All functions verify the
 # JWT except the truly public catalog reads, which rely on RLS to gate
 # visibility instead.
 
@@ -109,13 +109,13 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # enforce @canzeco.com + MFA. verify_jwt = true gates each to a real
 # session.
 
-[functions.business-signin-email]
+[functions.business-web-signin-email]
 verify_jwt = true
 
 [functions.consumer-web-signin-phone]
 verify_jwt = true
 
-[functions.business-accept-invite]
+[functions.business-web-accept-invite]
 verify_jwt = true
 
 [functions.enricher-suggest-places]
@@ -229,7 +229,7 @@ verify_jwt = true
 [functions.consumer-web-submit-story]
 verify_jwt = true
 
-[functions.business-verify-story]
+[functions.business-web-verify-story]
 verify_jwt = true
 
 # Consumer lookup at the table (resolve 6-char code → name + balance).
@@ -239,10 +239,10 @@ verify_jwt = true
 
 # Ownership-verification submit + status-poll, called from /add on
 # business.mesita.ai.
-[functions.business-get-verification]
+[functions.business-web-get-verification]
 verify_jwt = true
 
-[functions.business-request-manual-review]
+[functions.business-web-request-manual-review]
 verify_jwt = true
 
 # Email / phone OTP flow for ownership verification.
@@ -265,18 +265,18 @@ verify_jwt = true
 [functions.consumer-web-submit-ticket-review]
 verify_jwt = true
 
-[functions.business-get-profile]
+[functions.business-web-get-profile]
 verify_jwt = true
 
-[functions.business-create-profile]
+[functions.business-web-create-profile]
 verify_jwt = true
 
 # Unit (place) lifecycle
-[functions.business-create-project]
+[functions.business-web-create-project]
 verify_jwt = true
 
 # Admin-app create path (operator JWT → admin allowlist). Same pipeline as
-# business-create-project, admin-gated, no businesses upsert.
+# business-web-create-project, admin-gated, no businesses upsert.
 [functions.admin-web-create-project]
 verify_jwt = true
 
@@ -285,75 +285,75 @@ verify_jwt = true
 [functions.scheduler-run-project-creations]
 verify_jwt = false
 
-[functions.business-update-project]
+[functions.business-web-update-project]
 verify_jwt = true
 
-[functions.business-list-tags]
+[functions.business-web-list-tags]
 verify_jwt = true
 
-[functions.business-list-categories]
+[functions.business-web-list-categories]
 verify_jwt = true
 
 # Ownership-verification submit + status-poll, called from /add on
 # business.mesita.ai.
-[functions.business-send-email-otp]
+[functions.business-web-send-email-otp]
 verify_jwt = true
 
-[functions.business-verify-email-otp]
+[functions.business-web-verify-email-otp]
 verify_jwt = true
 
-[functions.business-send-phone-otp]
+[functions.business-web-send-phone-otp]
 verify_jwt = true
 
-[functions.business-verify-phone-otp]
+[functions.business-web-verify-phone-otp]
 verify_jwt = true
 
 # State-aware Place ID → Mesita place lookup. Powers the /add page's
 # inline result card (not_in_mesita / web_listed_unclaimed / pending /
 # verified_partner).
-[functions.business-find-place]
+[functions.business-web-find-place]
 verify_jwt = true
 
 # One-shot dashboard bundle: user + places + active place + recent tickets.
-[functions.business-get-overview]
+[functions.business-web-get-overview]
 verify_jwt = true
 
 # Ticket workflow
-[functions.business-create-ticket]
+[functions.business-web-create-ticket]
 verify_jwt = true
 
-[functions.business-submit-ticket-bill]
+[functions.business-web-submit-ticket-bill]
 verify_jwt = true
 
-[functions.business-mark-ticket-paid]
+[functions.business-web-mark-ticket-paid]
 verify_jwt = true
 
-[functions.business-list-tickets]
+[functions.business-web-list-tickets]
 verify_jwt = true
 
-[functions.business-cancel-ticket]
+[functions.business-web-cancel-ticket]
 verify_jwt = true
 
-[functions.business-suggest-places]
+[functions.business-web-suggest-places]
 verify_jwt = true
 
 # Team management — owner / editor / viewer tier + waiters.
-[functions.business-list-team]
+[functions.business-web-list-team]
 verify_jwt = true
 
-[functions.business-invite-member]
+[functions.business-web-invite-member]
 verify_jwt = true
 
-[functions.business-invite-staff]
+[functions.business-web-invite-staff]
 verify_jwt = true
 
-[functions.business-remove-member]
+[functions.business-web-remove-member]
 verify_jwt = true
 
-[functions.business-update-member-role]
+[functions.business-web-update-member-role]
 verify_jwt = true
 
-[functions.business-test-staff-channel]
+[functions.business-web-test-staff-channel]
 verify_jwt = true
 
 # --- Admin (Supabase Auth + super_admins allowlist) ---
@@ -433,10 +433,10 @@ verify_jwt = true
 verify_jwt = true
 
 # Owner-only place plan changes (Free / Promote / Ultra) via Stripe Checkout.
-[functions.business-change-subscription]
+[functions.business-web-change-subscription]
 verify_jwt = true
 
-[functions.stripe-handle-webhook]
+[functions.stripe-webhook-handle-event]
 verify_jwt = false
 
 # --- Twilio (external webhooks) ---
@@ -444,8 +444,8 @@ verify_jwt = false
 # WhatsApp inbound + delivery status. Public at the gateway; security
 # is X-Twilio-Signature validation inside each EF (TWILIO_AUTH_TOKEN).
 
-[functions.twilio-whatsapp-inbound]
+[functions.business-whats-handle-message]
 verify_jwt = false
 
-[functions.twilio-whatsapp-status]
+[functions.twilio-webhook-update-delivery]
 verify_jwt = false

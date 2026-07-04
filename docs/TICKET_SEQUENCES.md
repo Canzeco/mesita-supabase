@@ -32,7 +32,7 @@ Staff-only confirmation for off-rail (table) discount visits:
 2. Guest pays the discounted total at the table.
 3. Waiter taps **Paid received** (business console or WhatsApp **listo**).
 
-Ticket advances to review when staff confirms (`business-mark-ticket-paid` → `revealed`).
+Ticket advances to review when staff confirms (`business-web-mark-ticket-paid` → `revealed`).
 
 ### Review sequence
 
@@ -70,7 +70,7 @@ Kinds: `s_dp_sf`, `r_s_dp_sf`. Story runs **after** billing, before discount pay
 |---------|--------|
 | Consumer stepper | `mesita-web-consumer/src/lib/ticket-flow-steps.ts` |
 | Business floor | `mesita-web-business/src/lib/ticket-staff-lifecycle.ts` |
-| Scan + bill | `business-create-ticket` (`scanOnly`), `business-submit-ticket-bill` |
-| Discount pay | `business-mark-ticket-paid`, staff WhatsApp `handleStaffPaymentConfirm` |
-| Story | IG tag detection, `business-verify-story` |
+| Scan + bill | `business-web-create-ticket` (`scanOnly`), `business-web-submit-ticket-bill` |
+| Discount pay | `business-web-mark-ticket-paid`, staff WhatsApp `handleStaffPaymentConfirm` |
+| Story | IG tag detection, `business-web-verify-story` |
 | WhatsApp waiter | `supabase/functions/_shared/staff-whatsapp-flow.ts` |

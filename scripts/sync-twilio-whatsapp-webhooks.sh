@@ -11,8 +11,8 @@ source "${ROOT}/scripts/_load-local-env.sh"
 ACCOUNT_SID="${TWILIO_ACCOUNT_SID:?Set TWILIO_ACCOUNT_SID}"
 AUTH_TOKEN="${TWILIO_AUTH_TOKEN:?Set TWILIO_AUTH_TOKEN}"
 PROJECT_REF="${SUPABASE_PROJECT_REF:-yjalywfzdelacdzccpgb}"
-INBOUND="https://${PROJECT_REF}.supabase.co/functions/v1/twilio-whatsapp-inbound"
-STATUS="https://${PROJECT_REF}.supabase.co/functions/v1/twilio-whatsapp-status"
+INBOUND="https://${PROJECT_REF}.supabase.co/functions/v1/business-whats-handle-message"
+STATUS="https://${PROJECT_REF}.supabase.co/functions/v1/twilio-webhook-update-delivery"
 TARGET="${TWILIO_PHONE_NUMBERS:-+16282968794,+16282964968}"
 
 echo "==> Inbound:  ${INBOUND}"
@@ -51,4 +51,4 @@ for s in json.load(sys.stdin).get('senders', []):
 done
 
 echo ""
-echo "Deploy EFs first: supabase functions deploy twilio-whatsapp-inbound twilio-whatsapp-status"
+echo "Deploy EFs first: supabase functions deploy business-whats-handle-message twilio-webhook-update-delivery"
