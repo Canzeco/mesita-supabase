@@ -10,7 +10,11 @@ All software development work is coordinated in the SWARM Notion database
 (Software Work Assignment, Review & Merge):
 https://www.notion.so/393a9bf37a528096a20efd3d5514d77c
 
-- One task = one branch = one squash PR. Before starting any coding task, check SWARM;
+- Two task types: `Type = Code` (touches a repo; Repo/Branch/PR required; done = PR merged)
+  and `Type = Cowork` (research/planning/docs/ops; no repo params; done = output linked in
+  `Deliverable` or written in the task's Notes). Claim/blocking/escalation identical for both.
+  Keep columns light — rich context goes in `Description` and the task page body as text.
+- Code tasks: one task = one branch = one squash PR. Before starting any task, check SWARM;
   ad-hoc requests get a SWARM row first. Out-of-scope discoveries → new rows, not scope creep.
 - **Claim:** write `<platform>:<session-slug>` into `Agent` (e.g. `cursor:promos-ui`,
   `codex:refactor-x`, `code:dependabot-admin`), set Status = In progress, then re-read the
