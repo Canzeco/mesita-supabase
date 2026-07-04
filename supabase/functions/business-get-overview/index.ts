@@ -10,7 +10,7 @@
 // never calls another Edge Function.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
+import { corsPreflight, json, readJsonOr, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   checkSuperAdmin,
@@ -19,7 +19,9 @@ import {
 } from "../_shared/auth.ts";
 import { PLACE_BUSINESS_COLUMNS as PLACE_COLUMNS } from "../_shared/place-columns.ts";
 
-type Body = { activeUnitId?: string; ticketsLimit?: number };
+// `placeId` is the canonical place-row id key (MESITA-26); `activeUnitId`
+// is this EF's legacy alias, kept working during the client migration window.
+type Body = { placeId?: string; activeUnitId?: string; ticketsLimit?: number };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -39,7 +41,7 @@ Deno.serve(async (req) => {
   const isSuperAdmin = await checkSuperAdmin(admin, authRes.user);
 
   const body = await readJsonOr<Body>(req, {});
-  const requestedUnitId = (body.activeUnitId ?? "").toString().trim() || null;
+  const requestedUnitId = readPlaceIdAlias(body) || null;
   // 0 means "don't fetch tickets at all" — the sidebar layout doesn't need
   // them, only the active page does.
   const ticketsLimit = clampTicketsLimit(body.ticketsLimit);

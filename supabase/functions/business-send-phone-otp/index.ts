@@ -17,7 +17,7 @@
 // prior claim.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJson } from "../_shared/http.ts";
+import { corsPreflight, json, readJson, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
@@ -34,7 +34,7 @@ import {
   mockPlaceOtpPhone,
 } from "../_shared/place-otp-mock.ts";
 
-type Body = { projectId?: string; requesterEmail?: string };
+type Body = { placeId?: string; projectId?: string; requesterEmail?: string };
 
 // Channel choice. Voice for LatAm (landlines common; SMS-to-landline
 // fails). SMS for US/CA (mobile-dominant; voice OTPs feel jarring).
@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const projectId = (body.projectId ?? "").trim();
+  const projectId = readPlaceIdAlias(body);
   if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
 
   const mockMode = isPlaceOtpMockMode();

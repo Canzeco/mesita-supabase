@@ -15,7 +15,7 @@
 // Caller must be an owner of the place (super-admins pass through).
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
+import { corsPreflight, json, readJsonOr, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
@@ -27,6 +27,8 @@ import { isMemberRole, type MemberRole } from "../_shared/roles.ts";
 import { newInviteToken } from "../_shared/tokens.ts";
 
 type Body = {
+  /** Canonical place-row id key (MESITA-26); `projectId` kept as legacy alias. */
+  placeId?: string;
   projectId?: string;
   email?: string;
   role?: MemberRole;
@@ -43,7 +45,7 @@ Deno.serve(async (req) => {
   if (!authRes.ok) return authRes.response;
 
   const body = await readJsonOr<Body>(req, {});
-  const projectId = (body.projectId ?? "").trim();
+  const projectId = readPlaceIdAlias(body);
   const email = (body.email ?? "").trim().toLowerCase();
   const role = body.role ?? "editor";
   const redirectBase = (body.redirectBase ?? "").trim().replace(/\/$/, "");

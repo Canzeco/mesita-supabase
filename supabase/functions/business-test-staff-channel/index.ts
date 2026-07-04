@@ -6,7 +6,7 @@
 // a "(mock — Twilio coming soon)" caption.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
+import { corsPreflight, json, readJsonOr, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
@@ -16,6 +16,8 @@ import {
 import { readTwilioEnv, sendWhatsAppText } from "../_shared/twilio.ts";
 
 type Body = {
+  /** Canonical place-row id key (MESITA-26); `projectId` kept as legacy alias. */
+  placeId?: string;
   projectId?: string;
   channel?: "whatsapp" | "sms";
   phone?: string;
@@ -31,7 +33,7 @@ Deno.serve(async (req) => {
   if (!authRes.ok) return authRes.response;
 
   const body = await readJsonOr<Body>(req, {});
-  const projectId = (body.projectId ?? "").trim();
+  const projectId = readPlaceIdAlias(body);
   const channel = (body.channel ?? "whatsapp") as Body["channel"];
   const phone = (body.phone ?? "").trim();
   if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);

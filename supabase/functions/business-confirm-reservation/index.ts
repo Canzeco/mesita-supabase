@@ -8,7 +8,7 @@
 // Deploy: supabase functions deploy business-confirm-reservation
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJson } from "../_shared/http.ts";
+import { corsPreflight, json, readJson, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
@@ -18,7 +18,7 @@ import {
 import { RESERVATION_SELECT } from "../_shared/reservation-columns.ts";
 
 type Decision = "confirm" | "decline";
-type Body = { projectId?: string; reservationId?: string; decision?: Decision };
+type Body = { placeId?: string; projectId?: string; reservationId?: string; decision?: Decision };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const projectId = (body.projectId ?? "").toString().trim();
+  const projectId = readPlaceIdAlias(body);
   const reservationId = (body.reservationId ?? "").toString().trim();
   const decision = body.decision;
   if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);

@@ -17,7 +17,7 @@
 // function-to-function calls.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJson } from "../_shared/http.ts";
+import { corsPreflight, json, readJson, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
@@ -35,6 +35,8 @@ import { closeTicketAndEnqueueReview } from "../_shared/ticket-informal.ts";
 import { toCents } from "../_shared/money.ts";
 
 type Body = {
+  /** Canonical place-row id key (MESITA-26); `projectId` kept as legacy alias. */
+  placeId?: string;
   projectId?: string;
   consumerCode?: string;
   kind?: string;
@@ -64,7 +66,7 @@ Deno.serve(async (req) => {
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
 
-  const projectId = (body.projectId ?? "").toString().trim();
+  const projectId = readPlaceIdAlias(body);
   const consumerCode = (body.consumerCode ?? "").toString().trim().toUpperCase();
   const kind = (body.kind ?? "dp").toString().trim();
 

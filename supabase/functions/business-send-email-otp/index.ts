@@ -23,7 +23,7 @@
 // Auth: any signed-in user. Pending-row dedup mirrors the phone path.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJson } from "../_shared/http.ts";
+import { corsPreflight, json, readJson, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
@@ -41,7 +41,7 @@ import {
   mockPlaceOtpEmail,
 } from "../_shared/place-otp-mock.ts";
 
-type Body = { projectId?: string; requesterEmail?: string };
+type Body = { placeId?: string; projectId?: string; requesterEmail?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const projectId = (body.projectId ?? "").trim();
+  const projectId = readPlaceIdAlias(body);
   if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
 
   const mockMode = isPlaceOtpMockMode();

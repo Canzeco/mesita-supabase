@@ -30,7 +30,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import Stripe from "npm:stripe@17";
-import { corsPreflight, json, readJson } from "../_shared/http.ts";
+import { corsPreflight, json, readJson, readPlaceIdAlias } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv, requireOwner } from "../_shared/auth.ts";
 import {
   ensureWholeCatalog,
@@ -39,6 +39,8 @@ import {
 } from "../_shared/stripe-billing.ts";
 
 type Body = {
+  /** Canonical place-row id key (MESITA-26); `projectId` kept as legacy alias. */
+  placeId?: string;
   projectId?: string;
   plan?: string;
   successUrl?: string;
@@ -67,7 +69,7 @@ Deno.serve(async (req) => {
 
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
-  const projectId = (bodyRes.body.projectId ?? "").toString().trim();
+  const projectId = readPlaceIdAlias(bodyRes.body);
   const plan = (bodyRes.body.plan ?? "").toString().trim();
   if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
   if (plan !== "free" && !PAID_PLANS.has(plan)) {
