@@ -15,7 +15,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
+import { corsPreflight, json, readJsonOr, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
@@ -24,7 +24,7 @@ import {
 } from "../_shared/auth.ts";
 import { phoneDigits } from "../_shared/phone.ts";
 
-type Body = { projectId?: string };
+type Body = { placeId?: string; projectId?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
   if (!authRes.ok) return authRes.response;
 
   const body = await readJsonOr<Body>(req, {});
-  const projectId = (body.projectId ?? "").trim();
+  const projectId = readPlaceIdAlias(body);
   if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
 
   const admin = adminClient(envRes.env);

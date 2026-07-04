@@ -25,7 +25,7 @@
 // Auth: any signed-in user.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJson } from "../_shared/http.ts";
+import { corsPreflight, json, readJson, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
@@ -33,7 +33,7 @@ import {
 } from "../_shared/auth.ts";
 import { resolveRequesterEmail } from "../_shared/input.ts";
 
-type Body = { projectId?: string; requesterEmail?: string; note?: string };
+type Body = { placeId?: string; projectId?: string; requesterEmail?: string; note?: string };
 
 type Region = "mx_latam" | "us" | "other";
 
@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const projectId = (body.projectId ?? "").trim();
+  const projectId = readPlaceIdAlias(body);
   const note = (body.note ?? "").trim().slice(0, 500);
   if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
 

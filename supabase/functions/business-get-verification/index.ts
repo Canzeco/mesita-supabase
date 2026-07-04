@@ -10,14 +10,14 @@
 // operators' requests.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { corsPreflight, json, readJson } from "../_shared/http.ts";
+import { corsPreflight, json, readJson, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
 
-type Body = { projectId?: string };
+type Body = { placeId?: string; projectId?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
-  const projectId = (body.projectId ?? "").trim();
+  const projectId = readPlaceIdAlias(body);
   if (!projectId) return json({ ok: false, error: "projectId is required" }, 400);
 
   const admin = adminClient(envRes.env);

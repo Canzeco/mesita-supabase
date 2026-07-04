@@ -42,7 +42,7 @@
 // Deploy: supabase functions deploy admin-list-notifications
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { clampIntRange, corsPreflight, json, readJsonOr } from "../_shared/http.ts";
+import { clampIntRange, corsPreflight, json, readJsonOr, readPlaceIdAlias } from "../_shared/http.ts";
 import {
   adminClient,
   getAuthedUser,
@@ -72,6 +72,8 @@ type Body = {
   // Narrow to specific event types server-side (empty/omitted = all types).
   types?: string[] | null;
   // Narrow every source to a single place (the places/projects shared PK).
+  // `placeId` is the canonical key (MESITA-26); `projectId` is the legacy alias.
+  placeId?: string | null;
   projectId?: string | null;
   // Case-insensitive place-name substring filter (applied post-merge).
   q?: string | null;
@@ -159,7 +161,7 @@ Deno.serve(async (req) => {
     .filter((t): t is NotificationType => ALL_TYPES.includes(t as NotificationType));
   const wantType = (t: NotificationType) =>
     wantAtlas && (typesFilter.length === 0 || typesFilter.includes(t));
-  const projectId = (body.projectId ?? "").toString().trim() || null;
+  const projectId = readPlaceIdAlias(body) || null;
   const q = (body.q ?? "").toString().trim().toLowerCase() || null;
 
   const items: NotificationItem[] = [];
