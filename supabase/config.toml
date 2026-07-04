@@ -258,10 +258,7 @@ verify_jwt = true
 # Each EF re-checks the caller's JWT email against public.super_admins
 # before doing anything privileged.
 
-# Tiny session-check used by the admin web's app shell.
-[functions.admin-get-identity]
-verify_jwt = true
-
+# Tiny session-check used by the admin + business app shells.
 [functions.auth-get-identity]
 verify_jwt = true
 
