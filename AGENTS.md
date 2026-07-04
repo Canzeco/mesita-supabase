@@ -6,8 +6,8 @@ follows the same modus operandi: **SWARM**.
 
 ## SWARM — task coordination (Linear)
 
-All work by AI agents is coordinated in **Linear** (workspace `canzeco`, team **Canzeco**)
-under the **SWARM** protocol (Software Work Assignment, Review & Merge). Linear holds all
+All work by AI agents is coordinated in **Linear** (workspace `canzeco`, team **Mesita**,
+issue key `MESITA-`) under the **SWARM** protocol (Software Work Assignment, Review & Merge). Linear holds all
 management (Initiatives → Projects → Issues); Notion holds knowledge (issues link to Notion
 pages). Full protocol doc:
 https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus-operandi-442de3edc517
