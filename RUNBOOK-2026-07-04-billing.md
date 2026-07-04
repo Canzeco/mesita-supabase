@@ -26,15 +26,22 @@ updated).
 ```sh
 supabase functions deploy business-change-subscription \
   stripe-handle-webhook consumer-create-subscription business-update-project \
+  twilio-whatsapp-inbound \
   --project-ref yjalywfzdelacdzccpgb
 ```
 
 - `business-change-subscription` — NEW: owner-only Free/Promote/Ultra changes
   (Stripe Checkout in real mode, instant grant in mock mode).
 - `stripe-handle-webhook` — now reconciles both consumer and business
-  subscriptions (discriminated by `consumer_id` / `project_id` metadata).
+  subscriptions (discriminated by `consumer_id` / `project_id` metadata);
+  retires prior live rows before mirroring (one-live invariant) and rolls
+  back the dedupe marker on handler error so failed events retry.
 - `consumer-create-subscription` — $100 fallback + self-provisioning price.
 - `business-update-project` — no longer accepts `plan` (billing owns it).
+- `twilio-whatsapp-inbound` — bundles the `_shared/staff-place-ops.ts` fix:
+  its discount-eligibility gate now recognises the `pro`/`ultra` plan keys
+  (was still checking the retired `informal_pro`/`informal_ultra`, which
+  blocked every paid place from opening a discount ticket over WhatsApp).
 
 Must run AFTER step 1 (the EFs read the new tables). Afterwards, verify
 cloud == repo via MCP `get_edge_function` (no stubs — see the

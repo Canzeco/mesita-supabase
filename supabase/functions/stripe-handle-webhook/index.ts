@@ -124,6 +124,9 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     console.error(`[stripe-handle-webhook] handler error (${event.type}):`, err);
+    // Roll back the dedupe marker so Stripe's retry re-processes this event
+    // instead of hitting the replay short-circuit and dropping it forever.
+    await admin.from("stripe_events").delete().eq("event_id", event.id);
     return new Response("Handler error", { status: 500 });
   }
 
@@ -179,7 +182,24 @@ async function reconcileConsumerSubscription(
   const priceCents = sub.items.data[0]?.price.unit_amount ?? null;
   const currency = (sub.items.data[0]?.price.currency ?? "mxn").toUpperCase();
 
-  await admin
+  const isLive = localStatus === "active" || localStatus === "past_due";
+
+  if (isLive) {
+    // Keep the one-live invariant: retire any OTHER live row for this consumer
+    // (e.g. a leftover mock_<consumerId> row from the demo toggle) so the
+    // incoming subscription can't collide with consumer_subscriptions_one_live.
+    const retire = await admin
+      .from("consumer_subscriptions")
+      .update({ status: "canceled" })
+      .eq("consumer_id", consumerId)
+      .neq("stripe_subscription_id", sub.id)
+      .in("status", ["active", "past_due"]);
+    if (retire.error) {
+      throw new Error(`consumer_retire_prior_live: ${retire.error.message}`);
+    }
+  }
+
+  const mirror = await admin
     .from("consumer_subscriptions")
     .upsert(
       {
@@ -194,11 +214,13 @@ async function reconcileConsumerSubscription(
       },
       { onConflict: "stripe_subscription_id" },
     );
+  if (mirror.error) {
+    throw new Error(`consumer_subscription_mirror: ${mirror.error.message}`);
+  }
 
-  const isLive = localStatus === "active" || localStatus === "past_due";
   if (isLive) {
     // Grant Premium via the subscription door.
-    await admin
+    const grant = await admin
       .from("consumers")
       .update({
         tier_key: "premium",
@@ -207,10 +229,11 @@ async function reconcileConsumerSubscription(
         tier_expires_at: periodEnd,
       })
       .eq("id", consumerId);
+    if (grant.error) throw new Error(`consumer_grant: ${grant.error.message}`);
   } else {
     // Lapsed/cancelled: only downgrade if Premium came through the paid door.
     // An Instagram/invitation Premium is left untouched.
-    await admin
+    const revoke = await admin
       .from("consumers")
       .update({
         tier_key: "free",
@@ -219,6 +242,7 @@ async function reconcileConsumerSubscription(
       })
       .eq("id", consumerId)
       .eq("tier_origin", "subscription");
+    if (revoke.error) throw new Error(`consumer_revoke: ${revoke.error.message}`);
   }
 }
 
@@ -295,7 +319,24 @@ async function reconcileProjectSubscription(
     return;
   }
 
-  await admin
+  const isLive = localStatus === "active" || localStatus === "past_due";
+
+  if (isLive) {
+    // Keep the one-live invariant: retire any OTHER live row for this project
+    // (e.g. a leftover mock_<projectId> row from the demo toggle) so the
+    // incoming subscription can't collide with project_subscriptions_one_live.
+    const retire = await admin
+      .from("project_subscriptions")
+      .update({ status: "canceled" })
+      .eq("project_id", projectId)
+      .neq("stripe_subscription_id", sub.id)
+      .in("status", ["active", "past_due"]);
+    if (retire.error) {
+      throw new Error(`project_retire_prior_live: ${retire.error.message}`);
+    }
+  }
+
+  const mirror = await admin
     .from("project_subscriptions")
     .upsert(
       {
@@ -311,23 +352,27 @@ async function reconcileProjectSubscription(
       },
       { onConflict: "stripe_subscription_id" },
     );
+  if (mirror.error) {
+    throw new Error(`project_subscription_mirror: ${mirror.error.message}`);
+  }
 
-  const isLive = localStatus === "active" || localStatus === "past_due";
   if (isLive) {
     // Grant the paid plan.
-    await admin
+    const grant = await admin
       .from("projects")
       .update({ plan: planKey })
       .eq("id", projectId);
+    if (grant.error) throw new Error(`project_grant: ${grant.error.message}`);
   } else {
     // Lapsed/cancelled: only lower the plan when it matches what this
     // subscription was paying for. A plan granted through another door
     // (admin, partnership) is left untouched.
-    await admin
+    const revoke = await admin
       .from("projects")
       .update({ plan: "free" })
       .eq("id", projectId)
       .eq("plan", planKey);
+    if (revoke.error) throw new Error(`project_revoke: ${revoke.error.message}`);
   }
 }
 

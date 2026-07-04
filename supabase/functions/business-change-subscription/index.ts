@@ -155,7 +155,11 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `Plan '${plan}' is not configured` }, 500);
   }
 
-  if (liveSub?.plan_key === plan) {
+  // Already on this plan? No-op — UNLESS we're in real mode and the live row
+  // is only a leftover mock grant (from when MOCK_SUBSCRIPTION was on). In
+  // that case fall through so the owner gets real Stripe billing; the webhook
+  // retires the mock row when the real subscription lands.
+  if (liveSub?.plan_key === plan && (mockMode || !liveIsMock)) {
     return json({ ok: true, plan, already_subscribed: true });
   }
 

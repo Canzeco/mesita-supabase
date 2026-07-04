@@ -11,7 +11,9 @@ export type PlaceOpsRow = PlaceRateRow & {
   instagram_url?: string | null;
 };
 
-const INFORMAL_DISCOUNT_PLANS = new Set(["informal_pro", "informal_ultra"]);
+// Paid place plans (public.membership enum). fiscal_type is checked
+// separately, so this only distinguishes Free from the paid tiers.
+const DISCOUNT_PLANS = new Set(["pro", "ultra"]);
 
 export type DiscountOpsBlock = {
   ok: false;
@@ -76,7 +78,7 @@ export function assessDiscountTicketOps(
       staffMessage:
         "Este local no está configurado para descuentos en cuenta.\n\n" +
         "Mesita Ops por WhatsApp solo abre tickets con descuento (tipo A).\n" +
-        "Para usar este canal: Mesita Business → Promos → elige «Pro/Ultra con Descuentos» y configura porcentajes.",
+        "Para usar este canal: Mesita Business → Promos → elige «Promote» o «Ultra» y configura porcentajes.",
     };
   }
 
@@ -87,17 +89,17 @@ export function assessDiscountTicketOps(
       code: "free_plan",
       staffMessage:
         "Este local está en plan Free — las promos están bloqueadas en 0%.\n\n" +
-        "En Mesita Business → Promos activa «Pro o Ultra con Descuentos» y configura los porcentajes (Free / Premium, primera visita y recurrente).",
+        "En Mesita Business → Promos activa «Promote» o «Ultra» y configura los porcentajes (Free / Premium, primera visita y recurrente).",
     };
   }
 
-  if (!INFORMAL_DISCOUNT_PLANS.has(plan)) {
+  if (!DISCOUNT_PLANS.has(plan)) {
     return {
       ok: false,
       code: "wrong_plan",
       staffMessage:
         "El plan de este local no incluye tickets con descuento por WhatsApp.\n\n" +
-        "En Mesita Business → Promos elige una suscripción «con Descuentos» (Pro o Ultra).",
+        "En Mesita Business → Promos elige «Promote» o «Ultra».",
     };
   }
 
