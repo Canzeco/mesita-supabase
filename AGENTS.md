@@ -2,39 +2,44 @@
 
 This repo is part of the **Mesita** multi-repo workspace. Every AI coding agent working
 here — Cursor, Codex, Claude Code, Claude Cowork, subagents, scheduled cloud agents —
-follows the same modus operandi: **SWARM**.
+follows the same orchestration protocol: **SWARM v2** (a blackboard system: agents never
+talk to each other; they coordinate through the Linear work ledger and git).
 
-## SWARM — task coordination (Linear)
+## SWARM v2 — orchestration (Linear)
 
-All work by AI agents is coordinated in **Linear** (workspace `canzeco`, team **Mesita**,
-issue key `MESITA-`) under the **SWARM** protocol (Software Work Assignment, Review & Merge). Linear holds all
-management (Initiatives → Projects → Issues); Notion holds knowledge (issues link to Notion
-pages). Full protocol doc:
-https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus-operandi-442de3edc517
+Work ledger: **Linear**, workspace `canzeco`, team **Mesita**, issue key `MESITA-`.
+Full protocol: https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus-operandi-442de3edc517
 
-- Two task types via labels: `code` (touches a repo; one issue = one branch = one squash PR;
-  done = merged) and `cowork` (research/planning/docs/ops; done = deliverable link posted in
-  a comment). Keep issues thin — rich context in the description as natural text.
-- **Pick & claim:** take the highest-priority unblocked Todo issue without `needs-human`.
-  Move it to In Progress and immediately comment `claimed: <platform>:<session-slug>`
-  (e.g. `claimed: cursor:promos-ui`, `claimed: code:dependabot-admin`). Then re-read the
-  comments — if an earlier claim by someone else exists, back off and pick another issue.
-- **Code flow:** branch off freshly-pulled `main` as `agent/<ISSUE-ID>-<slug>` (the issue ID
-  in the branch name auto-links GitHub↔Linear). Ship via squash PR with `Closes <ISSUE-ID>`
-  in the PR description — Linear moves the issue through In Review and closes it on merge
-  (`gh pr merge --squash --delete-branch`).
-- Ad-hoc requests get a Linear issue first, then work starts. Out-of-scope discoveries
-  become new issues — never scope creep.
-- Blocked, uncertain, or the decision belongs to Pato → add the `needs-human` label, assign
-  Pato, comment why, and stop. Never guess.
-- (SWARM agents are NOT Mesita's product AI agents — Enricher/Reservationist live inside
-  the product; SWARM agents build it.)
+- **Pato never opens Linear.** You are the interface; Linear is the database. Never ask
+  him to check or update it — summarize in chat instead.
+- **If it writes to a repo or a cloud service, it has an issue.** Ad-hoc request → silently
+  create the issue (title, repo label, footprint = paths you expect to touch), claim it,
+  work it. Pure Q&A needs no issue. Don't narrate the bookkeeping.
+- **Boot** (before touching any repo): resume your own open claims; scan `needs-human`
+  issues and surface a one-line summary to Pato if any exist.
+- **Pick:** highest-priority unblocked Todo without `needs-human` whose footprint doesn't
+  overlap an active claim. **Claim:** move to In Progress + comment
+  `claimed: <platform>:<session-slug>`; re-read comments — an earlier claim wins, back off.
+- **Lease:** claims with no comment/commit for 4h are stale — take over with a
+  `takeover: <your-id> (stale >4h)` comment. Post progress comments on long tasks.
+- **Code flow:** branch `agent/<ISSUE-ID>-<slug>` off freshly-pulled `main` → small
+  commits, push early → pull `main` back in, resolve, re-test → squash PR with
+  `Closes <ISSUE-ID>` → **merge it yourself** (`gh pr merge --squash --delete-branch`).
+  Don't wait for Pato. Whoever merges second resolves conflicts. Never push `main`.
+- **Cowork flow:** do the work, post the deliverable link/results in a comment, Done.
+- **Fan-out:** ≥3 independent units or >1 repo → split into child issues (blocked-by
+  wiring) and run parallel subagents in isolated git worktrees, one issue each (≤5).
+- **Escalate to Pato ONLY for:** contradictory high-level instructions; irreversible or
+  destructive ops (prod data, deletions, spend, external publishing); credentials/OAuth;
+  undocumented product decisions. Then: label `needs-human`, assign Pato, comment — and
+  ask him in chat if he's present. Everything else: decide, log a `decision:` comment,
+  proceed.
+- **Hierarchy:** Pato live > Linear issue > Notion specs > memory/conventions.
+- Out-of-scope discoveries → new issues, never scope creep.
 
 ## Core rules
 
 - Reply in English, even when Pato writes in Spanish.
-- **Git:** never push directly to `main`. Branch off freshly-pulled `main` → commit small →
-  pull `main` back in before merging → squash PR (`gh pr merge --squash --delete-branch`).
 - **No local dev servers** (no `pnpm dev` / `next dev`). Verify via Vercel auto-deploy on push.
 - **DB access:** Mesita user clients never call the database directly — every read/write
   goes through a Supabase Edge Function.
@@ -42,3 +47,4 @@ https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus-operandi-442de
   mirrored into its repo (`mesita-supabase` / `mesita-n8n`) in the same session.
 - Deep project context lives in the Notion **Mesita Main** page (read-only):
   https://www.notion.so/Mesita-323a9bf37a528060987ee31c750e3dfa
+- (SWARM agents build Mesita; Enricher/Reservationist are product agents inside Mesita.)
