@@ -165,6 +165,9 @@ verify_jwt = true
 [functions.consumer-list-reservations]
 verify_jwt = true
 
+[functions.consumer-list-pay-notifications]
+verify_jwt = true
+
 [functions.consumer-mock-story-detect]
 verify_jwt = true
 
