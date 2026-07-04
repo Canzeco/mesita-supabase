@@ -1,6 +1,7 @@
 // Partial bill amounts across multiple WhatsApp messages (session.context).
 
 import { extractConsumerCodeFromText } from "./consumer-code.ts";
+import { toCents } from "./money.ts";
 
 export type BillDraft = {
   subtotal_cents: number | null;
@@ -219,11 +220,4 @@ function moneyToCents(v: string): number | null {
   const n = Number(v);
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.round(n * 100);
-}
-
-function toCents(v: unknown): number | null {
-  if (v == null) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.trunc(n);
 }
