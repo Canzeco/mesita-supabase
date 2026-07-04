@@ -70,7 +70,7 @@ Deno.serve(async (req) => {
     // super-admin gets the broadest permission set the place role enum
     // can express. (The frontend MyPlace type only knows owner|business|staff.)
     places = [
-      { ...(placeRow.data as Record<string, unknown>), my_role: "owner" } as PlaceRow,
+      { ...(placeRow.data as unknown as Record<string, unknown>), my_role: "owner" } as unknown as PlaceRow,
     ];
   } else {
     // Pull every place the caller is a member of, with the role on each row.
@@ -83,9 +83,9 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: memberRows.error.message }, 500);
     }
     type MemberRow = { role: string; place: Record<string, unknown> | null };
-    places = ((memberRows.data ?? []) as MemberRow[])
+    places = ((memberRows.data ?? []) as unknown as MemberRow[])
       .filter((r) => r.place != null)
-      .map((r) => ({ ...r.place!, my_role: r.role }) as PlaceRow);
+      .map((r) => ({ ...r.place!, my_role: r.role }) as unknown as PlaceRow);
   }
 
   // Pick the active unit. Honour the requested id when it matches a

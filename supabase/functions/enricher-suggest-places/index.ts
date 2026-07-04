@@ -17,7 +17,7 @@
 // Deploy: supabase functions deploy enricher-suggest-places
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
@@ -205,7 +205,7 @@ async function fetchGooglePredictions(
 // ── Mesita-side fallback ──────────────────────────────────────────────
 
 async function fetchMesitaPredictions(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseClient,
   input: string,
   callerId: string | null,
 ): Promise<Prediction[]> {
@@ -241,7 +241,7 @@ async function fetchMesitaPredictions(
 }
 
 async function enrichByPlaceIds(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseClient,
   placeIds: string[],
   callerId: string | null,
 ): Promise<Map<string, PredictionStatus>> {
@@ -262,7 +262,7 @@ async function enrichByPlaceIds(
 // `verified_partner_self/_other` for owned ones depending on whether the
 // caller (resolved by the natural EF before this call) is the owner.
 async function statusesForPlaces(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseClient,
   rows: Array<{ id: string; google_place_id: string }>,
   callerId: string | null,
 ): Promise<Map<string, PredictionStatus>> {

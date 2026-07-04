@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
   if (!premium?.stripe_price_id) {
     return json({ ok: false, error: "Premium price not configured" }, 500);
   }
-  const stripe = new Stripe(stripeKey, { apiVersion: "2025-03-31.basil" });
+  const stripe = new Stripe(stripeKey, { apiVersion: "2025-03-31.basil" as Stripe.StripeConfig["apiVersion"] });
 
   // Reuse an existing Stripe customer id if we've seen this consumer before.
   const { data: existing } = await admin
