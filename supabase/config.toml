@@ -197,6 +197,9 @@ verify_jwt = true
 [functions.business-list-tags]
 verify_jwt = true
 
+[functions.business-list-categories]
+verify_jwt = true
+
 # Ownership-verification submit + status-poll, called from /add on
 # business.mesita.ai.
 [functions.business-send-email-otp]
