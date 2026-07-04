@@ -184,6 +184,56 @@ verify_jwt = false
 [functions.consumer-schedule-project-creation]
 verify_jwt = true
 
+# Entity-split EFs (migration 0031). consumer-list-tickets stays for
+# now while clients migrate; the new surfaces split saved-places,
+# reservations, and coupons into first-class entities.
+[functions.consumer-save-place]
+verify_jwt = true
+
+[functions.consumer-list-saved-places]
+verify_jwt = true
+
+[functions.consumer-list-coupons]
+verify_jwt = true
+
+[functions.consumer-create-reservation]
+verify_jwt = true
+
+[functions.consumer-list-tickets]
+verify_jwt = true
+
+# Entity-split EFs (migration 0031). consumer-list-tickets stays for
+# now while clients migrate; the new surfaces split saved-places,
+# reservations, and coupons into first-class entities.
+
+[functions.consumer-delete-account]
+verify_jwt = true
+
+# --- Business (all authed) ---
+
+# Identity
+
+[functions.consumer-submit-story]
+verify_jwt = true
+
+[functions.business-verify-story]
+verify_jwt = true
+
+# Consumer lookup at the table (resolve 6-char code → name + balance).
+
+[functions.consumer-claim-instagram]
+verify_jwt = true
+
+# Ownership-verification submit + status-poll, called from /add on
+# business.mesita.ai.
+[functions.business-get-verification]
+verify_jwt = true
+
+[functions.business-request-manual-review]
+verify_jwt = true
+
+# Email / phone OTP flow for ownership verification.
+
 [functions.consumer-get-profile]
 verify_jwt = true
 
