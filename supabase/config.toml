@@ -118,47 +118,6 @@ verify_jwt = true
 [functions.business-accept-invite]
 verify_jwt = true
 
-[functions.staff-accept-invite]
-verify_jwt = true
-
-# --- Consumer (public reads + authed writes) ---
-
-# Public catalog reads. RLS enforces which place statuses are visible.
-[functions.consumer-list-places]
-verify_jwt = false
-
-[functions.consumer-get-place]
-verify_jwt = false
-
-# Personalised discovery surfaces. JWT required so we can read the
-# consumer's class + history; the recommendation logic still respects
-# RLS for place visibility.
-[functions.consumer-recommend-map]
-verify_jwt = true
-
-[functions.consumer-recommend-swipe]
-verify_jwt = true
-
-# --- Artificial callers (recommender-*) ---
-#
-# Internal-only services with no end user. Natural-caller EFs invoke them
-# with the service-role bearer + an X-Internal-Caller header; the gateway
-# is open (verify_jwt = false) and authentication happens inside the EF
-# via _shared/internal.ts → requireInternalCaller. Never exposed to the
-# web — clients call the natural-caller EFs which delegate here.
-
-[functions.recommender-rank-swipe]
-verify_jwt = false
-
-[functions.recommender-rank-map]
-verify_jwt = false
-
-# Artificial callers (atlas-*) — place intelligence + encyclopaedia. The
-# Google Places key (SUPA_GMP_KEY) only lives inside these EFs; natural
-# callers forward requests through invokeArtificialCaller. Atlas is the
-# umbrella for every place-research / place-data-source surface (Google,
-# Foursquare, schema.org, …).
-
 [functions.enricher-suggest-places]
 verify_jwt = false
 
@@ -196,28 +155,7 @@ verify_jwt = true
 [functions.consumer-update-profile]
 verify_jwt = true
 
-[functions.consumer-list-tickets]
-verify_jwt = true
-
-# Entity-split EFs (migration 0031). consumer-list-tickets stays for
-# now while clients migrate; the new surfaces split saved-places,
-# reservations, and coupons into first-class entities.
-[functions.consumer-save-place]
-verify_jwt = true
-
-[functions.consumer-list-saved-places]
-verify_jwt = true
-
-[functions.consumer-list-coupons]
-verify_jwt = true
-
 [functions.consumer-list-reservations]
-verify_jwt = true
-
-[functions.consumer-create-reservation]
-verify_jwt = true
-
-[functions.consumer-submit-story]
 verify_jwt = true
 
 [functions.consumer-mock-story-detect]
@@ -226,12 +164,6 @@ verify_jwt = true
 [functions.consumer-submit-ticket-review]
 verify_jwt = true
 
-[functions.consumer-delete-account]
-verify_jwt = true
-
-# --- Business (all authed) ---
-
-# Identity
 [functions.business-get-profile]
 verify_jwt = true
 
@@ -239,9 +171,6 @@ verify_jwt = true
 verify_jwt = true
 
 # Unit (place) lifecycle
-[functions.business-list-projects]
-verify_jwt = true
-
 [functions.business-create-project]
 verify_jwt = true
 
@@ -252,37 +181,17 @@ verify_jwt = true
 
 # Staggered scheduler: consumer/admin enqueue a scheduled_project_creations row; the
 # pg_cron poller drips due rows to the service-gated scheduler-run-project-creations.
-[functions.consumer-schedule-project-creation]
-verify_jwt = true
-
-[functions.admin-schedule-project-creations]
-verify_jwt = true
-
-# Service-gated internal create the poller invokes per due placeId
-# (get-enriched -> save-unit-data -> save-place-media; updates the queue row).
 [functions.scheduler-run-project-creations]
 verify_jwt = false
 
 [functions.business-update-project]
 verify_jwt = true
 
-[functions.business-delete-project]
-verify_jwt = true
-
-# Tag vocabulary for the Place tag picker. Authenticated (the console always
-# has a session); reads the world-readable place_tags config via the anon key.
 [functions.business-list-tags]
 verify_jwt = true
 
 # Ownership-verification submit + status-poll, called from /add on
 # business.mesita.ai.
-[functions.business-get-verification]
-verify_jwt = true
-
-[functions.business-request-manual-review]
-verify_jwt = true
-
-# Email / phone OTP flow for ownership verification.
 [functions.business-send-email-otp]
 verify_jwt = true
 
@@ -321,14 +230,6 @@ verify_jwt = true
 [functions.business-cancel-ticket]
 verify_jwt = true
 
-[functions.business-verify-story]
-verify_jwt = true
-
-# Consumer lookup at the table (resolve 6-char code → name + balance).
-[functions.business-find-consumer]
-verify_jwt = true
-
-# Google Places proxies. Keep the platform key server-side.
 [functions.business-suggest-places]
 verify_jwt = true
 
@@ -427,23 +328,7 @@ verify_jwt = true
 verify_jwt = true
 
 # Re-run the profile enricher on an existing place (super-admin only).
-[functions.admin-enrich-place]
-verify_jwt = true
-
-# --- Membership (Free / Premium) ---
-#
-# The three "doors" into Premium + the admin grant. consumer-* are gated by
-# the caller's JWT. stripe-handle-webhook is PUBLIC (verify_jwt = false) —
-# it's an external webhook; security is Stripe signature verification inside
-# the EF (STRIPE_WEBHOOK_SECRET), not the gateway.
-
 [functions.consumer-create-subscription]
-verify_jwt = true
-
-[functions.consumer-claim-instagram]
-verify_jwt = true
-
-[functions.admin-grant-plan]
 verify_jwt = true
 
 [functions.stripe-handle-webhook]
@@ -459,8 +344,3 @@ verify_jwt = false
 
 [functions.twilio-whatsapp-status]
 verify_jwt = false
-
-[functions.twilio-bootstrap-staff-invite]
-verify_jwt = false
-
-# (Link-discovery benchmark harness + bench tables removed — research lives in n8n.)
