@@ -1,6 +1,6 @@
 // Supabase Edge Function — enricher-discover-places (artificial caller)
 //
-// Part of the Atlas namespace (place intelligence + encyclopaedia).
+// Part of the Enricher namespace (place intelligence + encyclopaedia).
 // Runs many Google Places Text Search queries in one batch and returns
 // the union of Place IDs across all of them. Paginates each query up to
 // the API max (3 pages × 20 = 60 results) and runs queries with bounded

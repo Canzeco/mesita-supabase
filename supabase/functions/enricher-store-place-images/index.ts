@@ -1,6 +1,6 @@
 // Supabase Edge Function — enricher-store-place-images (artificial caller / async)
 //
-// Receives gathered source image URLs + metadata from Atlas enrichment, stores
+// Receives gathered source image URLs + metadata from Enricher enrichment, stores
 // metadata rows immediately, then mirrors assets to Supabase Storage in the
 // background. Place creation/enrichment should stay fast: runtime keeps source
 // URLs, while this function persists durable media paths asynchronously.

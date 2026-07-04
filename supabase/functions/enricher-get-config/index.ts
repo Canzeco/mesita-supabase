@@ -6,7 +6,7 @@
 // S5 (category inference + tag synthesis).
 //
 // Returns { config, categories[], tags[] }:
-//   • config     — the Atlas enrichment knobs from app_settings (loadAtlasConfig):
+//   • config     — the Enricher enrichment knobs from app_settings (loadAtlasConfig):
 //                  synthesis quality, gather/analyze/save image caps, vision
 //                  toggle, and the vision analysis/sorting prompts.
 //   • categories — the live place_categories vocabulary (slug,label,section,
