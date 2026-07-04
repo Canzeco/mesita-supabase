@@ -50,7 +50,7 @@ type Body = {
 const PAID_PLANS = new Set(["pro", "ultra"]);
 const MOCK_PERIOD_DAYS = 30;
 
-// ⚠️ DEMO MOCK — same single on/off switch as consumer-create-subscription.
+// ⚠️ DEMO MOCK — same single on/off switch as consumer-web-create-subscription.
 // Set the MOCK_SUBSCRIPTION env to "false" and redeploy to require real
 // Stripe Checkout payments.
 const MOCK_SUBSCRIPTION =

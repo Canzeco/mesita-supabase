@@ -19,7 +19,7 @@
 //      (lets a really good place repeat once but not seven times).
 //
 // Auth: artificial caller — only invoked by natural-caller EFs (currently
-// consumer-recommend-map) over the internal-call channel. verify_jwt
+// consumer-web-recommend-map) over the internal-call channel. verify_jwt
 // is disabled at the gateway; the EF itself enforces the service-role
 // bearer via requireInternalCaller.
 //

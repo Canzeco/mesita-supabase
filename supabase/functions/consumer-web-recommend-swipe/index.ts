@@ -1,0 +1,77 @@
+// Supabase Edge Function — consumer-web-recommend-swipe (natural caller)
+//
+// Thin facade for the consumer swipe view. Resolves the caller's profile
+// (anonymous OK — the discover surface is public until sign-up) and forwards
+// to the recommender-rank-swipe artificial caller for the actual ranking
+// pipeline. Everything ranking-related lives in the artificial caller so
+// admin / business / future consumer surfaces can reuse the same pipeline.
+//
+// Local:  supabase functions serve consumer-web-recommend-swipe
+// Deploy: supabase functions deploy consumer-web-recommend-swipe
+
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
+import { getOptionalAuthedUser, readEFEnv } from "../_shared/auth.ts";
+import { invokeArtificialCaller } from "../_shared/internal.ts";
+
+type Body = {
+  lat?: number;
+  lng?: number;
+  radiusKm?: number;
+  limit?: number;
+};
+
+type ConsumerProfile = {
+  full_name: string | null;
+  country: string | null;
+  birthday: string | null;
+  sex: string | null;
+  tier?: string | null;
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return corsPreflight();
+  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
+
+  const envRes = readEFEnv();
+  if (!envRes.ok) return envRes.response;
+  const env = envRes.env;
+
+  // Honour the bearer if present so we can read the signed-in consumer's
+  // profile for personalisation, but anonymous is the common path. RLS-aware
+  // reads through the user-scoped client.
+  const { user, userClient } = await getOptionalAuthedUser(req, env);
+  let profile: ConsumerProfile | null = null;
+  if (user && userClient) {
+    const { data } = await userClient
+      .from("consumers")
+      .select("full_name, country, birthday, sex, tier_key")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (data) {
+      const { tier_key, ...rest } = data as Record<string, unknown>;
+      profile = { ...(rest as ConsumerProfile), tier: (tier_key as string) ?? "free" };
+    }
+  }
+
+  const body = await readJsonOr<Body>(req, {});
+
+  // Forward to the artificial caller. The shape we return is whatever it
+  // returns — no shaping here, this EF exists for auth + profile resolution.
+  const ranked = await invokeArtificialCaller<{
+    ok: boolean;
+    deck?: unknown[];
+    summary?: unknown;
+    error?: string;
+  }>(env, "consumer-web-recommend-swipe", "recommender-rank-swipe", {
+    lat: body.lat,
+    lng: body.lng,
+    radiusKm: body.radiusKm,
+    limit: body.limit,
+    profile,
+  });
+  if (!ranked.ok) {
+    return json({ ok: false, error: ranked.error }, 502);
+  }
+  return json(ranked.data);
+});

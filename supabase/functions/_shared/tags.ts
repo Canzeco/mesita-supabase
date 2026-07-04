@@ -1,7 +1,7 @@
 // Shared helper — place tag vocabulary (public.place_tags, migration
 // 20260625060037_place_tags). Mirrors categories.ts: the list is config that
 // lives in the DB, read live, never hardcoded. Both the business tag picker
-// (business-list-tags) and the consumer detail enrichment (consumer-get-place)
+// (business-list-tags) and the consumer detail enrichment (consumer-web-get-place)
 // resolve slugs → labelled catalog entries through here, so a place's tags are
 // always canonical catalog entries (snake_case slugs) and never free text.
 

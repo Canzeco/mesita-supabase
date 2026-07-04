@@ -6,7 +6,7 @@
 // (the entity split keeps discounts on tickets, not bookings).
 //
 // Membership-gated like business-list-tickets; shape + scope filter mirror
-// consumer-list-reservations. Self-contained.
+// consumer-web-list-reservations. Self-contained.
 //
 // Deploy: supabase functions deploy business-list-reservations
 

@@ -171,7 +171,7 @@ Deno.serve(async (req) => {
       },
       requester_email: requesterEmail,
       // manual_contact never auto-verifies; the row sits in the admin
-      // queue until a human flips it via admin-decide-verification.
+      // queue until a human flips it via admin-web-decide-verification.
       status: "pending",
     })
     .select("id")

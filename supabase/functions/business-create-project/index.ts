@@ -12,7 +12,7 @@
 //      (fire-and-forget; the Enricher flips content_status→'ready' when done).
 //
 // Intentionally NO project_members insert — the caller becomes owner only when
-// admin-decide-verification approves the ownership claim; until then the place
+// admin-web-decide-verification approves the ownership claim; until then the place
 // is publicly listed but unowned.
 //
 // Local:  supabase functions serve business-create-project
@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
 
   // ── Ownership scaffolding ─────────────────────────────────────────────────
   // Upsert the signed-in business so its row exists for any later ownership
-  // claim. NO project_members insert — ownership lands at admin-decide-verification.
+  // claim. NO project_members insert — ownership lands at admin-web-decide-verification.
   const { error: businessError } = await admin
     .from("accounts")
     .upsert({ id: userId, email: userEmail }, { onConflict: "id" });
