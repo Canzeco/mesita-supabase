@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
     created_at: string;
     business: { id: string; full_name: string | null; email: string | null } | null;
   };
-  const businesses = ((memberRows.data ?? []) as BusinessJoin[])
+  const businesses = ((memberRows.data ?? []) as unknown as BusinessJoin[])
     .filter((r) => r.business != null)
     .map((r) => ({
       memberId: r.id,

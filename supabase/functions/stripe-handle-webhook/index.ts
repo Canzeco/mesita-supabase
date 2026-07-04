@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
   if (!stripeKey || !webhookSecret) {
     return new Response("Stripe not configured", { status: 500 });
   }
-  const stripe = new Stripe(stripeKey, { apiVersion: "2025-03-31.basil" });
+  const stripe = new Stripe(stripeKey, { apiVersion: "2025-03-31.basil" as Stripe.StripeConfig["apiVersion"] });
 
   const sig = req.headers.get("stripe-signature");
   if (!sig) return new Response("Missing signature", { status: 400 });
