@@ -1,6 +1,6 @@
 // Supabase Edge Function — enricher-suggest-places (artificial caller)
 //
-// Part of the Atlas namespace (place intelligence + encyclopaedia).
+// Part of the Enricher namespace (place intelligence + encyclopaedia).
 // Proxies Google Places (New) Autocomplete + a Mesita-side name ILIKE
 // fallback in parallel, merges the two, and returns predictions tagged
 // with per-row status (`not_in_mesita`, `web_listed`,

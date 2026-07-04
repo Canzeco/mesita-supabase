@@ -1,4 +1,4 @@
-// Shared Atlas place field limits — mirrored in business-update-project and
+// Shared Enricher place field limits — mirrored in business-update-project and
 // the business Place editor. Surfaced read-only in admin-get-atlas-fields.
 
 export const ATLAS_FIELD_LIMITS = {

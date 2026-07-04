@@ -1,7 +1,7 @@
 // Supabase Edge Function — consumer-suggest-places (natural caller)
 //
 // Thin facade for the consumer /discover/search page picker. Resolves
-// the caller's user id (so the atlas caller can flag
+// the caller's user id (so the Enricher caller can flag
 // verified_partner_self vs _other on already-owned places — relevant
 // when a consumer who also runs a place searches for it from inside
 // the consumer app) and forwards to enricher-suggest-places for the
@@ -9,7 +9,7 @@
 //
 // Mirrors business-suggest-places exactly — the caller-namespace
 // matters for telemetry and future per-namespace rate limiting / quota,
-// but the work happens inside the Atlas artificial caller either way.
+// but the work happens inside the Enricher artificial caller either way.
 // The consumer surface deliberately also surfaces "Not on Mesita"
 // rows so users can find places that haven't onboarded yet (they'd
 // still want to know the spot exists; the UI nudges them to "ping
@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
 
-  // Resolve caller user id from the bearer (if present). The atlas
+  // Resolve caller user id from the bearer (if present). The Enricher
   // caller uses this to mark verified_partner_self vs _other on
   // Mesita-side matches. RLS-aware user client; anonymous degrades to
   // "_other".

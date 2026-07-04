@@ -1,4 +1,4 @@
-// Shared Apify helper. Atlas selects Apify as the method for Instagram,
+// Shared Apify helper. The Enricher selects Apify as the method for Instagram,
 // Facebook and OpenTable data (followers, bio, page category, cuisine). Each
 // source maps to a store actor run synchronously via the run-sync endpoint,
 // which blocks until the run finishes and returns the dataset items inline.

@@ -2,7 +2,7 @@
 //
 // The PERSIST half of the create pipeline. Takes the `place` JSON produced by
 // fetchGoogleBasics at create time (read-only) and writes it as the real rows:
-//   • places — the full Atlas profile (Google identity, geo, channels, signals,
+//   • places — the full Enricher profile (Google identity, geo, channels, signals,
 //     synthesis, photos)
 //   • units  — the owned Mesita entity (shared PK with the place), landing
 //     status='active', listing_type='web', and a caller-supplied content_status

@@ -1,7 +1,7 @@
 // Supabase Edge Function — business-suggest-places (natural caller)
 //
 // Thin facade for the business /add page picker. Resolves the caller's
-// user id (so the atlas caller can flag verified_partner_self vs _other
+// user id (so the Enricher caller can flag verified_partner_self vs _other
 // on already-owned places) and forwards to enricher-suggest-places for the
 // actual Google+Mesita merge.
 //
@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
 
-  // Resolve caller user id from the bearer (if present). The atlas caller
+  // Resolve caller user id from the bearer (if present). The Enricher caller
   // uses this to mark verified_partner_self vs _other on Mesita-side
   // matches. RLS-aware user client; anonymous degrades to "_other".
   const { user } = await getOptionalAuthedUser(req, env);

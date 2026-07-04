@@ -3,9 +3,9 @@
 //
 // Background: natural callers (admin/business/consumer/staff/waiter) are
 // invoked by web clients and authenticate end users. Artificial callers
-// (recommender/atlas/…) are reusable internal services with no end
+// (recommender/enricher/…) are reusable internal services with no end
 // user — they exist so multiple natural callers can share expensive
-// pipelines (RAG, Google Places, Atlas Storage IO) without duplicating
+// pipelines (RAG, Google Places, Enricher Storage IO) without duplicating
 // hundreds of lines of code per natural EF.
 //
 // Wire protocol between the two:

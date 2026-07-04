@@ -1,4 +1,4 @@
-// Small JSON / string parsing helpers shared by Atlas and business onboarding.
+// Small JSON / string parsing helpers shared by the Enricher and business onboarding.
 
 /** De-dupe string URLs (or any strings) preserving first-seen order. */
 export function dedup(arr: string[]): string[] {
