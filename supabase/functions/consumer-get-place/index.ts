@@ -8,9 +8,8 @@
 // naming convention.)
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
-import { readAnonEnv } from "../_shared/auth.ts";
+import { anonClient, readAnonEnv } from "../_shared/auth.ts";
 import { PLACE_PUBLIC_COLUMNS as PLACE_COLUMNS } from "../_shared/place-columns.ts";
 import { resolvePlaceTags } from "../_shared/tags.ts";
 
@@ -34,7 +33,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "id or slug is required" }, 400);
   }
 
-  const supabase = createClient(envRes.env.url, envRes.env.anonKey);
+  const supabase = anonClient(envRes.env);
   const column = UUID_RE.test(idOrSlug) ? "id" : "slug";
 
   const { data, error } = await supabase
