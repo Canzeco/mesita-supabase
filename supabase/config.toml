@@ -331,6 +331,10 @@ verify_jwt = true
 [functions.consumer-create-subscription]
 verify_jwt = true
 
+# Owner-only place plan changes (Free / Promote / Ultra) via Stripe Checkout.
+[functions.business-change-subscription]
+verify_jwt = true
+
 [functions.stripe-handle-webhook]
 verify_jwt = false
 
