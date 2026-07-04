@@ -11,9 +11,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import {
   adminClient,
-  checkSuperAdmin,
   getAuthedUser,
   readEFEnv,
+  requireSuperAdmin,
 } from "../_shared/auth.ts";
 import { invokeArtificialCaller } from "../_shared/internal.ts";
 
@@ -30,10 +30,8 @@ Deno.serve(async (req) => {
   const authRes = await getAuthedUser(req, env);
   if (!authRes.ok) return authRes.response;
   const admin = adminClient(env);
-
-  if (!(await checkSuperAdmin(admin, authRes.user))) {
-    return json({ ok: false, code: "unauthorized", error: "Not a super-admin" });
-  }
+  const saRes = await requireSuperAdmin(admin, authRes.user);
+  if (!saRes.ok) return saRes.response;
 
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
