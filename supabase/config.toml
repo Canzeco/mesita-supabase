@@ -112,7 +112,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 [functions.business-signin-email]
 verify_jwt = true
 
-[functions.consumer-signin-phone]
+[functions.consumer-web-signin-phone]
 verify_jwt = true
 
 [functions.business-accept-invite]
@@ -158,24 +158,24 @@ verify_jwt = false
 # LIVE admin create path — seeds the minimal 'generating' place via
 # enricher-save-place-data and hands deep enrichment to the n8n Enricher
 # (fire-and-forget webhook). Operator JWT + super_admins allowlist.
-[functions.admin-create-unit]
+[functions.admin-web-create-unit]
 verify_jwt = true
 
 # Authed consumer writes / reads tied to the signed-in consumer's own data.
 # Public catalog reads. RLS enforces which place statuses are visible.
-[functions.consumer-list-places]
+[functions.consumer-web-list-places]
 verify_jwt = false
 
-[functions.consumer-get-place]
+[functions.consumer-web-get-place]
 verify_jwt = false
 
 # Personalised discovery surfaces. JWT required so we can read the
 # consumer's class + history; the recommendation logic still respects
 # RLS for place visibility.
-[functions.consumer-recommend-map]
+[functions.consumer-web-recommend-map]
 verify_jwt = true
 
-[functions.consumer-recommend-swipe]
+[functions.consumer-web-recommend-swipe]
 verify_jwt = true
 
 # --- Artificial callers (recommender-*) ---
@@ -194,39 +194,39 @@ verify_jwt = false
 
 # Staggered scheduler: consumer/admin enqueue a scheduled_project_creations row; the
 # pg_cron poller drips due rows to the service-gated scheduler-run-project-creations.
-[functions.consumer-schedule-project-creation]
+[functions.consumer-web-schedule-project-creation]
 verify_jwt = true
 
 # Entity-split EFs (migration 0031). consumer-list-tickets stays for
 # now while clients migrate; the new surfaces split saved-places,
 # reservations, and coupons into first-class entities.
-[functions.consumer-save-place]
+[functions.consumer-web-save-place]
 verify_jwt = true
 
-[functions.consumer-list-saved-places]
+[functions.consumer-web-list-saved-places]
 verify_jwt = true
 
-[functions.consumer-list-coupons]
+[functions.consumer-web-list-coupons]
 verify_jwt = true
 
-[functions.consumer-create-reservation]
+[functions.consumer-web-create-reservation]
 verify_jwt = true
 
-[functions.consumer-list-tickets]
+[functions.consumer-web-list-tickets]
 verify_jwt = true
 
 # Entity-split EFs (migration 0031). consumer-list-tickets stays for
 # now while clients migrate; the new surfaces split saved-places,
 # reservations, and coupons into first-class entities.
 
-[functions.consumer-delete-account]
+[functions.consumer-web-delete-account]
 verify_jwt = true
 
 # --- Business (all authed) ---
 
 # Identity
 
-[functions.consumer-submit-story]
+[functions.consumer-web-submit-story]
 verify_jwt = true
 
 [functions.business-verify-story]
@@ -234,7 +234,7 @@ verify_jwt = true
 
 # Consumer lookup at the table (resolve 6-char code → name + balance).
 
-[functions.consumer-claim-instagram]
+[functions.consumer-web-claim-instagram]
 verify_jwt = true
 
 # Ownership-verification submit + status-poll, called from /add on
@@ -247,22 +247,22 @@ verify_jwt = true
 
 # Email / phone OTP flow for ownership verification.
 
-[functions.consumer-get-profile]
+[functions.consumer-web-get-profile]
 verify_jwt = true
 
-[functions.consumer-update-profile]
+[functions.consumer-web-update-profile]
 verify_jwt = true
 
-[functions.consumer-list-reservations]
+[functions.consumer-web-list-reservations]
 verify_jwt = true
 
-[functions.consumer-list-pay-notifications]
+[functions.consumer-web-list-pay-notifications]
 verify_jwt = true
 
-[functions.consumer-mock-story-detect]
+[functions.consumer-web-mock-story-detect]
 verify_jwt = true
 
-[functions.consumer-submit-ticket-review]
+[functions.consumer-web-submit-ticket-review]
 verify_jwt = true
 
 [functions.business-get-profile]
@@ -277,7 +277,7 @@ verify_jwt = true
 
 # Admin-app create path (operator JWT → admin allowlist). Same pipeline as
 # business-create-project, admin-gated, no businesses upsert.
-[functions.admin-create-project]
+[functions.admin-web-create-project]
 verify_jwt = true
 
 # Staggered scheduler: consumer/admin enqueue a scheduled_project_creations row; the
@@ -367,69 +367,69 @@ verify_jwt = true
 verify_jwt = true
 
 # Ownership-verification queue surface for super-admins.
-[functions.admin-list-verifications]
+[functions.admin-web-list-verifications]
 verify_jwt = true
 
 # Global Performance notifications feed for super-admins (derived,
 # non-realtime — the console pulls it on Refresh).
-[functions.admin-list-notifications]
+[functions.admin-web-list-notifications]
 verify_jwt = true
 
-[functions.admin-decide-verification]
+[functions.admin-web-decide-verification]
 verify_jwt = true
 
-[functions.admin-set-auto-verify]
+[functions.admin-web-set-auto-verify]
 verify_jwt = true
 
-[functions.admin-get-atlas-fields]
+[functions.admin-web-get-atlas-fields]
 verify_jwt = true
 
 # Bulk Google Places Text Search proxy. Many queries in, deduped
 # Place IDs out.
-[functions.admin-discover-places]
+[functions.admin-web-discover-places]
 verify_jwt = true
 
 # Google Places autocomplete for Create Single Unit (admin console).
-[functions.admin-suggest-places]
+[functions.admin-web-suggest-places]
 verify_jwt = true
 
 # Resolve a Google Place ID to a Mesita place. Powers the admin
 # console's "open in business" link generator.
-[functions.admin-find-place]
+[functions.admin-web-find-place]
 verify_jwt = true
 
 # Super-admin free-text place search (name / slug / id) for the admin
 # console's Manage Single Unit place picker.
-[functions.admin-search-places]
+[functions.admin-web-search-places]
 verify_jwt = true
 
 # DESTRUCTIVE full reset. Gated on super_admins + a typed "RESET"
 # confirmation. Wipes all data, keeps the super-admin allowlist.
-[functions.admin-reset-database]
+[functions.admin-web-reset-database]
 verify_jwt = true
 
 # Super-admin allowlist management (public.super_admins). Each re-checks
 # super_admins on the caller. Powers the Admin Configuration
 # "Add/remove admins" card.
-[functions.admin-list-admins]
+[functions.admin-web-list-admins]
 verify_jwt = true
 
-[functions.admin-grant-admin]
+[functions.admin-web-grant-admin]
 verify_jwt = true
 
-[functions.admin-revoke-admin]
+[functions.admin-web-revoke-admin]
 verify_jwt = true
 
 # Atlas configuration — place research/enrichment knobs on app_settings,
 # owned by admins.
-[functions.admin-get-settings]
+[functions.admin-web-get-settings]
 verify_jwt = true
 
-[functions.admin-update-atlas-config]
+[functions.admin-web-update-atlas-config]
 verify_jwt = true
 
 # Re-run the profile enricher on an existing place (super-admin only).
-[functions.consumer-create-subscription]
+[functions.consumer-web-create-subscription]
 verify_jwt = true
 
 # Owner-only place plan changes (Free / Promote / Ultra) via Stripe Checkout.

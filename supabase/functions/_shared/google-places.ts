@@ -116,7 +116,7 @@ export function friendlyGoogleError(
 }
 
 // Throws an Error with the classified message — used by code paths that
-// can't gracefully degrade per-call (e.g., admin-discover-places' per-query
+// can't gracefully degrade per-call (e.g., admin-web-discover-places' per-query
 // worker, where one bad query shouldn't crash the batch but should be
 // reported alongside the others).
 export async function googleErrorFromResponse(r: Response): Promise<Error> {

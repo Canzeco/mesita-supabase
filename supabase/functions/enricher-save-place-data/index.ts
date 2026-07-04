@@ -16,7 +16,7 @@
 //
 // Ownership (project_members) is intentionally NOT created here — the caller
 // (business-create-project) owns the businesses upsert; ownership only lands when
-// admin-decide-verification approves a claim. This agent is place-only.
+// admin-web-decide-verification approves a claim. This agent is place-only.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
 // bearer. Mirrors how enricher-store-place-images is gated.

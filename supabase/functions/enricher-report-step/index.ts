@@ -2,7 +2,7 @@
 //
 // Progress beacon for the n8n Enricher: one INSERT per completed (or failed)
 // pipeline step into public.place_enrichment_events, which powers the admin
-// console's global notifications feed (admin-list-notifications →
+// console's global notifications feed (admin-web-list-notifications →
 // atlas.enrichment_step items). The Enricher calls it from leaf branches after
 // each stage, so a failure here must never break an enrichment run — the n8n
 // nodes fire it with neverError + continue-on-error, and this EF stays tiny.

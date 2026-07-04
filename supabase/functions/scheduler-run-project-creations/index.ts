@@ -1,7 +1,7 @@
 // Supabase Edge Function — scheduler-run-project-creations (artificial caller / agent)
 //
 // The SERVICE-GATED internal create path the SQL scheduler poller invokes. It is
-// the headless twin of admin-create-project: same ASYNC pipeline (early dedupe ->
+// the headless twin of admin-web-create-project: same ASYNC pipeline (early dedupe ->
 // fetchGoogleBasics (Google identity spine, category='undefined') ->
 // enricher-save-place-data (places+units, content_status='generating') ->
 // triggerEnrichPlace (n8n webhook, fire-and-forget)), but gated by
@@ -13,7 +13,7 @@
 // to 'done' (with the result summary) or 'failed' (with the error). The poller
 // already marked the row 'running' + bumped attempts before firing this call.
 //
-// Like admin-create-project, the scheduler creates an UNOWNED listing
+// Like admin-web-create-project, the scheduler creates an UNOWNED listing
 // (listing_type='web' is set by enricher-save-place-data); there is NO businesses
 // upsert here.
 //
@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
   // fails creation — the row exists ('generating') and can be re-triggered. ──
   const trigger = await triggerEnrichPlace(saved.unit_id, placeId);
 
-  // ── Build the create summary (same shape as admin-create-project; now async). ──
+  // ── Build the create summary (same shape as admin-web-create-project; now async). ──
   const channelCount = CHANNEL_KEYS.filter((k) => !!place[k]).length;
   const enrichment = {
     google: true,

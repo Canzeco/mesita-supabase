@@ -1,6 +1,6 @@
 // Candidate-pool query shared by every recommender pipeline.
 //
-// Recommender EFs (consumer-recommend-swipe, consumer-recommend-map, and
+// Recommender EFs (consumer-web-recommend-swipe, consumer-web-recommend-map, and
 // the new recommender-* artificial callers) all start the same way: pull a
 // bounded set of active places — by bounding-box if the caller has a
 // location, otherwise newest-first — then hand the rows to the ranker.
