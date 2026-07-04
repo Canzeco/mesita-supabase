@@ -2,10 +2,10 @@
 
 This repo is part of the **Mesita** multi-repo workspace. Every AI coding agent working
 here — Cursor, Codex, Claude Code, Claude Cowork, subagents, scheduled cloud agents —
-follows the same orchestration protocol: **SWARM v3** (a blackboard system: agents never
+follows the same orchestration protocol: **SWARM v4** (a blackboard system: agents never
 talk to each other; they coordinate through the Linear work ledger and git).
 
-## SWARM v3 — orchestration (Linear)
+## SWARM v4 — orchestration (Linear)
 
 Work ledger: **Linear**, workspace `canzeco`, team **Mesita**, issue key `MESITA-`.
 Full protocol: https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus-operandi-442de3edc517
@@ -22,7 +22,8 @@ Full protocol: https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus
   sessions may share one. One-off chores → the standing **Ops & maintenance** project.
   Keep project status current; mark Completed when the outcome ships.
 - **Boot** (before touching any repo): resume your own open claims; scan `needs-human`
-  issues and surface a one-line summary to Pato if any exist.
+  issues (should be rare), clear any whose blocker has since resolved, and surface a
+  one-line summary to Pato only if any remain.
 - **Pick:** highest-priority unblocked Todo without `needs-human` whose footprint doesn't
   overlap an active claim. **Claim:** move to In Progress + comment
   `claimed: <platform>:<session-slug>`; re-read comments — an earlier claim wins, back off.
@@ -35,11 +36,20 @@ Full protocol: https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus
 - **Cowork flow:** do the work, post the deliverable link/results in a comment, Done.
 - **Fan-out:** ≥3 independent units or >1 repo → split into child issues (blocked-by
   wiring) and run parallel subagents in isolated git worktrees, one issue each (≤5).
-- **Escalate to Pato ONLY for:** contradictory high-level instructions; irreversible or
-  destructive ops (prod data, deletions, spend, external publishing); credentials/OAuth;
-  undocumented product decisions. Then: label `needs-human`, assign Pato, comment — and
-  ask him in chat if he's present. Everything else: decide, log a `decision:` comment,
-  proceed.
+- **Autonomy (v4 — the point):** default to ACT; the test is **reversibility, not
+  category**. If it can be undone (revert, redeploy, migration-down, flag flip, re-seed,
+  re-run), decide it, log a `decision:` comment, and proceed. **`needs-human` = an agent
+  *physically cannot proceed***, reserved for exactly two cases: **(1) a secret the agent
+  can't enter** (OAuth/connector grants; pasting an API/service-role/Vault key into n8n,
+  Stripe, or the Supabase dashboard) — do all the prep, leave a ≤1-min paste; **(2) one
+  irreversible external/financial trigger** (real money / live charges, destroying prod
+  data with no recoverable backup, publishing to a public external channel) — do everything
+  up to the trigger. Product/pricing/naming/copy/error-posture **decisions are agent-owned**
+  (best-supported option — shipped code > issue > Notion > memory — + a `decision:` comment,
+  then mention in chat). **Prod deploys run autonomously**; if the harness auto-mode guard
+  blocks one, that's a batched `deploy:` operator handoff (one exact command), NOT a
+  `needs-human` escalation. Every `needs-human` names the exact blocker + the one human
+  action; batch handoffs.
 - **Hierarchy:** Pato live > Linear issue > Notion specs > memory/conventions.
 - Out-of-scope discoveries → new issues, never scope creep.
 
