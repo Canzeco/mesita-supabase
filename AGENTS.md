@@ -4,27 +4,29 @@ This repo is part of the **Mesita** multi-repo workspace. Every AI coding agent 
 here — Cursor, Codex, Claude Code, Claude Cowork, subagents, scheduled cloud agents —
 follows the same modus operandi: **SWARM**.
 
-## SWARM — task coordination
+## SWARM — task coordination (Linear)
 
-All software development work is coordinated in the SWARM Notion database
-(Software Work Assignment, Review & Merge):
-https://www.notion.so/393a9bf37a528096a20efd3d5514d77c
+All work by AI agents is coordinated in **Linear** (workspace `canzeco`, team **Canzeco**)
+under the **SWARM** protocol (Software Work Assignment, Review & Merge). Linear holds all
+management (Initiatives → Projects → Issues); Notion holds knowledge (issues link to Notion
+pages). Full protocol doc:
+https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus-operandi-442de3edc517
 
-- Two task types: `Type = Code` (touches a repo; Repo/Branch/PR required; done = PR merged)
-  and `Type = Cowork` (research/planning/docs/ops; no repo params; done = output linked in
-  `Deliverable` or written in the task's Notes). Claim/blocking/escalation identical for both.
-  Keep columns light — rich context goes in `Description` and the task page body as text.
-- Code tasks: one task = one branch = one squash PR. Before starting any task, check SWARM;
-  ad-hoc requests get a SWARM row first. Out-of-scope discoveries → new rows, not scope creep.
-- **Claim:** write `<platform>:<session-slug>` into `Agent` (e.g. `cursor:promos-ui`,
-  `codex:refactor-x`, `code:dependabot-admin`), set Status = In progress, then re-read the
-  row — if `Agent` isn't you, another agent won the race; pick a different task. Only take
-  tasks whose `Blocked by` tasks are all Done.
-- Record your branch name (`agent/<slug>`) in `Branch` and the squash PR URL in `PR`.
-  `PR` filled + In progress = the task is in review. After merge, set Status = Done.
-- Blocked, uncertain, or the decision belongs to Pato → check `Needs Human` and explain
-  in a comment. Never guess.
-- The full step-by-step checklist lives in SWARM's "New task" template.
+- Two task types via labels: `code` (touches a repo; one issue = one branch = one squash PR;
+  done = merged) and `cowork` (research/planning/docs/ops; done = deliverable link posted in
+  a comment). Keep issues thin — rich context in the description as natural text.
+- **Pick & claim:** take the highest-priority unblocked Todo issue without `needs-human`.
+  Move it to In Progress and immediately comment `claimed: <platform>:<session-slug>`
+  (e.g. `claimed: cursor:promos-ui`, `claimed: code:dependabot-admin`). Then re-read the
+  comments — if an earlier claim by someone else exists, back off and pick another issue.
+- **Code flow:** branch off freshly-pulled `main` as `agent/<ISSUE-ID>-<slug>` (the issue ID
+  in the branch name auto-links GitHub↔Linear). Ship via squash PR with `Closes <ISSUE-ID>`
+  in the PR description — Linear moves the issue through In Review and closes it on merge
+  (`gh pr merge --squash --delete-branch`).
+- Ad-hoc requests get a Linear issue first, then work starts. Out-of-scope discoveries
+  become new issues — never scope creep.
+- Blocked, uncertain, or the decision belongs to Pato → add the `needs-human` label, assign
+  Pato, comment why, and stop. Never guess.
 - (SWARM agents are NOT Mesita's product AI agents — Enricher/Reservationist live inside
   the product; SWARM agents build it.)
 
