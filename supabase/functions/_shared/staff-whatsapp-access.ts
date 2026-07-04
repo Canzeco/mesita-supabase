@@ -4,7 +4,6 @@ import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { phoneDigits } from "./phone.ts";
 import type {
   StaffAccess,
-  StaffIdentity,
   StaffPlace,
 } from "./staff-whatsapp-types.ts";
 
@@ -54,13 +53,4 @@ export async function resolveStaffAccess(
       places,
     },
   };
-}
-
-/** @deprecated Use resolveStaffAccess */
-export async function resolveStaffIdentity(
-  admin: SupabaseClient,
-  phoneE164: string,
-): Promise<StaffIdentity | null> {
-  const access = await resolveStaffAccess(admin, phoneE164);
-  return access.status === "ok" ? access.identity : null;
 }
