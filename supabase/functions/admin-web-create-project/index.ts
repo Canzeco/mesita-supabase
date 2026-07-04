@@ -1,6 +1,6 @@
 // Supabase Edge Function — admin-web-create-project (admin caller / LIVE admin create path)
 //
-// The admin-app equivalent of business-create-project: an admin operator passes a
+// The admin-app equivalent of business-web-create-project: an admin operator passes a
 // Google Places `placeId` and gets back a MINIMAL 'generating' unit; deep
 // enrichment then runs ASYNC in the n8n Enricher. Pipeline: early dedupe →
 // fetchGoogleBasics (Google identity spine, category='undefined') →
@@ -8,14 +8,14 @@
 // triggerEnrichPlace (n8n webhook, fire-and-forget).
 //
 // Roles are simple now: admins create from the admin app via THIS function;
-// businesses create from the business app via business-create-project. (There is
+// businesses create from the business app via business-web-create-project. (There is
 // no "super-admin operates the business app" path anymore.)
 //
 // Gating: operator JWT → the admin allowlist (requireSuperAdmin checks the
 // public.super_admins table — that table IS the admin allowlist; this is the
 // same gate every other admin-* EF uses).
 //
-// Difference vs business-create-project: NO businesses upsert — an admin creates an
+// Difference vs business-web-create-project: NO businesses upsert — an admin creates an
 // UNOWNED listing (listing_type='web'); ownership only ever lands when a business
 // claims it and admin-web-decide-verification approves.
 //

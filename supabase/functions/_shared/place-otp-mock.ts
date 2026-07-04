@@ -9,7 +9,7 @@ export function isPlaceOtpMockMode(): boolean {
 }
 
 /**
- * Flip to true only when business-send-phone-otp / -email-otp actually place
+ * Flip to true only when business-web-send-phone-otp / -email-otp actually place
  * outbound traffic AND product has signed off. Until then, places are never contacted.
  */
 export function placeOtpOutboundImplemented(): boolean {

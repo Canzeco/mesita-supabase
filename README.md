@@ -45,8 +45,8 @@ mesita-supabase/
 | Layer | Location | Deploy |
 |---|---|---|
 | **App logic** (tickets, reservations, auth) | `supabase/functions/` | `supabase functions deploy` |
-| **Twilio WhatsApp / SMS** | `_shared/twilio.ts` + `twilio-whatsapp-*` | same |
-| **Stripe** | `stripe-handle-webhook` | same |
+| **Twilio WhatsApp / SMS** | `_shared/twilio.ts` + `business-whats-handle-message` + `twilio-webhook-update-delivery` | same |
+| **Stripe** | `stripe-webhook-handle-event` | same |
 | **Twilio templates, TwiML, webhooks** | `integrations/twilio/` + `scripts/` | run scripts locally |
 | **ElevenLabs agents** (later) | `integrations/elevenlabs/` | API scripts + Supabase webhook EF |
 
@@ -90,12 +90,12 @@ supabase secrets set \
 **Deploy webhooks:**
 
 ```bash
-supabase functions deploy twilio-whatsapp-inbound twilio-whatsapp-status
+supabase functions deploy business-whats-handle-message twilio-webhook-update-delivery
 ```
 
 ### Stripe
 
-Webhook: `stripe-handle-webhook` (public, signature-verified). Membership / Premium door.
+Webhook: `stripe-webhook-handle-event` (public, signature-verified). Membership / Premium door.
 
 ### ElevenLabs (post-MVP)
 
@@ -108,16 +108,16 @@ AI voice for **phone reservations** on a **dedicated** Twilio number — not the
 | Prefix | Auth | Purpose |
 |---|---|---|
 | `admin-*` | email + MFA | Super-admin console |
-| `business-*` | email | Places, tickets, team, verification |
+| `business-web-*` | email | Places, tickets, team, verification |
 | `consumer-*` | phone OTP | Discovery, tickets, **reservations**, profile |
 | `staff-*` | phone OTP | Waiter post-invite |
-| `twilio-whatsapp-*` | Twilio signature | Inbound WA + delivery status |
-| `stripe-handle-webhook` | Stripe signature | Subscriptions |
+| `business-whats-handle-message` + `twilio-webhook-update-delivery` | Twilio signature | Inbound WA + delivery status |
+| `stripe-webhook-handle-event` | Stripe signature | Subscriptions |
 | `atlas-*` / `recommender-*` | internal | Place intelligence (service role) |
 
 Reward ticket sequences (scan, billing, story, payment, review, cashback) are documented in [docs/TICKET_SEQUENCES.md](docs/TICKET_SEQUENCES.md). They orchestrate in **business-** / **consumer-** / **staff-** functions; Twilio sends the messages.
 
-Business console: `business-create-ticket` with `scanOnly: true`, then `business-submit-ticket-bill`. Consumer step order and staff floor steppers live in each web repo’s `ticket-flow-steps.ts` / `ticket-staff-lifecycle.ts`.
+Business console: `business-web-create-ticket` with `scanOnly: true`, then `business-web-submit-ticket-bill`. Consumer step order and staff floor steppers live in each web repo’s `ticket-flow-steps.ts` / `ticket-staff-lifecycle.ts`.
 
 ---
 
@@ -156,7 +156,7 @@ RLS: clients read only what they may see; writes go through Edge Functions.
 - [x] WABA + WhatsApp senders connected
 - [ ] Meta Business Verification
 - [ ] `supabase secrets set` Twilio vars
-- [ ] Deploy `twilio-whatsapp-inbound` / `-status`
+- [ ] Deploy `business-whats-handle-message` / `-status`
 - [ ] `./scripts/sync-twilio-whatsapp-webhooks.sh`
 - [ ] WhatsApp templates in `integrations/twilio/templates/` + apply script
 - [ ] Wire `business-invite-waiter`, reservation confirmations

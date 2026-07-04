@@ -1,5 +1,5 @@
-// Ticket-kind taxonomy used by business-create-ticket, business-submit-ticket-bill,
-// and business-verify-story. Single source of truth so a new flow added
+// Ticket-kind taxonomy used by business-web-create-ticket, business-web-submit-ticket-bill,
+// and business-web-verify-story. Single source of truth so a new flow added
 // to one EF can't drift from the others.
 //
 // Mesita is discounts-only: every ticket is a discount ("dp") flow, with an

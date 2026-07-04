@@ -18,8 +18,8 @@ Base: `https://yjalywfzdelacdzccpgb.supabase.co/functions/v1`
 
 | Endpoint | Function |
 |---|---|
-| `/twilio-whatsapp-inbound` | Inbound messages |
-| `/twilio-whatsapp-status` | Delivery receipts |
+| `/business-whats-handle-message` | Inbound messages |
+| `/twilio-webhook-update-delivery` | Delivery receipts |
 
 Apply via `./scripts/sync-twilio-whatsapp-webhooks.sh` or Twilio Console → WhatsApp Senders.
 
@@ -53,7 +53,7 @@ Flow:
 
 1. Manager **Add waiter** → WhatsApp con texto natural (“responde sí…”).
 2. Waiter responde **sí** (o sí quiero, listo, vale, etc.).
-3. `twilio-whatsapp-inbound` los da de alta en el equipo.
+3. `business-whats-handle-message` los da de alta en el equipo.
 
 No mencionar botones ni flows en copy hasta que exista un Flow aprobado. Más adelante se puede añadir [WhatsApp Flows](https://developers.facebook.com/documentation/business-messaging/whatsapp/flows) solo para el paso final de confirmación.
 

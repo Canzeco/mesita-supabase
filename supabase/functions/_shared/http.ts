@@ -57,7 +57,7 @@ export async function readJsonOr<T>(req: Request, fallback: T): Promise<T> {
 // MESITA-26 alias window — place-row id payload key unification.
 // The same place-row id historically arrived under three different keys:
 // `projectId` (business team/tickets/verifications EFs, admin business-*
-// calls), `activeUnitId` (business-get-overview), and `placeId`
+// calls), `activeUnitId` (business-web-get-overview), and `placeId`
 // (create/find). Canonical key going forward is `placeId`.
 //
 // Every receiving EF reads the id through this helper so BOTH the legacy

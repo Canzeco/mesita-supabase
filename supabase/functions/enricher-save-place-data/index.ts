@@ -15,7 +15,7 @@
 // enricher-store-place-images next with the media_assets get-enriched returned.
 //
 // Ownership (project_members) is intentionally NOT created here — the caller
-// (business-create-project) owns the businesses upsert; ownership only lands when
+// (business-web-create-project) owns the businesses upsert; ownership only lands when
 // admin-web-decide-verification approves a claim. This agent is place-only.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role

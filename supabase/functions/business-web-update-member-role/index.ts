@@ -1,0 +1,83 @@
+// Supabase Edge Function — business-web-update-member-role
+//
+// Promote / demote a place member. Owners only. The last owner of a
+// place can never be demoted — there has to be at least one owner at
+// rest, otherwise no one can re-invite. (Removing the last owner is
+// also blocked by business-web-remove-member.)
+
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { corsPreflight, json, readJsonOr } from "../_shared/http.ts";
+import {
+  adminClient,
+  getAuthedUser,
+  readEFEnv,
+  requireOwner,
+} from "../_shared/auth.ts";
+import { isMemberRole, type MemberRole } from "../_shared/roles.ts";
+import { isLastOwnerOfPlace } from "../_shared/place-ownership.ts";
+
+type Body = {
+  memberId?: string;
+  role?: MemberRole;
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return corsPreflight();
+  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
+
+  const envRes = readEFEnv();
+  if (!envRes.ok) return envRes.response;
+  const authRes = await getAuthedUser(req, envRes.env);
+  if (!authRes.ok) return authRes.response;
+
+  const body = await readJsonOr<Body>(req, {});
+  const memberId = (body.memberId ?? "").trim();
+  const role = body.role;
+  if (!memberId) return json({ ok: false, error: "memberId is required" }, 400);
+  if (!isMemberRole(role)) {
+    return json({ ok: false, error: "role must be owner | editor | viewer" }, 400);
+  }
+
+  const admin = adminClient(envRes.env);
+
+  const target = await admin
+    .from("project_members")
+    .select("id, project_id, business_id, role")
+    .eq("id", memberId)
+    .maybeSingle();
+  if (target.error) {
+    return json({ ok: false, error: `member_read: ${target.error.message}` }, 500);
+  }
+  if (!target.data) {
+    return json({ ok: false, error: "Member not found." }, 404);
+  }
+
+  const owner = await requireOwner(
+    admin,
+    authRes.user,
+    target.data.project_id,
+    "Only owners can change roles.",
+  );
+  if (!owner.ok) return owner.response;
+
+  if (target.data.role === "owner" && role !== "owner") {
+    if (await isLastOwnerOfPlace(admin, target.data.project_id)) {
+      return json(
+        { ok: false, code: "last_owner", error: "Promote another owner first." },
+        409,
+      );
+    }
+  }
+
+  const upd = await admin
+    .from("project_members")
+    .update({ role })
+    .eq("id", memberId)
+    .select("id, role")
+    .single();
+  if (upd.error) {
+    return json({ ok: false, error: `member_update: ${upd.error.message}` }, 500);
+  }
+
+  return json({ ok: true, memberId: upd.data.id, role: upd.data.role });
+});

@@ -7,7 +7,7 @@
 // the consumer app) and forwards to enricher-suggest-places for the
 // actual Google + Mesita merge.
 //
-// Mirrors business-suggest-places exactly — the caller-namespace
+// Mirrors business-web-suggest-places exactly — the caller-namespace
 // matters for telemetry and future per-namespace rate limiting / quota,
 // but the work happens inside the Enricher artificial caller either way.
 // The consumer surface deliberately also surfaces "Not on Mesita"

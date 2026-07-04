@@ -2,8 +2,8 @@
 //
 // Why centralised: the phone/email OTP flows both generate a 6-digit
 // code, hash it, store the hash on the project_verifications row, and
-// compare on redemption. Four EFs (`business-send-phone-otp`,
-// `business-send-email-otp`, `business-verify-{phone,email}`) used to
+// compare on redemption. Four EFs (`business-web-send-phone-otp`,
+// `business-web-send-email-otp`, `business-web-verify-{phone,email}`) used to
 // reimplement the same primitives + flow control. The higher-level
 // helpers below (`insertPendingOtpVerification`, `redeemOtpVerification`)
 // keep both paths in lock-step. Pure utilities — no Deno globals

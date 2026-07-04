@@ -1,4 +1,4 @@
-// Discount ticket math — shared by business-create-ticket and the Staff
+// Discount ticket math — shared by business-web-create-ticket and the Staff
 // WhatsApp Type-A flow. Discounts only: Mesita never holds a balance, so there
 // is no redeem/ledger step — the discount is applied straight to the bill.
 

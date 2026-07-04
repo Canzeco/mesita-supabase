@@ -11,7 +11,7 @@
 // re-matching predictions by name; Google-only predictions omit both.
 //
 // The Google key never leaves Supabase — natural-caller EFs (currently
-// business-suggest-places, and any future consumer- or admin- surface)
+// business-web-suggest-places, and any future consumer- or admin- surface)
 // invoke this with the caller's user id and we own the rest.
 //
 // Auth: artificial caller — verify_jwt = false at the gateway; the EF
