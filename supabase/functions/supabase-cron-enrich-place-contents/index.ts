@@ -116,12 +116,18 @@ async function runContents(
       fetchPlaceCategories(admin),
       fetchPlaceTags(admin),
     ]);
+    // 'undefined' is the create-path placeholder, not a real category — never
+    // offer it to the classifier (thin-signal places would land there).
+    const realCategories = categoryList.filter((c) => c.slug !== "undefined");
     const [inferredCategory, inferredTags] = await Promise.all([
-      inferPlaceCategory(OPENAI_KEY, categoryList, {
+      inferPlaceCategory(OPENAI_KEY, realCategories, {
         name,
         address: (place.address ?? null) as string | null,
         editorialSummary: (place.editorial_summary ?? null) as string | null,
-        description: igBio || siteMarkdown.slice(0, 1200) || null,
+        // Best grounding available, in order: scraped material, then the
+        // About we just synthesized (it exists even when scraping was thin).
+        description: igBio || siteMarkdown.slice(0, 1200) ||
+          ((place.description ?? null) as string | null)?.slice(0, 1200) || null,
       }),
       inferPlaceTags(OPENAI_KEY, tagVocabulary, {
         name,
@@ -134,11 +140,11 @@ async function runContents(
     if (inferredCategory) {
       place.category = inferredCategory;
       place.category_label =
-        categoryList.find((c) => c.slug === inferredCategory)?.label ??
+        realCategories.find((c) => c.slug === inferredCategory)?.label ??
         humanizeCategorySlug(inferredCategory) ?? inferredCategory;
     }
     if (inferredTags.length > 0) place.tags = inferredTags;
-    sources.category = { ok: !!inferredCategory, slug: inferredCategory, candidates: categoryList.length };
+    sources.category = { ok: !!inferredCategory, slug: inferredCategory, candidates: realCategories.length };
     sources.tags = { ok: inferredTags.length > 0, count: inferredTags.length, vocabulary: tagVocabulary.length };
 
     place.enriched_at = new Date().toISOString();

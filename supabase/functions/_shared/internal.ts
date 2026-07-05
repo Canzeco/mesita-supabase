@@ -35,6 +35,7 @@
 
 import type { EFEnv } from "./auth.ts";
 import { json } from "./http.ts";
+import { timingSafeEqual } from "./timing-safe-equal.ts";
 
 // Base64url-decode + JSON.parse the JWT payload (middle segment). Returns null
 // on any malformed input — callers treat null as "reject". We do NOT verify the
@@ -56,13 +57,23 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 }
 
 // Verifies that a request was made by another EF (or the pg_cron poller) with a
-// service_role JWT. Use this at the top of every artificial-caller EF — and
-// ONLY on EFs that are `verify_jwt = true` (see the invariant above). The `env`
-// argument is retained for signature stability; the check no longer reads
-// env.serviceKey (it trusts the gateway-verified role claim instead).
+// service-role credential. Use this at the top of every artificial-caller EF —
+// and ONLY on EFs that are `verify_jwt = true` (see the invariant above).
+//
+// Two accepted bearer shapes (the platform migrated EF env to the NEW API
+// keys on 2026-07-05, so both circulate):
+//   1. Legacy service_role JWT — gateway-verified signature; we decode the
+//      payload and require role === 'service_role'. (n8n creds, Vault
+//      scheduler secret, dashboard key.)
+//   2. New secret API key (sb_secret_…) — this is what the platform now
+//      injects as SUPABASE_SERVICE_ROLE_KEY into EF env, so it's what
+//      invokeArtificialCaller sends. Not a JWT, so no payload to check;
+//      instead we constant-time compare against our own env.serviceKey
+//      (both sides read the same injected secret). The publishable key
+//      (sb_publishable_…) never matches.
 export function requireInternalCaller(
   req: Request,
-  _env: EFEnv,
+  env: EFEnv,
 ):
   | { ok: true; callerName: string }
   | { ok: false; response: Response } {
@@ -75,7 +86,9 @@ export function requireInternalCaller(
   }
   const token = authHeader.slice("Bearer ".length).trim();
   const payload = decodeJwtPayload(token);
-  if (!payload || payload.role !== "service_role") {
+  const jwtOk = !!payload && payload.role === "service_role";
+  const secretKeyOk = !payload && timingSafeEqual(token, env.serviceKey);
+  if (!jwtOk && !secretKeyOk) {
     return {
       ok: false,
       response: json({ ok: false, error: "Internal call rejected" }, 403),
