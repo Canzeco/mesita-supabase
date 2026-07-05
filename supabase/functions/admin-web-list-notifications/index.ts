@@ -113,7 +113,10 @@ function one<T>(rel: T | T[] | null | undefined): T | null {
 
 type PlaceShape = {
   id: string;
-  slug: string | null;
+  // `slug` is a projects_view-only computed column — the base public.places
+  // table has none. Sources embedded via the places FK (steps, claims) can't
+  // select it, so it's optional here and defaults to null in placeRef.
+  slug?: string | null;
   name: string | null;
   address: string | null;
   category_label: string | null;
@@ -124,7 +127,7 @@ function placeRef(v: PlaceShape | null): PlaceRef {
   if (!v) return null;
   return {
     id: v.id,
-    slug: v.slug,
+    slug: v.slug ?? null,
     name: v.name ?? "(unnamed place)",
     address: v.address,
     categoryLabel: v.category_label,
@@ -205,7 +208,7 @@ Deno.serve(async (req) => {
         let qb = admin
           .from("place_enrichment_events")
           .select(
-            "id, project_id, step, step_name, status, detail, meta, created_at, place:places(id, slug, name, address, category_label, google_place_id)",
+            "id, project_id, step, step_name, status, detail, meta, created_at, place:places(id, name, address, category_label, google_place_id)",
           )
           .order("created_at", { ascending: false })
           .limit(limit);
@@ -219,7 +222,7 @@ Deno.serve(async (req) => {
         let qb = admin
           .from("project_verifications")
           .select(
-            "id, project_id, method, requester_email, status, created_at, place:places(id, slug, name, address, category_label, google_place_id)",
+            "id, project_id, method, requester_email, status, created_at, place:places(id, name, address, category_label, google_place_id)",
           )
           .order("created_at", { ascending: false })
           .limit(limit);
