@@ -1,7 +1,7 @@
 // Atlas source — Apify Instagram: followers + bio + post IMAGES (top by likes).
 //
 // IDENTITY-CHECKED but GENEROUS: scrape the candidate and confirm it's this
-// venue's OR its brand's account (website-domain match, FB-slug agreement,
+// place's OR its brand's account (website-domain match, FB-slug agreement,
 // brand-name match, else a true-biased LLM judge) — a franchise's single brand
 // account is a valid result. Candidates are tried in order — the Firecrawl/
 // Google handle, then the Facebook slug reused as a handle, then a Perplexity-
@@ -12,10 +12,10 @@
 import { APIFY_ACTORS, instagramHandleFromUrl, runApifyActor } from "./apify.ts";
 import { numOf, safeParseJson } from "./parse-utils.ts";
 import { domainOf, fbSlugCandidate } from "./channels.ts";
-import { OPENAI_URL, VISION_MODEL } from "./atlas-config.ts";
-import { fillMissingChannels } from "./atlas-channel-discovery.ts";
+import { OPENAI_URL, VISION_MODEL } from "./enrich-config.ts";
+import { fillMissingChannels } from "./enrich-channel-discovery.ts";
 
-export type InstagramVenueCtx = {
+export type InstagramPlaceCtx = {
   name: string;
   locationLine: string;
   website: string | null;
@@ -42,7 +42,7 @@ export async function gatherInstagram(opts: {
   apifyKey: string;
   openaiKey: string | undefined;
   perplexityKey: string | undefined;
-  venue: InstagramVenueCtx;
+  place: InstagramPlaceCtx;
   igHandle: string | null;
   fbHandleCandidate: string | null;
   gatherInstagramPosts: number;
@@ -51,7 +51,7 @@ export async function gatherInstagram(opts: {
     apifyKey,
     openaiKey,
     perplexityKey,
-    venue,
+    place,
     igHandle,
     fbHandleCandidate,
     gatherInstagramPosts,
@@ -76,7 +76,7 @@ export async function gatherInstagram(opts: {
     // back with every field null/empty. Treat that empty stub as not-found so a
     // dead handle (e.g. a guessed FB-slug) never reaches the identity judge.
     if (!p || isDeadIgStub(p)) return null;
-    const ok = await igProfileMatchesVenue(p, venue, openaiKey, corroborateFb);
+    const ok = await igProfileMatchesPlace(p, place, openaiKey, corroborateFb);
     return { handle, p, ok };
   };
 
@@ -91,7 +91,7 @@ export async function gatherInstagram(opts: {
   if (!chosen?.ok && perplexityKey) {
     const pp = await fillMissingChannels(
       perplexityKey,
-      { name: venue.name, locationLine: venue.locationLine, category: venue.category },
+      { name: place.name, locationLine: place.locationLine, category: place.category },
       new Set(["instagram_url"]),
       {},
     );
@@ -177,16 +177,16 @@ function isDeadIgStub(p: Record<string, unknown>): boolean {
   return !hasFollowers && !hasName && !hasBio && !hasPosts;
 }
 
-// Does this scraped Instagram profile belong to THIS venue or its brand? We
+// Does this scraped Instagram profile belong to THIS place or its brand? We
 // confirm before trusting it, but lean GENEROUS — a missing IG is a worse miss
-// than a brand-level one. Instant yes on a bio link to the venue's website
+// than a brand-level one. Instant yes on a bio link to the place's website
 // domain, agreement with the Facebook page slug, or a handle/name carrying the
-// venue's brand (so franchises resolve to their one brand account). Otherwise
+// place's brand (so franchises resolve to their one brand account). Otherwise
 // an LLM judge decides, biased toward TRUE, rejecting only a clearly different
 // business. No OpenAI key → fall back to the brand/slug signals above only.
-async function igProfileMatchesVenue(
+async function igProfileMatchesPlace(
   p: Record<string, unknown>,
-  venue: {
+  place: {
     name: string;
     locationLine: string;
     website: string | null;
@@ -208,8 +208,8 @@ async function igProfileMatchesVenue(
     }
   }
 
-  // Strong signal: the IG bio link points to the venue's own website domain.
-  const wd = domainOf(venue.website);
+  // Strong signal: the IG bio link points to the place's own website domain.
+  const wd = domainOf(place.website);
   if (wd && links.some((l) => domainOf(l) === wd)) return true;
 
   const fold = (s: string) =>
@@ -219,24 +219,24 @@ async function igProfileMatchesVenue(
   const fname = norm(fullName);
 
   // Strong signal: an INDEPENDENTLY-discovered IG handle/name lines up with the
-  // venue's Facebook page slug (venues reuse handles across networks, so
+  // place's Facebook page slug (places reuse handles across networks, so
   // fb.com/Stranasanpedro + ig handle "stranasanpedro" is the same brand). Skip
   // when the candidate was derived FROM that slug — then it'd vouch for itself.
-  const fbKey = corroborateFb ? norm(fbSlugCandidate(venue.facebook) ?? "") : "";
+  const fbKey = corroborateFb ? norm(fbSlugCandidate(place.facebook) ?? "") : "";
   if (fbKey.length >= 5 && (uname === fbKey || fname === fbKey)) return true;
 
-  // Strong signal: the handle/name carries the venue's BRAND — its name minus
+  // Strong signal: the handle/name carries the place's BRAND — its name minus
   // the city/location words. Franchises and multi-location brands run ONE
   // account for the whole brand, so "Mochomos Monterrey" → @mochomos is the
   // right match even though the handle isn't location-specific. We'd rather
   // attach the brand account than show nothing — a missing IG is the worse miss.
   const locTokens = new Set(
-    fold(venue.locationLine)
+    fold(place.locationLine)
       .split(/[^a-z0-9]+/)
       .filter((w) => w.length >= 3),
   );
   const brandKey = norm(
-    fold(venue.name)
+    fold(place.name)
       .split(/[^a-z0-9]+/)
       .filter((w) => w && !locTokens.has(w))
       .join(""),
@@ -262,17 +262,17 @@ async function igProfileMatchesVenue(
           {
             role: "user",
             content:
-              `Decide if an Instagram profile belongs to the venue below OR to the ` +
+              `Decide if an Instagram profile belongs to the place below OR to the ` +
               `brand/chain it is part of. For a franchise or multi-location business ` +
               `the brand's MAIN account counts as a match even when it isn't specific ` +
               `to this location. Answer false ONLY when the profile is clearly a ` +
               `DIFFERENT, unrelated business; when the name plausibly matches the ` +
-              `venue or its brand, prefer true.\n\n` +
-              `Venue: "${venue.name}"` +
-              (venue.locationLine ? `, ${venue.locationLine}` : "") +
-              (venue.category ? `, category: ${venue.category}` : "") +
-              (venue.website ? `, website: ${venue.website}` : "") +
-              (venue.facebook ? `, facebook: ${venue.facebook}` : "") +
+              `place or its brand, prefer true.\n\n` +
+              `Place: "${place.name}"` +
+              (place.locationLine ? `, ${place.locationLine}` : "") +
+              (place.category ? `, category: ${place.category}` : "") +
+              (place.website ? `, website: ${place.website}` : "") +
+              (place.facebook ? `, facebook: ${place.facebook}` : "") +
               `\nInstagram: @${username}, name: "${fullName}", bio: "${bio.slice(0, 500)}", ` +
               `links: ${links.join(", ") || "none"}\n\n` +
               `Reply JSON {"match": true} or {"match": false}.`,

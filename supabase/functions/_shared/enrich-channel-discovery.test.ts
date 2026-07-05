@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { validateFieldUrl } from "./atlas-channel-discovery.ts";
+import { validateFieldUrl } from "./enrich-channel-discovery.ts";
 
 // validateFieldUrl is the single host+shape gate every candidate passes through
 // (footer link, Perplexity answer, citation, degraded search) before it's trusted.

@@ -130,28 +130,10 @@ verify_jwt = true
 [functions.enricher-agent-save-place-data]
 verify_jwt = true
 
-# UPDATE half of the ASYNC enrich pipeline — writes the enriched profile onto the
-# existing places/units row (UPDATE by id; flips content_status → 'ready'/'failed').
-# Internal-only; invoked by the n8n Enricher with the service-role bearer.
-[functions.enricher-agent-write-place-data]
-verify_jwt = true
-
-# Read-only init endpoint for the n8n Enricher — returns { config, categories[],
-# tags[] } (Atlas knobs + closed category/tag vocabularies). Internal-only;
-# invoked by the n8n Enricher once at workflow start with the service-role bearer.
-[functions.enricher-agent-get-config]
-verify_jwt = true
-
 # Async media persistence worker — stores source metadata immediately and mirrors
-# source images to Supabase Storage in background. Internal-only.
+# source images to Supabase Storage in background. Internal-only; invoked by
+# supabase-cron-enrich-place-contents (S9) so mirroring runs in its own wall clock.
 [functions.enricher-agent-store-place-images]
-verify_jwt = true
-
-# Per-step progress beacon for the n8n Enricher — INSERTs one
-# place_enrichment_events row per pipeline step (feeds the admin console
-# notifications). Internal-only; invoked by the n8n Enricher leaf branches
-# with the service-role bearer.
-[functions.enricher-agent-report-step]
 verify_jwt = true
 
 # --- Enricher v2 pipeline (the Enricher is a PROCESS: cron-driven stages) ---
@@ -170,8 +152,8 @@ verify_jwt = true
 verify_jwt = true
 
 # LIVE admin create path — seeds the minimal 'generating' place via
-# enricher-agent-save-place-data and hands deep enrichment to the n8n Enricher
-# (fire-and-forget webhook). Operator JWT + super_admins allowlist.
+# enricher-agent-save-place-data and queues deep enrichment (place_research →
+# supabase-cron-enrich-place-*). Operator JWT + super_admins allowlist.
 [functions.admin-web-create-unit]
 verify_jwt = true
 

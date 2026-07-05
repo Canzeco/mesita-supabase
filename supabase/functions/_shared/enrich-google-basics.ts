@@ -14,7 +14,7 @@
 import { classifyLinks } from "./channels.ts";
 import { slugify } from "./place-slug.ts";
 import { humanizeCategorySlug } from "./parse-utils.ts";
-import { ATLAS_FIELD_LIMITS } from "./atlas-field-limits.ts";
+import { ATLAS_FIELD_LIMITS } from "./enrich-field-limits.ts";
 
 const GOOGLE_FIELD_MASK = [
   "id",

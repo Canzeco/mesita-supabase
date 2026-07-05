@@ -113,7 +113,15 @@ AI voice for **phone reservations** on a **dedicated** Twilio number — not the
 | `staff-*` | phone OTP | Waiter post-invite |
 | `business-whats-handle-message` + `twilio-webhook-update-delivery` | Twilio signature | Inbound WA + delivery status |
 | `stripe-webhook-handle-event` | Stripe signature | Subscriptions |
-| `atlas-*` / `recommender-*` | internal | Place intelligence (service role) |
+| `supabase-cron-*` | internal (pg_cron poller) | Scheduled creates + the Enricher pipeline |
+| `enricher-agent-*` | internal | Place persistence services (service role) |
+
+**The Enricher is a process, not an agent:** a cron-driven pipeline of three
+Edge Functions (`supabase-cron-enrich-place-{research,analysis,contents}`)
+advancing places through the `place_research` stage table
+(research → analysis → contents → done). Create EFs seed the row; the pg_cron
+poller `run_place_enrichment_stages` drives the stages. n8n is fully out of
+the stack (the Reservationist will be ElevenLabs-based).
 
 Reward ticket sequences (scan, billing, story, payment, review, cashback) are documented in [docs/TICKET_SEQUENCES.md](docs/TICKET_SEQUENCES.md). They orchestrate in **business-** / **consumer-** / **staff-** functions; Twilio sends the messages.
 

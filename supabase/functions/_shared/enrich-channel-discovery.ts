@@ -1,4 +1,4 @@
-// Atlas channel URL discovery — Step S3, WEBSITE-FIRST: a venue's own site footer
+// Atlas channel URL discovery — Step S3, WEBSITE-FIRST: a place's own site footer
 // is the highest-precision source of its official channels, so we anchor on the
 // website, classify its outbound links, then make ONE Perplexity Agent call — P3,
 // the niche gap-filler — to fill only what's still missing. Every URL is host + shape
@@ -172,7 +172,7 @@ function mainDomainLabel(host: string): string {
   return parts.length >= 2 ? parts[parts.length - 2] : (parts[0] ?? "");
 }
 
-// Fraction of a candidate host's main-label letters that the venue-name tokens
+// Fraction of a candidate host's main-label letters that the place-name tokens
 // account for. A bare substring match is too loose — "cosmo" is inside the
 // unrelated "cosmoprofbeauty" — so we require the name to COVER a strong majority
 // of the label. Rejects cosmoprofbeauty (0.33) while accepting cosmosanpedro
@@ -211,7 +211,7 @@ async function findWebsite(
     .map((u) => pickWebsite([u]))
     .filter((u): u is string => !!u);
   if (!sites.length) return null;
-  // Require the candidate host's main label to be strongly EXPLAINED by the venue
+  // Require the candidate host's main label to be strongly EXPLAINED by the place
   // name. A loose substring match ("cosmo" ⊂ "cosmoprofbeauty") once resolved
   // "Cosmo San Pedro" to a beauty-supply store. No confident match → return null
   // (no website) rather than guessing sites[0]: a wrong site poisons footer
@@ -223,7 +223,7 @@ async function findWebsite(
 // ── Phase 2 — harvest the website footer ─────────────────────────────────────
 // Scrape the homepage with onlyMainContent:false (footer links live outside main
 // content), classify the outbound links, shape-validate each wanted hit. Footer
-// links are trusted on host+shape alone — they are the links the venue itself
+// links are trusted on host+shape alone — they are the links the place itself
 // points at. Best-effort: null website / scrape failure → {}.
 async function harvestFooter(
   firecrawlKey: string,
@@ -255,30 +255,30 @@ async function harvestFooter(
 // answer first, then cited URLs) is host + shape validated. Also reused by S4
 // (atlas-instagram.ts) to re-find an Instagram handle. Best-effort → {}.
 const FILL_FIELD_SPEC: Record<ChannelField, string> = {
-  website_url: "website_url: the venue's official website. null if none.",
+  website_url: "website_url: the place's official website. null if none.",
   instagram_url:
-    "instagram_url: the venue's Instagram profile (instagram.com/<handle>). A brand/franchise main account is acceptable. null if none.",
-  facebook_url: "facebook_url: the venue's official Facebook page. null if none.",
+    "instagram_url: the place's Instagram profile (instagram.com/<handle>). A brand/franchise main account is acceptable. null if none.",
+  facebook_url: "facebook_url: the place's official Facebook page. null if none.",
   opentable_url:
     "opentable_url: the canonical OpenTable restaurant page (opentable.com/r/… or a country domain). Brand page acceptable. null if not on OpenTable.",
   uber_eats_url:
     "uber_eats_url: the canonical Uber Eats store page (ubereats.com/.../store/...). null if not on Uber Eats.",
   tiktok_url:
-    "tiktok_url: the venue's TikTok profile (tiktok.com/@handle), never a single video. null if none.",
+    "tiktok_url: the place's TikTok profile (tiktok.com/@handle), never a single video. null if none.",
   tripadvisor_url:
-    "tripadvisor_url: the venue's TripAdvisor detail page (a Restaurant_Review / -d… page, not a city or category list). null if none.",
-  yelp_url: "yelp_url: the venue's Yelp business page (yelp.com/biz/<slug>). null if none.",
+    "tripadvisor_url: the place's TripAdvisor detail page (a Restaurant_Review / -d… page, not a city or category list). null if none.",
+  yelp_url: "yelp_url: the place's Yelp business page (yelp.com/biz/<slug>). null if none.",
 };
 
 function serpGroundingLine(serpContext?: string): string {
   const s = (serpContext ?? "").trim();
   if (!s) return "";
-  return `Background on the venue (web-grounded, soft context — do not treat as the source of any URL):\n${s.slice(0, 600)}\n\n`;
+  return `Background on the place (web-grounded, soft context — do not treat as the source of any URL):\n${s.slice(0, 600)}\n\n`;
 }
 
 export async function fillMissingChannels(
   key: string,
-  venue: { name: string; locationLine: string; category: string | null },
+  place: { name: string; locationLine: string; category: string | null },
   want: Set<ChannelField>,
   siblings: Partial<ChannelMap> = {},
   serpContext?: string,
@@ -297,15 +297,15 @@ export async function fillMissingChannels(
   const askLines = fields.map((f) => `- ${FILL_FIELD_SPEC[f]}`).join("\n");
 
   const prompt =
-    `Find the official online channels for the venue "${venue.name}"` +
-    (venue.locationLine ? ` in ${venue.locationLine}` : "") +
-    (venue.category ? ` (category: ${venue.category})` : "") + ".\n" +
+    `Find the official online channels for the place "${place.name}"` +
+    (place.locationLine ? ` in ${place.locationLine}` : "") +
+    (place.category ? ` (category: ${place.category})` : "") + ".\n" +
     serpGroundingLine(serpContext) +
     (sibLines
       ? `Anchor on these already-known official channels (the missing ones almost always share the same brand handle / are linked from these):\n${sibLines}\n\n`
       : "") +
     `Find the official WEBSITE first and trust the channels the site itself links to. ` +
-    `Return strict JSON with ONLY these keys (null any you cannot confirm belongs to THIS venue):\n${askLines}\n` +
+    `Return strict JSON with ONLY these keys (null any you cannot confirm belongs to THIS place):\n${askLines}\n` +
     `A franchise / multi-location brand's MAIN account or page is acceptable. ` +
     `Be conservative — prefer null over a guess. Never invent a URL.`;
 
@@ -416,7 +416,7 @@ export async function resolveChannels(opts: {
     if (site) fill("website_url", site, "search");
   }
 
-  // Phase 2 — HARVEST the footer (highest precision: the venue's own links).
+  // Phase 2 — HARVEST the footer (highest precision: the place's own links).
   if (out.website_url && firecrawlKey && missing().size > 0) {
     const harvested = await harvestFooter(firecrawlKey, out.website_url, missing());
     for (const f of CHANNEL_FIELDS) {
@@ -489,7 +489,7 @@ export async function discoverPhonePerplexity(
   hints: { website?: string | null; serpContext?: string } = {},
 ): Promise<string | null> {
   const prompt =
-    `Find the official public phone number for the venue "${name}"` +
+    `Find the official public phone number for the place "${name}"` +
     (locationLine ? ` in ${locationLine}` : "") +
     (category ? ` (category: ${category})` : "") + ".\n" +
     serpGroundingLine(hints.serpContext) +
@@ -514,7 +514,7 @@ export async function discoverEmailPerplexity(
   hints: { website?: string | null; serpContext?: string } = {},
 ): Promise<string | null> {
   const prompt =
-    `Find the official public contact email for the venue "${name}"` +
+    `Find the official public contact email for the place "${name}"` +
     (locationLine ? ` in ${locationLine}` : "") +
     (category ? ` (category: ${category})` : "") + ".\n" +
     serpGroundingLine(hints.serpContext) +
