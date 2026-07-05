@@ -27,6 +27,11 @@ type Body = {
   birthday?: string | null;
   country?: string | null;
   phone?: string | null;
+  // Profile visibility flags (MESITA-76). Sent alone or alongside the
+  // identity fields; only the keys present are patched.
+  profile_public?: boolean;
+  profile_show_saves?: boolean;
+  profile_show_visits?: boolean;
 };
 
 const SEX_VALUES = new Set(["male", "female", "other"]);
@@ -127,6 +132,18 @@ Deno.serve(async (req) => {
   if (body.birthday !== undefined) patch.birthday = birthday;
   if (body.country !== undefined) patch.country = country;
   if (body.phone !== undefined) patch.phone = phone;
+  for (const key of [
+    "profile_public",
+    "profile_show_saves",
+    "profile_show_visits",
+  ] as const) {
+    const value = body[key];
+    if (value === undefined) continue;
+    if (typeof value !== "boolean") {
+      return json({ ok: false, error: `${key} must be a boolean` }, 400);
+    }
+    patch[key] = value;
+  }
 
   if (Object.keys(patch).length === 0) {
     return json({ ok: false, error: "Nothing to update" }, 400);
@@ -137,7 +154,7 @@ Deno.serve(async (req) => {
     .update(patch)
     .eq("id", userId)
     .select(
-      "id, code, full_name, first_name, last_name, sex, birthday, country, phone",
+      "id, code, full_name, first_name, last_name, sex, birthday, country, phone, profile_public, profile_show_saves, profile_show_visits",
     )
     .single();
   if (update.error) {
