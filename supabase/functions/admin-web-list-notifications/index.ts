@@ -33,7 +33,7 @@
 // "Who called it" for a creation: places don't persist the caller at insert
 // time (business-web-create-project deliberately leaves the place unowned until an
 // ownership claim is approved), so the closest honest signal is the place's
-// current owner — resolved here via project_members(role=owner) → businesses.
+// current owner — resolved here via project_members(role=owner) → accounts.
 // Unclaimed places report actor = null and meta.claimed = false. The exact
 // claimant, when it exists, is its own ownership_claimed event.
 //
@@ -308,7 +308,10 @@ Deno.serve(async (req) => {
     if (createdIds.length > 0) {
       const { data: owners, error: ownersErr } = await admin
         .from("project_members")
-        .select("project_id, business:businesses(email, full_name, first_name, last_name)")
+        // project_members.business_id → accounts (the businesses table was
+        // renamed to `accounts` in the R2 rename; no compat view exists, so
+        // embedding `businesses` 500s). Alias the result back to `business`.
+        .select("project_id, business:accounts(email, full_name, first_name, last_name)")
         .eq("role", "owner")
         .in("project_id", createdIds);
       if (ownersErr) {
