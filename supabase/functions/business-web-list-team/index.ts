@@ -50,7 +50,9 @@ Deno.serve(async (req) => {
   const [memberRows, roleRows, pendingBusinessRows, pendingWaiterRows] = await Promise.all([
     admin
       .from("project_members")
-      .select("id, role, created_at, business:businesses(id, full_name, email)")
+      // business_id → accounts (businesses was renamed to accounts in the R2
+      // rename; no compat view). Result stays aliased `business`.
+      .select("id, role, created_at, business:accounts(id, full_name, email)")
       .eq("project_id", projectId)
       .order("created_at", { ascending: true }),
     admin
