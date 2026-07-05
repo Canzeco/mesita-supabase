@@ -343,14 +343,8 @@ verify_jwt = true
 # Each EF re-checks the caller's JWT email against public.super_admins
 # before doing anything privileged.
 
-# Tiny session-check used by the admin + business app shells. Superseded by
-# the per-caller *-get-identity doors below (MESITA-54); stays live until
-# both shells flip to their own endpoints, then MESITA-59 deletes it.
-[functions.auth-get-identity]
-verify_jwt = true
-
 # Per-caller identity doors over _shared/identity.ts (the endpoint name IS
-# the ACL). Same contract as auth-get-identity.
+# the ACL). The old shared auth-get-identity door was deleted in MESITA-59.
 [functions.admin-web-get-identity]
 verify_jwt = true
 
