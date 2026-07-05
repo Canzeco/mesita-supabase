@@ -7,7 +7,7 @@
 //
 // One category so far — **atlas** — with four event types. Three are
 // *derived* (we read the timestamps the product already writes); the fourth
-// reads the dedicated per-step events table the n8n Enricher appends to:
+// reads the dedicated per-step events table the Enricher pipeline appends to:
 //
 //   atlas.place_created      a new row in public.places
 //   atlas.place_enriched     a place whose Enricher pass completed
@@ -15,7 +15,7 @@
 //                            summary the enricher synthesised
 //   atlas.enrichment_step    one Enricher pipeline step finished (or failed) —
 //                            read from public.place_enrichment_events, written
-//                            by enricher-agent-report-step as the n8n run progresses
+//                            by the enrich-place stage EFs as the run progresses
 //   atlas.ownership_claimed  someone submitted an ownership proof
 //                            (public.project_verifications) for a place
 //

@@ -14,7 +14,7 @@
 import { classifyLinks } from "./channels.ts";
 import { slugify } from "./place-slug.ts";
 import { humanizeCategorySlug } from "./parse-utils.ts";
-import { ATLAS_FIELD_LIMITS } from "./enrich-field-limits.ts";
+import { ENRICH_FIELD_LIMITS } from "./enrich-field-limits.ts";
 
 const GOOGLE_FIELD_MASK = [
   "id",
@@ -196,7 +196,7 @@ export async function fetchGoogleBasics(
     ok: true,
     basics: {
       google_place_id: details.id ?? placeId,
-      name: name.slice(0, ATLAS_FIELD_LIMITS.placeName.max),
+      name: name.slice(0, ENRICH_FIELD_LIMITS.placeName.max),
       category: categorySlug,
       category_label: categoryLabel ?? humanizeCategorySlug(categorySlug ?? ""),
       price_level: priceLevelFromGoogle(details.priceLevel),

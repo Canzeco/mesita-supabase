@@ -62,7 +62,6 @@ Deno.serve(async (req) => {
   }
 
   const created = await createMinimalPlace({
-    env,
     admin,
     callerName: "business-web-create-project",
     googlePlaceId,

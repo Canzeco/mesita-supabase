@@ -1,7 +1,7 @@
 // Shared Enricher place field limits — mirrored in business-web-update-project and
 // the business Place editor. Surfaced read-only in admin-web-get-atlas-fields.
 
-export const ATLAS_FIELD_LIMITS = {
+export const ENRICH_FIELD_LIMITS = {
   placeName: { max: 80, note: "Business Place editor" },
   description: { max: 2000, note: "About / description (business-web-update-project)" },
   tagsPerPlace: { max: 20, note: "Up to 20 tags per place (places.tags)" },
