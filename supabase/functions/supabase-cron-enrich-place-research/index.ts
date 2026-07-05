@@ -32,15 +32,15 @@ import {
   discoverEmailPerplexity,
   discoverPhonePerplexity,
   resolveChannels,
-} from "../_shared/atlas-channel-discovery.ts";
+} from "../_shared/enrich-channel-discovery.ts";
 import { fbSlugCandidate } from "../_shared/channels.ts";
-import { loadAtlasConfig } from "../_shared/atlas-config.ts";
-import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
-import { gatherGoogleMaps } from "../_shared/atlas-google.ts";
-import { gatherSerpSummary } from "../_shared/atlas-serp.ts";
-import { gatherInstagram, type InstagramResult } from "../_shared/atlas-instagram.ts";
-import { type FacebookResult, gatherFacebook } from "../_shared/atlas-facebook.ts";
-import { gatherWebsite, type WebsiteResult } from "../_shared/atlas-website.ts";
+import { loadAtlasConfig } from "../_shared/enrich-config.ts";
+import { fetchGoogleBasics } from "../_shared/enrich-google-basics.ts";
+import { gatherGoogleMaps } from "../_shared/enrich-google.ts";
+import { gatherSerpSummary } from "../_shared/enrich-serp.ts";
+import { gatherInstagram, type InstagramResult } from "../_shared/enrich-instagram.ts";
+import { type FacebookResult, gatherFacebook } from "../_shared/enrich-facebook.ts";
+import { gatherWebsite, type WebsiteResult } from "../_shared/enrich-website.ts";
 import {
   advanceResearchStage,
   failResearchRow,
@@ -263,7 +263,7 @@ async function runResearch(
           apifyKey: APIFY_KEY!,
           openaiKey: OPENAI_KEY,
           perplexityKey: PERPLEXITY_KEY,
-          venue: { name, locationLine, website: resolvedWebsite, facebook: resolvedFacebook, category },
+          place: { name, locationLine, website: resolvedWebsite, facebook: resolvedFacebook, category },
           igHandle,
           fbHandleCandidate,
           gatherInstagramPosts: cfg.gatherInstagramPosts,

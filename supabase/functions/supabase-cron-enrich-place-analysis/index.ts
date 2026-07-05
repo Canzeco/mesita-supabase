@@ -22,8 +22,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { requireInternalCaller } from "../_shared/internal.ts";
-import { loadAtlasConfig, PHOTO_CEILING } from "../_shared/atlas-config.ts";
-import { runImageFunnel } from "../_shared/atlas-image-funnel.ts";
+import { loadAtlasConfig, PHOTO_CEILING } from "../_shared/enrich-config.ts";
+import { runImageFunnel } from "../_shared/enrich-image-funnel.ts";
 import {
   advanceResearchStage,
   type AnalysisPayload,

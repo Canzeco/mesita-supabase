@@ -22,7 +22,7 @@ import {
   inferPlaceCategory,
   type PlaceCategory,
 } from "../_shared/categories.ts";
-import { ATLAS_FIELD_LIMITS } from "../_shared/atlas-field-limits.ts";
+import { ATLAS_FIELD_LIMITS } from "../_shared/enrich-field-limits.ts";
 
 const MAX_PHOTOS = ATLAS_FIELD_LIMITS.photos.max;
 const MAX_TAGS = ATLAS_FIELD_LIMITS.tagsPerPlace.max;

@@ -1,11 +1,11 @@
 // Supabase Edge Function — admin-web-create-unit (admin caller / LIVE admin create path)
 //
-// The admin-app equivalent of business-web-create-project: an admin operator passes a
-// Google Places `placeId` and gets back a MINIMAL 'generating' place; deep
-// enrichment then runs ASYNC in the n8n Enricher. Pipeline: early dedupe →
-// fetchGoogleBasics (Google identity spine, category='undefined') →
-// enricher-agent-save-place-data (places+projects, content_status='generating') →
-// triggerEnrichPlace (n8n webhook, fire-and-forget).
+// The admin-app equivalent of business-web-create-project: an admin operator
+// passes a Google Places `placeId` and gets back a MINIMAL 'generating' place;
+// deep enrichment then runs ASYNC in the Enricher pipeline
+// (supabase-cron-enrich-place-*). Core: createMinimalPlace
+// (_shared/create-place.ts): dedupe → Google spine → save 'generating' row →
+// seed place_research.
 //
 // Roles are simple now: admins create from the admin app via THIS function;
 // businesses create from the business app via business-web-create-project.
@@ -24,20 +24,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv, requireSuperAdmin } from "../_shared/auth.ts";
-import { invokeArtificialCaller } from "../_shared/internal.ts";
-import { seedPlaceResearch } from "../_shared/enrich-pipeline.ts";
-import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
+import { createMinimalPlace } from "../_shared/create-place.ts";
 
 type Body = { placeId?: string };
-
-// enricher-agent-save-place-data response.
-type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
-
-const CHANNEL_KEYS = [
-  "website_url", "instagram_url", "facebook_url", "tiktok_url", "x_url", "threads_url",
-  "reddit_url", "whatsapp_url", "opentable_url", "resy_url", "uber_eats_url",
-  "didi_food_url", "tripadvisor_url", "yelp_url", "google_maps_url",
-];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -60,93 +49,17 @@ Deno.serve(async (req) => {
   const placeId = (bodyRes.body.placeId ?? "").toString().trim();
   if (!placeId) return json({ ok: false, error: "placeId is required" }, 400);
 
-  // ── 0) Early dedupe — already on Mesita? ──
-  const { data: existing } = await admin
-    .from("projects_view")
-    .select("id, slug, name, status, listing_type")
-    .eq("google_place_id", placeId)
-    .maybeSingle();
-  if (existing) {
-    return json(
-      {
-        ok: false,
-        code: "place_already_exists",
-        error: "This place is already on Mesita.",
-        existing,
-      },
-      409,
-    );
-  }
-
-  // ── 1) Minimal seed — Google basics only (Default process). fetchGoogleBasics
-  // builds the identity spine directly (no EF hop); category is left 'undefined'
-  // for the n8n Enricher to infer at S5. NO Apify/Firecrawl/Perplexity/OpenAI
-  // here — deep enrichment is async (step 3). ──
-  const GOOGLE_KEY = Deno.env.get("GMP_KEY") ?? Deno.env.get("SUPA_GMP_KEY");
-  if (!GOOGLE_KEY) {
-    return json({ ok: false, error: "Server misconfigured (missing core secrets)" }, 500);
-  }
-  const basicsRes = await fetchGoogleBasics(placeId, GOOGLE_KEY);
-  if (!basicsRes.ok) {
-    return json({ ok: false, code: basicsRes.code, error: basicsRes.error }, basicsRes.status || 502);
-  }
-  // category 'undefined' until the Enricher resolves it; the category-label
-  // trigger fills category_label from the 'undefined' catalog row.
-  const place: Record<string, unknown> = {
-    ...basicsRes.basics,
-    category: "undefined",
-    category_label: null,
-  };
-
-  // ── 2) Persist the minimal row — lands content_status='generating' until the
-  // Enricher flips it to 'ready' via enricher-agent-write-place-data. No businesses
-  // upsert — admin creates an unowned listing. ──
-  const saveRes = await invokeArtificialCaller<SaveResult>(
+  const created = await createMinimalPlace({
     env,
-    "admin-web-create-unit",
-    "enricher-agent-save-place-data",
-    { place, content_status: "generating" },
-  );
-  if (!saveRes.ok) {
-    return json({ ok: false, error: saveRes.error }, saveRes.status || 502);
-  }
-  const saved = saveRes.data;
-  const placeOut = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
+    admin,
+    callerName: "admin-web-create-unit",
+    googlePlaceId: placeId,
+  });
+  if (!created.ok) return json(created.body, created.status);
 
-  // ── 3) Queue deep enrichment (async): seed the place_research row at
-  // stage='research'; the Enricher pipeline's pg_cron poller picks it up
-  // (supabase-cron-enrich-place-*). A seed failure NEVER fails the create —
-  // the row exists ('generating') and can be re-seeded. ──
-  const trigger = await seedPlaceResearch(admin, saved.unit_id, placeId, "admin-web-create-unit");
-
-  // ── Respond — minimal row created; deep enrichment in flight. enrichment.* kept
-  // for admin-web response-contract compatibility (now async). `venue` is the
-  // legacy alias for pre-rename admin-web builds. ──
-  const channelCount = CHANNEL_KEYS.filter((k) => !!place[k]).length;
-
+  // `venue` is the legacy alias for pre-rename admin-web builds.
   return json(
-    {
-      ok: true,
-      place: placeOut,
-      venue: placeOut,
-      enrichment: {
-        google: true,
-        enrichmentTriggered: trigger.ok,
-        enrichmentAsync: true,
-        enrichmentError: trigger.ok ? null : trigger.error ?? null,
-        photoCount: Array.isArray(place.photos) ? place.photos.length : 0,
-        photoCandidates: 0,
-        photoRanked: false,
-        firecrawl: false,
-        perplexity: false,
-        openai: false,
-        openaiError: null,
-        channelCount,
-        googleRating: (place.google_stars_overall as number | null) ?? null,
-        googleReviewCount: (place.google_review_count as number | null) ?? null,
-        instagramFollowers: (place.instagram_followers_count as number | null) ?? null,
-      },
-    },
+    { ok: true, place: created.place, venue: created.place, enrichment: created.enrichment },
     201,
   );
 });

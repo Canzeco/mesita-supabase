@@ -1,6 +1,6 @@
 // Atlas synthesis — the "Research Backbone". Reads ONLY the gathered source
 // material (Instagram bio, Google reviews, website content) — no web access, so
-// it can't drift — and compiles the canonical venue profile JSON. Model comes
+// it can't drift — and compiles the canonical place profile JSON. Model comes
 // from the admin 'synthesis quality' param.
 
 import {
@@ -8,7 +8,7 @@ import {
   ATLAS_DESCRIPTION_TARGET_WORDS,
   OPENAI_URL,
   QUALITY_MODEL,
-} from "./atlas-config.ts";
+} from "./enrich-config.ts";
 import { safeParseJson } from "./parse-utils.ts";
 
 const PROFILE_SCHEMA = {
@@ -94,7 +94,7 @@ export function synthesisModelFor(quality: string): string {
   return QUALITY_MODEL[quality] ?? "gpt-4o-mini";
 }
 
-// Compile the venue profile from gathered material. Returns the parsed profile
+// Compile the place profile from gathered material. Returns the parsed profile
 // (or null) plus a diagnostic for enrichment_sources.synthesis.
 export async function synthesizeProfile(input: {
   openaiKey: string;
@@ -127,7 +127,7 @@ export async function synthesizeProfile(input: {
     .join("\n\n");
 
   const userPrompt =
-    `Compile the public profile of the venue "${name}"` +
+    `Compile the public profile of the place "${name}"` +
     (locationLine ? ` located at ${locationLine}` : "") +
     (category ? ` (category: ${category})` : "") +
     `, using ONLY the source material below. Return a single JSON object ` +
@@ -147,7 +147,7 @@ export async function synthesizeProfile(input: {
       : "\n\n(No extra source material was gathered.)");
 
   const systemContent =
-    "You are Mesita's venue-intelligence synthesis agent. Use ONLY the source " +
+    "You are Mesita's place-intelligence synthesis agent. Use ONLY the source " +
     "material the user provides — do not browse or use outside knowledge. " +
     "Output a SINGLE valid JSON object (no prose, no markdown fences) matching " +
     "this shape, using null or [] when the sources don't support a field: " +
@@ -184,7 +184,7 @@ export async function synthesizeProfile(input: {
   }
 }
 
-// Apply the synthesized profile onto the venue update object (mutates it).
+// Apply the synthesized profile onto the place update object (mutates it).
 // Only sets a field when synthesis actually produced a usable value.
 export function applyProfileToUpdate(
   update: Record<string, unknown>,

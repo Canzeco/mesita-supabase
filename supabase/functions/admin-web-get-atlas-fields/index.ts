@@ -12,7 +12,7 @@ import {
   requireSuperAdmin,
 } from "../_shared/auth.ts";
 import { fetchPlaceCategories } from "../_shared/categories.ts";
-import { ATLAS_FIELD_LIMITS } from "../_shared/atlas-field-limits.ts";
+import { ATLAS_FIELD_LIMITS } from "../_shared/enrich-field-limits.ts";
 import { fetchPlaceTags, TAG_FACETS } from "../_shared/tags.ts";
 
 Deno.serve(async (req) => {

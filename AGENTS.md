@@ -40,7 +40,7 @@ Full protocol: https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus
   category**. If it can be undone (revert, redeploy, migration-down, flag flip, re-seed,
   re-run), decide it, log a `decision:` comment, and proceed. **`needs-human` = an agent
   *physically cannot proceed***, reserved for exactly two cases: **(1) a secret the agent
-  can't enter** (OAuth/connector grants; pasting an API/service-role/Vault key into n8n,
+  can't enter** (OAuth/connector grants; pasting an API/service-role/Vault key into ElevenLabs,
   Stripe, or the Supabase dashboard) — do all the prep, leave a ≤1-min paste; **(2) one
   irreversible external/financial trigger** (real money / live charges, destroying prod
   data with no recoverable backup, publishing to a public external channel) — do everything
@@ -59,8 +59,8 @@ Full protocol: https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus
 - **No local dev servers** (no `pnpm dev` / `next dev`). Verify via Vercel auto-deploy on push.
 - **DB access:** Mesita user clients never call the database directly — every read/write
   goes through a Supabase Edge Function.
-- **Cloud↔repo sync:** any Supabase (schema/RLS/Edge Function) or n8n cloud change must be
-  mirrored into its repo (`mesita-supabase` / `mesita-n8n`) in the same session.
+- **Cloud↔repo sync:** any Supabase cloud change (schema/RLS/Edge Function) must be
+  mirrored into `mesita-supabase` in the same session.
 - Deep project context lives in the Notion **Mesita Main** page (read-only):
   https://www.notion.so/Mesita-323a9bf37a528060987ee31c750e3dfa
 - (SWARM agents build Mesita; Enricher/Reservationist are product agents inside Mesita.)

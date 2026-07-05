@@ -9,7 +9,7 @@ import {
   pickInternalPages,
   rankWebsiteImagesByRelevance,
   type WebImage,
-} from "./atlas-image-funnel.ts";
+} from "./enrich-image-funnel.ts";
 
 export type WebsiteResult = {
   siteMarkdown: string;

@@ -1,10 +1,9 @@
-// Supabase Edge Function — supabase-cron-run-project-creations (artificial caller / agent)
+// Supabase Edge Function — supabase-cron-run-project-creations (artificial caller / cron)
 //
 // The SERVICE-GATED internal create path the SQL scheduler poller invokes. It is
-// the headless twin of admin-web-create-project: same ASYNC pipeline (early dedupe ->
-// fetchGoogleBasics (Google identity spine, category='undefined') ->
-// enricher-agent-save-place-data (places+units, content_status='generating') ->
-// triggerEnrichPlace (n8n webhook, fire-and-forget)), but gated by
+// the headless twin of admin-web-create-project: the same createMinimalPlace
+// core (_shared/create-place.ts: dedupe → Google spine → save 'generating' row →
+// seed place_research for the Enricher pipeline), but gated by
 // requireInternalCaller instead of getAuthedUser+requireSuperAdmin, because the
 // poller is service-role with no end-user JWT and CANNOT call the JWT-gated
 // natural create EFs.
@@ -14,12 +13,11 @@
 // already marked the row 'running' + bumped attempts before firing this call.
 //
 // Like admin-web-create-project, the scheduler creates an UNOWNED listing
-// (listing_type='web' is set by enricher-agent-save-place-data); there is NO businesses
-// upsert here.
+// (listing_type='web' is set by enricher-agent-save-place-data); there is NO
+// accounts upsert here.
 //
-// Contract: verify_jwt=true; the gateway verifies the service_role JWT signature,
-// then requireInternalCaller checks the role=service_role claim + reads the
-// bearer. Mirrors enricher-agent-save-place-data / enricher-agent-store-place-images.
+// Contract: verify_jwt=true; the gateway verifies the service-role credential,
+// then requireInternalCaller checks it (JWT role claim or new secret API key).
 //
 // Local:  supabase functions serve supabase-cron-run-project-creations
 // Deploy: supabase functions deploy supabase-cron-run-project-creations
@@ -27,24 +25,14 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
-import { invokeArtificialCaller, requireInternalCaller } from "../_shared/internal.ts";
-import { seedPlaceResearch } from "../_shared/enrich-pipeline.ts";
-import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
+import { requireInternalCaller } from "../_shared/internal.ts";
+import { createMinimalPlace } from "../_shared/create-place.ts";
 
 // `googlePlaceId` is the Google Place ID of the place to create (MESITA-51
 // addendum 9: `placeId` is reserved for place-row UUIDs platform-wide, so
 // the Google semantic moves to a distinct key on this new slug). The legacy
 // `placeId` key is still accepted as a fallback for manual invocations.
 type Body = { googlePlaceId?: string; placeId?: string; scheduled_id?: string };
-
-// enricher-agent-save-place-data response.
-type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
-
-const CHANNEL_KEYS = [
-  "website_url", "instagram_url", "facebook_url", "tiktok_url", "x_url", "threads_url",
-  "reddit_url", "whatsapp_url", "opentable_url", "resy_url", "uber_eats_url",
-  "didi_food_url", "tripadvisor_url", "yelp_url", "google_maps_url",
-];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -61,9 +49,9 @@ Deno.serve(async (req) => {
   // Parse input.
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
-  const placeId = (bodyRes.body.googlePlaceId ?? bodyRes.body.placeId ?? "").toString().trim();
+  const googlePlaceId = (bodyRes.body.googlePlaceId ?? bodyRes.body.placeId ?? "").toString().trim();
   const scheduledId = (bodyRes.body.scheduled_id ?? "").toString().trim() || null;
-  if (!placeId) return json({ ok: false, error: "googlePlaceId is required" }, 400);
+  if (!googlePlaceId) return json({ ok: false, error: "googlePlaceId is required" }, 400);
 
   const admin = adminClient(env);
 
@@ -87,90 +75,29 @@ Deno.serve(async (req) => {
       .eq("id", scheduledId);
   };
 
-  // ── Early dedupe (idempotency on google_place_id) ─────────────────────────
-  // The input IS the place's google_place_id. Reject already-onboarded places
-  // BEFORE spending any enrichment budget. enricher-agent-save-place-data dedupes again as
-  // a race guard. A duplicate is terminal 'failed' for the queue row carrying the
-  // existing-place code so the operator can see why.
-  const { data: existing } = await admin
-    .from("projects_view")
-    .select("id, slug, name, status, listing_type")
-    .eq("google_place_id", placeId)
-    .maybeSingle();
-  if (existing) {
-    await finishRow("failed", { error: "place_already_exists", result: { existing } });
-    return json(
-      { ok: false, code: "place_already_exists", error: "This place is already on Mesita.", existing },
-      409,
-    );
-  }
-
-  // ── 1) Minimal seed — Google basics only (Default process). fetchGoogleBasics
-  // builds the identity spine directly (no EF hop); category is left 'undefined'
-  // for the n8n Enricher to infer at S5. NO Apify/Firecrawl/Perplexity/OpenAI
-  // here — deep enrichment is async (step 3). ──
-  const GOOGLE_KEY = Deno.env.get("GMP_KEY") ?? Deno.env.get("SUPA_GMP_KEY");
-  if (!GOOGLE_KEY) {
-    await finishRow("failed", { error: "server_misconfigured: missing GMP_KEY" });
-    return json({ ok: false, error: "Server misconfigured (missing core secrets)" }, 500);
-  }
-  const basicsRes = await fetchGoogleBasics(placeId, GOOGLE_KEY);
-  if (!basicsRes.ok) {
-    await finishRow("failed", { error: `google_basics: ${basicsRes.error}` });
-    return json({ ok: false, code: basicsRes.code, error: basicsRes.error }, basicsRes.status || 502);
-  }
-  // category 'undefined' until the Enricher resolves it; the category-label
-  // trigger fills category_label from the 'undefined' catalog row.
-  const place: Record<string, unknown> = {
-    ...basicsRes.basics,
-    category: "undefined",
-    category_label: null,
-  };
-
-  // ── 2) Persist the minimal row — lands content_status='generating' until the
-  // Enricher flips it to 'ready' via enricher-agent-write-place-data. No businesses
-  // upsert — the scheduler creates an unowned listing. ──
-  const saveRes = await invokeArtificialCaller<SaveResult>(
+  const created = await createMinimalPlace({
     env,
-    "supabase-cron-run-project-creations",
-    "enricher-agent-save-place-data",
-    { place, content_status: "generating" },
-  );
-  if (!saveRes.ok) {
-    await finishRow("failed", { error: `save_unit_data: ${saveRes.error}` });
-    return json({ ok: false, error: saveRes.error }, saveRes.status || 502);
+    admin,
+    callerName: "supabase-cron-run-project-creations",
+    googlePlaceId,
+  });
+
+  if (!created.ok) {
+    // A duplicate is terminal 'failed' for the queue row, carrying the
+    // existing-place code so the operator can see why.
+    const code = (created.body.code as string | undefined) ?? null;
+    await finishRow("failed", {
+      error: code ?? (created.body.error as string | undefined) ?? "create_failed",
+      result: code === "place_already_exists" ? { existing: created.body.existing } : null,
+    });
+    return json(created.body, created.status);
   }
-  const saved = saveRes.data;
-  const project = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
 
-  // ── 3) Queue deep enrichment (async): seed the place_research row at
-  // stage='research'; the Enricher pipeline's pg_cron poller picks it up
-  // (supabase-cron-enrich-place-*). A seed failure NEVER fails creation —
-  // the row exists ('generating') and can be re-seeded. ──
-  const trigger = await seedPlaceResearch(admin, saved.unit_id, placeId, "supabase-cron-run-project-creations");
+  // Mark the queue row done — the place was created and enrichment queued.
+  await finishRow("done", { result: { place: created.place, enrichment: created.enrichment } });
 
-  // ── Build the create summary (same shape as admin-web-create-project; now async). ──
-  const channelCount = CHANNEL_KEYS.filter((k) => !!place[k]).length;
-  const enrichment = {
-    google: true,
-    enrichmentTriggered: trigger.ok,
-    enrichmentAsync: true,
-    enrichmentError: trigger.ok ? null : trigger.error ?? null,
-    photoCount: Array.isArray(place.photos) ? place.photos.length : 0,
-    photoCandidates: 0,
-    photoRanked: false,
-    firecrawl: false,
-    perplexity: false,
-    openai: false,
-    openaiError: null,
-    channelCount,
-    googleRating: (place.google_stars_overall as number | null) ?? null,
-    googleReviewCount: (place.google_review_count as number | null) ?? null,
-    instagramFollowers: (place.instagram_followers_count as number | null) ?? null,
-  };
-
-  // ── Mark the queue row done — the unit was created and enrichment dispatched. ──
-  await finishRow("done", { result: { place: project, enrichment } });
-
-  return json({ ok: true, place: project, enrichment, caller: callerRes.callerName }, 201);
+  return json(
+    { ok: true, place: created.place, enrichment: created.enrichment, caller: callerRes.callerName },
+    201,
+  );
 });

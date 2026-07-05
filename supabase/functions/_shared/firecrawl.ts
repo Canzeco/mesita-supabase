@@ -1,4 +1,4 @@
-// Shared Firecrawl helpers. Both the venue create path (business-create-unit)
+// Shared Firecrawl helpers. Both the place create path (business-create-unit)
 // and the enricher (atlas-enrich-place) hit the same two Firecrawl endpoints
 // with the same auth + timeout boilerplate; this is the one place that knows
 // how to call them. All calls are best-effort — a missing key, a slow page, or

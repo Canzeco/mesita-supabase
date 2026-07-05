@@ -11,7 +11,7 @@ const PERPLEXITY_AGENT_PRESET = "pro-search";
 // Default agent instructions — URL resolution (P3's discovery + phone/email
 // legs). P2 overrides with its own editorial-context instructions.
 const DEFAULT_INSTRUCTIONS =
-  "Resolve venue URLs by anchoring on the official website and trusting the links the site itself points to. Output only JSON matching the schema. Never fabricate URLs; prefer null when unsure.";
+  "Resolve place URLs by anchoring on the official website and trusting the links the site itself points to. Output only JSON matching the schema. Never fabricate URLs; prefer null when unsure.";
 
 // Call the managed Perplexity Agent once. Returns the schema JSON answer plus the
 // source URLs the agent actually cited (annotations) — both host-locked, so

@@ -1,9 +1,9 @@
-// Atlas venue image funnel: HTML extraction, page picking, vision + text sort,
+// Atlas place image funnel: HTML extraction, page picking, vision + text sort,
 // and the gather→analyze→sort→save orchestration (runImageFunnel).
 
 import { dedup, safeParseJson } from "./parse-utils.ts";
-import type { Img } from "./atlas-config.ts";
-import { OPENAI_URL, VISION_MODEL } from "./atlas-config.ts";
+import type { Img } from "./enrich-config.ts";
+import { OPENAI_URL, VISION_MODEL } from "./enrich-config.ts";
 
 export type WebImage = {
   url: string;
@@ -114,9 +114,9 @@ export async function rankWebsiteImagesByRelevance(
     })
     .join("\n");
   const user =
-    `These are all the images found on a venue's website (filename, alt text, ` +
+    `These are all the images found on a place's website (filename, alt text, ` +
     `dimensions, page). Rank them from MOST likely to be a hero / representative ` +
-    `venue photo (the space, interior, exterior, food, ambiance) to LEAST. ` +
+    `place photo (the space, interior, exterior, food, ambiance) to LEAST. ` +
     `PRIORITISE roughly SQUARE dimensions when known. ALWAYS rank LAST anything ` +
     `whose filename or alt contains logo / icon / favicon / badge / sprite / ` +
     `pixel / avatar, plus payment-method glyphs, social glyphs, and heavily ` +
@@ -268,7 +268,7 @@ export async function textSortImages(
 export type ImageFunnelResult = {
   // The gathered, de-duped, source-tagged pool (drives media-asset persistence).
   saved: Img[];
-  // The ordered top-N URLs to persist as venue.photos.
+  // The ordered top-N URLs to persist as place.photos.
   finalPhotos: string[];
   // url → vision description (for the analyzed subset).
   imageAnalysisByUrl: Map<string, string>;
@@ -280,7 +280,7 @@ export type ImageFunnelResult = {
 // fill the remaining slots by overall order, capped at `cap`. Guarantees website
 // + Instagram representation whenever those sources contributed images — the
 // vision rubric otherwise tends to rank Google Places photos highest and crowd
-// the others out (which is why venues looked "Google-only").
+// the others out (which is why places looked "Google-only").
 function selectWithDiversity(
   ordered: string[],
   srcOf: Map<string, Img["source"]>,

@@ -13,9 +13,9 @@ const SERP_SCHEMA = {
 } as const;
 
 const SERP_INSTRUCTIONS =
-  "Provide brief, web-grounded editorial context about a venue. Output only JSON matching the schema. Never fabricate. Prefer a null summary over guessing.";
+  "Provide brief, web-grounded editorial context about a place. Output only JSON matching the schema. Never fabricate. Prefer a null summary over guessing.";
 
-// Web-grounded editorial color for a venue. Returns the summary string (or null
+// Web-grounded editorial color for a place. Returns the summary string (or null
 // when the agent had nothing useful / failed) plus a diagnostic for
 // enrichment_sources.serp. Best-effort: every failure degrades to null.
 export async function gatherSerpSummary(opts: {
@@ -26,7 +26,7 @@ export async function gatherSerpSummary(opts: {
 }): Promise<{ summary: string | null; diag: Record<string, unknown> }> {
   const { perplexityKey, name, locationLine, category } = opts;
   const prompt =
-    `Research the venue "${name}"` +
+    `Research the place "${name}"` +
     (locationLine ? ` in ${locationLine}` : "") +
     (category ? ` (category: ${category})` : "") + ".\n" +
     `Write a SHORT editorial blurb (at most 120 words) capturing: the vibe / ` +

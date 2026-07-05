@@ -25,7 +25,7 @@
 // notifications feed identical to the n8n Enricher's S1–S9 step semantics.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import type { MediaAssetPayload } from "./atlas-config.ts";
+import type { MediaAssetPayload } from "./enrich-config.ts";
 
 export type ResearchStage = "research" | "analysis" | "contents" | "done" | "failed";
 
