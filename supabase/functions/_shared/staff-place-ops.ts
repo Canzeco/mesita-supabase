@@ -78,7 +78,7 @@ export function assessDiscountTicketOps(
       staffMessage:
         "Este local no está configurado para descuentos en cuenta.\n\n" +
         "Mesita Ops por WhatsApp solo abre tickets con descuento (tipo A).\n" +
-        "Para usar este canal: Mesita Business → Promos → elige «Promote» o «Ultra» y configura porcentajes.",
+        "Para usar este canal: Mesita Business → Promos → elige «Pro» o «Ultra» y configura porcentajes.",
     };
   }
 
@@ -89,7 +89,7 @@ export function assessDiscountTicketOps(
       code: "free_plan",
       staffMessage:
         "Este local está en plan Free — las promos están bloqueadas en 0%.\n\n" +
-        "En Mesita Business → Promos activa «Promote» o «Ultra» y configura los porcentajes (Free / Premium, primera visita y recurrente).",
+        "En Mesita Business → Promos activa «Pro» o «Ultra» y configura los porcentajes (Free / Premium, primera visita y recurrente).",
     };
   }
 
@@ -99,7 +99,7 @@ export function assessDiscountTicketOps(
       code: "wrong_plan",
       staffMessage:
         "El plan de este local no incluye tickets con descuento por WhatsApp.\n\n" +
-        "En Mesita Business → Promos elige «Promote» o «Ultra».",
+        "En Mesita Business → Promos elige «Pro» o «Ultra».",
     };
   }
 

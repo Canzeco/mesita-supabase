@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
   // Read once. If absent, insert with a generated code and re-read.
   const existing = await admin
     .from("consumers")
-    .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, tier_key, tier_origin, consumer_instagram_followers_count, tier_expires_at")
+    .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, class_key, class_origin, consumer_instagram_followers_count, class_expires_at")
     .eq("id", userId)
     .maybeSingle();
   if (existing.error) {
@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
       const inserted = await admin
         .from("consumers")
         .insert({ id: userId, code: codeResult.data as string })
-        .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, tier_key, tier_origin, consumer_instagram_followers_count, tier_expires_at")
+        .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, class_key, class_origin, consumer_instagram_followers_count, class_expires_at")
         .single();
       if (!inserted.error) {
         consumer = inserted.data;
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
       .from("consumers")
       .update({ code: codeResult.data as string })
       .eq("id", userId)
-      .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, tier_key, tier_origin, consumer_instagram_followers_count, tier_expires_at")
+      .select("id, code, full_name, first_name, last_name, sex, birthday, country, phone, class_key, class_origin, consumer_instagram_followers_count, class_expires_at")
       .single();
     if (updated.error) {
       return json({ ok: false, error: `consumer_code_set: ${updated.error.message}` }, 500);
@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
   // follower count, current subscription (if any), and this month's
   // reservation usage vs their cap. The UI uses this to render the Class tab
   // and gate the "upgrade" affordances.
-  const tier = await getTierConfig(admin, consumer.tier_key ?? "free");
+  const tier = await getTierConfig(admin, consumer.class_key ?? "free");
 
   const { data: subscription } = await admin
     .from("consumer_subscriptions")
@@ -113,12 +113,12 @@ Deno.serve(async (req) => {
     .neq("status", "cancelled");
   used = count ?? 0;
 
-  const membership = {
-    tier: consumer.tier_key ?? "free",
-    origin: consumer.tier_origin ?? "default",
+  const subscriptionClass = {
+    key: consumer.class_key ?? "free",
+    origin: consumer.class_origin ?? "default",
     label: tier?.label ?? "Free",
     followers: consumer.consumer_instagram_followers_count ?? null,
-    expires_at: consumer.tier_expires_at ?? null,
+    expires_at: consumer.class_expires_at ?? null,
     subscription: subscription ?? null,
     usage: {
       reservations_used: used,
@@ -126,5 +126,5 @@ Deno.serve(async (req) => {
     },
   };
 
-  return json({ ok: true, consumer, membership });
+  return json({ ok: true, consumer, class: subscriptionClass });
 });

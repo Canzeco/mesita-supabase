@@ -1,7 +1,7 @@
 // Supabase Edge Function — business-web-change-subscription (natural caller)
 //
 // Authenticated, owner-only. The paid "door" into a place's plan: Free,
-// Promote ('pro', $100 MXN/mo) or Ultra ('ultra', $5,000 MXN/mo).
+// Pro ('pro', $100 MXN/mo) or Ultra ('ultra', $5,000 MXN/mo).
 //
 // A Stripe subscription is billing, not entitlement: projects.plan is the
 // single source of truth and can be granted through other doors (admin,

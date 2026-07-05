@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
 
   const consumerRow = await admin
     .from("consumers")
-    .select("id, tier_key")
+    .select("id, class_key")
     .eq("id", ticket.consumer_id)
     .maybeSingle();
   if (consumerRow.error || !consumerRow.data) {
@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
   }
 
   const firstVisit = await isConsumerFirstVisit(admin, ticket.consumer_id, ticket.project_id);
-  const ratePercent = selectprojectRate(place, consumerRow.data.tier_key, firstVisit);
+  const ratePercent = selectprojectRate(place, consumerRow.data.class_key, firstVisit);
   const capPesos = place.monthly_promo_cap;
 
   const billRes = computeTicketBill({ subtotal, ratePercent, capPesos });

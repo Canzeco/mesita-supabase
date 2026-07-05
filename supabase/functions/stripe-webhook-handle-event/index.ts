@@ -7,7 +7,7 @@
 // One endpoint, two billing surfaces, discriminated by metadata:
 //   • consumer_id  → consumer Premium ($100 MXN/mo). The ONLY writer that
 //     flips a consumer to/from Premium on the back of the paid door.
-//   • project_id   → place plans (Promote/Ultra). The ONLY writer that flips
+//   • project_id   → place plans (Pro/Ultra). The ONLY writer that flips
 //     projects.plan on the back of the paid door.
 //
 // Idempotency: Stripe retries deliveries. We record every processed event id
@@ -223,10 +223,10 @@ async function reconcileConsumerSubscription(
     const grant = await admin
       .from("consumers")
       .update({
-        tier_key: "premium",
-        tier_origin: "subscription",
-        tier_granted_at: new Date().toISOString(),
-        tier_expires_at: periodEnd,
+        class_key: "premium",
+        class_origin: "subscription",
+        class_granted_at: new Date().toISOString(),
+        class_expires_at: periodEnd,
       })
       .eq("id", consumerId);
     if (grant.error) throw new Error(`consumer_grant: ${grant.error.message}`);
@@ -236,12 +236,12 @@ async function reconcileConsumerSubscription(
     const revoke = await admin
       .from("consumers")
       .update({
-        tier_key: "free",
-        tier_origin: "default",
-        tier_expires_at: null,
+        class_key: "free",
+        class_origin: "default",
+        class_expires_at: null,
       })
       .eq("id", consumerId)
-      .eq("tier_origin", "subscription");
+      .eq("class_origin", "subscription");
     if (revoke.error) throw new Error(`consumer_revoke: ${revoke.error.message}`);
   }
 }

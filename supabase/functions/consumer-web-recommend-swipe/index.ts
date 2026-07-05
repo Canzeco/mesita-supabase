@@ -42,12 +42,12 @@ Deno.serve(async (req) => {
   if (user && userClient) {
     const { data } = await userClient
       .from("consumers")
-      .select("full_name, country, birthday, sex, tier_key")
+      .select("full_name, country, birthday, sex, class_key")
       .eq("id", user.id)
       .maybeSingle();
     if (data) {
-      const { tier_key, ...rest } = data as Record<string, unknown>;
-      profile = { ...(rest as ConsumerProfile), tier: (tier_key as string) ?? "free" };
+      const { class_key, ...rest } = data as Record<string, unknown>;
+      profile = { ...(rest as ConsumerProfile), tier: (class_key as string) ?? "free" };
     }
   }
 
