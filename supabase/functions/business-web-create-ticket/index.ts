@@ -28,6 +28,7 @@ import {
   ACTIONABLE_KINDS,
   RESERVATION_KINDS,
   STORY_KINDS,
+  toDbTicketKind,
 } from "../_shared/ticket-kinds.ts";
 import { isConsumerFirstVisit, selectprojectRate } from "../_shared/membership.ts";
 import { computeTicketBill } from "../_shared/business-ticket-billing.ts";
@@ -81,6 +82,9 @@ Deno.serve(async (req) => {
 
   const requiresStory = STORY_KINDS.has(kind);
   const isReservation = RESERVATION_KINDS.has(kind);
+  // Persisted enum value — story is orthogonal (story_status), so kind only
+  // distinguishes reservation vs coupon.
+  const dbKind = toDbTicketKind(kind);
   const scanOnly = body.scanOnly === true;
 
   const admin = adminClient(envRes.env);
@@ -130,9 +134,12 @@ Deno.serve(async (req) => {
         project_id: projectId,
         consumer_id: consumerId,
         opened_by: validatorId,
-        kind,
+        kind: dbKind,
         status: "open",
-        story_status: "not_required",
+        // Story is orthogonal to `kind` now (enum collapsed to reservation|coupon),
+        // so seed the story requirement here from the wire kind — otherwise the
+        // scan→bill path would lose it and never gate the story verify step.
+        story_status: requiresStory ? "pending" : "not_required",
         check_subtotal_cents: null,
         tip_cents: null,
         total_cents: null,
@@ -254,7 +261,7 @@ Deno.serve(async (req) => {
       project_id: projectId,
       consumer_id: consumerId,
       opened_by: validatorId,
-      kind,
+      kind: dbKind,
       status,
       story_status: storyStatus,
       check_subtotal_cents: snap.checkSubtotalCents,

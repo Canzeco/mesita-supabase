@@ -16,7 +16,6 @@ import {
   requireMembership,
 } from "../_shared/auth.ts";
 import { computeTicketBill } from "../_shared/business-ticket-billing.ts";
-import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
 import { isConsumerFirstVisit, selectprojectRate } from "../_shared/membership.ts";
 import { placeInstagramHandleForPayload } from "../_shared/ticket-informal.ts";
 import { toCents } from "../_shared/money.ts";
@@ -57,7 +56,7 @@ Deno.serve(async (req) => {
   const ticketRow = await admin
     .from("tickets")
     .select(
-      "id, project_id, consumer_id, kind, status, check_subtotal_cents, total_cents, currency",
+      "id, project_id, consumer_id, kind, story_status, status, check_subtotal_cents, total_cents, currency",
     )
     .eq("id", ticketId)
     .maybeSingle();
@@ -86,7 +85,10 @@ Deno.serve(async (req) => {
   }
 
   const kind = ticket.kind;
-  const requiresStory = STORY_KINDS.has(kind);
+  // Story is orthogonal to `kind` (enum is reservation|coupon) — the story
+  // requirement is carried by story_status, seeded at scan/create time.
+  const requiresStory = ticket.story_status != null &&
+    ticket.story_status !== "not_required";
 
   const placeRow = await admin
     .from("projects_view")

@@ -16,7 +16,6 @@ import {
   readEFEnv,
   requireMembership,
 } from "../_shared/auth.ts";
-import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
 
 type Body = {
   ticketId?: string;
@@ -66,11 +65,13 @@ Deno.serve(async (req) => {
   if (!ticketRow.data) return json({ ok: false, error: "Ticket not found" }, 404);
   const ticket = ticketRow.data;
 
-  if (!STORY_KINDS.has(ticket.kind)) {
+  // Story is orthogonal to `kind` (enum is reservation|coupon) — a ticket has a
+  // story step iff its story_status is anything other than not_required.
+  if (ticket.story_status == null || ticket.story_status === "not_required") {
     return json(
       {
         ok: false,
-        error: `Ticket kind ${ticket.kind} has no story step to verify.`,
+        error: `Ticket ${ticket.id} has no story step to verify.`,
       },
       409,
     );

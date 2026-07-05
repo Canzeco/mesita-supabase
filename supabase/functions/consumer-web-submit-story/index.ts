@@ -24,7 +24,6 @@ import {
   getAuthedUser,
   readEFEnv,
 } from "../_shared/auth.ts";
-import { STORY_KINDS } from "../_shared/ticket-kinds.ts";
 
 type Body = { ticketId?: string; screenshotUrl?: string };
 
@@ -83,11 +82,13 @@ Deno.serve(async (req) => {
       403,
     );
   }
-  if (!STORY_KINDS.has(ticket.kind)) {
+  // Story is orthogonal to `kind` (enum is reservation|coupon) — presence of a
+  // story step is carried by story_status.
+  if (ticket.story_status == null || ticket.story_status === "not_required") {
     return json(
       {
         ok: false,
-        error: `This ticket (${ticket.kind}) doesn't require a story.`,
+        error: "This ticket doesn't require a story.",
       },
       409,
     );
