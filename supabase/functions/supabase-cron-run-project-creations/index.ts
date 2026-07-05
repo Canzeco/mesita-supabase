@@ -28,7 +28,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, readEFEnv } from "../_shared/auth.ts";
 import { invokeArtificialCaller, requireInternalCaller } from "../_shared/internal.ts";
-import { triggerEnrichPlace } from "../_shared/n8n.ts";
+import { seedPlaceResearch } from "../_shared/enrich-pipeline.ts";
 import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
 
 // `googlePlaceId` is the Google Place ID of the place to create (MESITA-51
@@ -143,10 +143,11 @@ Deno.serve(async (req) => {
   const saved = saveRes.data;
   const project = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
 
-  // ── 3) Hand deep enrichment to the n8n Enricher (async). Fire-and-forget: the
-  // webhook acks immediately, the workflow runs in n8n. A trigger failure NEVER
-  // fails creation — the row exists ('generating') and can be re-triggered. ──
-  const trigger = await triggerEnrichPlace(saved.unit_id, placeId);
+  // ── 3) Queue deep enrichment (async): seed the place_research row at
+  // stage='research'; the Enricher pipeline's pg_cron poller picks it up
+  // (supabase-cron-enrich-place-*). A seed failure NEVER fails creation —
+  // the row exists ('generating') and can be re-seeded. ──
+  const trigger = await seedPlaceResearch(admin, saved.unit_id, placeId, "supabase-cron-run-project-creations");
 
   // ── Build the create summary (same shape as admin-web-create-project; now async). ──
   const channelCount = CHANNEL_KEYS.filter((k) => !!place[k]).length;
