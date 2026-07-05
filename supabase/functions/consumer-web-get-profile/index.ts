@@ -86,20 +86,38 @@ Deno.serve(async (req) => {
   }
 
   // ── Membership payload ─────────────────────────────────────────────────
-  // Surfaces the consumer's tier, how they earned it, their Instagram
+  // Surfaces the consumer's class, how they earned it, their Instagram
   // follower count, current subscription (if any), and this month's
   // reservation usage vs their cap. The UI uses this to render the Class tab
   // and gate the "upgrade" affordances.
-  const tier = await getTierConfig(admin, consumer.class_key ?? "free");
+  //
+  // Everything below is best-effort: a missing `classes` row, a transient
+  // lookup failure, or a stray duplicate subscription row must degrade to
+  // sensible free-class defaults, never surface as a 500 on the user-facing
+  // Profile tab. `getTierConfig` already returns null for an unknown
+  // class_key; we additionally guard the await so a transient throw can't
+  // take the whole response down.
+  const classKey = consumer.class_key ?? "free";
+  let tier = null;
+  try {
+    tier = await getTierConfig(admin, classKey);
+  } catch (_err) {
+    tier = null; // fall through to Free defaults below
+  }
 
-  const { data: subscription } = await admin
+  // A consumer should have at most one active/past_due subscription, but a
+  // stray duplicate row must not 500 the profile — take the most recent via
+  // limit(1) instead of .maybeSingle() (which throws on >1 matching row).
+  const { data: subscriptionRows } = await admin
     .from("consumer_subscriptions")
     .select(
       "status, price_cents, currency, current_period_end, cancel_at_period_end",
     )
     .eq("consumer_id", userId)
     .in("status", ["active", "past_due"])
-    .maybeSingle();
+    .order("current_period_end", { ascending: false })
+    .limit(1);
+  const subscription = subscriptionRows?.[0] ?? null;
 
   let used = 0;
   const monthStart = new Date();
