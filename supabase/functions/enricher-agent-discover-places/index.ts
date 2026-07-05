@@ -1,4 +1,4 @@
-// Supabase Edge Function — enricher-discover-places (artificial caller)
+// Supabase Edge Function — enricher-agent-discover-places (artificial caller)
 //
 // Part of the Enricher namespace (place intelligence + encyclopaedia).
 // Runs many Google Places Text Search queries in one batch and returns
@@ -13,7 +13,7 @@
 // Auth: artificial caller — verify_jwt = false at the gateway; the EF
 // itself enforces the service-role bearer via requireInternalCaller.
 //
-// Deploy: supabase functions deploy enricher-discover-places
+// Deploy: supabase functions deploy enricher-agent-discover-places
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";

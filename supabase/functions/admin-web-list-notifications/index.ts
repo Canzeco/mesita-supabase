@@ -15,7 +15,7 @@
 //                            summary the enricher synthesised
 //   atlas.enrichment_step    one Enricher pipeline step finished (or failed) —
 //                            read from public.place_enrichment_events, written
-//                            by enricher-report-step as the n8n run progresses
+//                            by enricher-agent-report-step as the n8n run progresses
 //   atlas.ownership_claimed  someone submitted an ownership proof
 //                            (public.project_verifications) for a place
 //

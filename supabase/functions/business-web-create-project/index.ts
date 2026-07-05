@@ -7,7 +7,7 @@
 //      BEFORE any enrichment spend),
 //   2. upsert the businesses row (ownership scaffolding),
 //   3. fetchGoogleBasics — the Google identity spine (category='undefined'),
-//   4. enricher-save-place-data — writes places + units (content_status='generating'),
+//   4. enricher-agent-save-place-data — writes places + units (content_status='generating'),
 //   5. triggerEnrichPlace — hands deep enrichment to the n8n Enricher
 //      (fire-and-forget; the Enricher flips content_status→'ready' when done).
 //
@@ -31,7 +31,7 @@ import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
 // readPlaceIdAlias endpoints), so the new slug disambiguates.
 type Body = { googlePlaceId?: string; placeId?: string };
 
-// enricher-save-place-data response.
+// enricher-agent-save-place-data response.
 type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
 
 const CHANNEL_KEYS = [
@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
 
   // ── Early dedupe (idempotency on google_place_id) ─────────────────────────
   // placeId IS the place's google_place_id. Reject already-onboarded places
-  // BEFORE spending any enrichment budget. enricher-save-place-data dedupes again as
+  // BEFORE spending any enrichment budget. enricher-agent-save-place-data dedupes again as
   // a race guard, but gating here is what keeps a duplicate click cheap.
   const { data: existing } = await admin
     .from("projects_view")
@@ -118,11 +118,11 @@ Deno.serve(async (req) => {
   };
 
   // ── 2) Persist the minimal row — lands content_status='generating' until the
-  // Enricher flips it to 'ready' via enricher-write-place-data. ──
+  // Enricher flips it to 'ready' via enricher-agent-write-place-data. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,
     "business-web-create-project",
-    "enricher-save-place-data",
+    "enricher-agent-save-place-data",
     { place, content_status: "generating" },
   );
   if (!saveRes.ok) {

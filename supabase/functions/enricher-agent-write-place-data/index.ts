@@ -1,4 +1,4 @@
-// Supabase Edge Function — enricher-write-place-data (artificial caller / agent)
+// Supabase Edge Function — enricher-agent-write-place-data (artificial caller / agent)
 //
 // The UPDATE half of the ASYNC enrich pipeline. The create path
 // (xxx-create-unit) inserts a MINIMAL units/places row (content_status='generating')
@@ -6,7 +6,7 @@
 // via its native S1-S7 research and calls THIS function to persist it onto the
 // EXISTING row — an UPDATE keyed by project_id, not an INSERT.
 //
-// Twin of enricher-save-place-data, but:
+// Twin of enricher-agent-save-place-data, but:
 //   • UPDATEs `places` by id (the unit/place shared PK) instead of inserting
 //   • requires the row to already exist (404 unit_not_found if not)
 //   • flips units.content_status → 'ready' (default) or a caller-supplied terminal
@@ -17,14 +17,14 @@
 // profile; only the keys it carries are written (columns it omits are left
 // untouched), so a wholesale UPDATE cannot wipe data the create step seeded.
 //
-// Media is NOT handled here — the Enricher invokes enricher-store-place-images next
+// Media is NOT handled here — the Enricher invokes enricher-agent-store-place-images next
 // with the media_assets get-enriched returned.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Mirrors enricher-save-place-data gating.
+// bearer. Mirrors enricher-agent-save-place-data gating.
 //
-// Local:  supabase functions serve enricher-write-place-data
-// Deploy: supabase functions deploy enricher-write-place-data
+// Local:  supabase functions serve enricher-agent-write-place-data
+// Deploy: supabase functions deploy enricher-agent-write-place-data
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";

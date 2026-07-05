@@ -1,4 +1,4 @@
-// Supabase Edge Function — enricher-save-place-data (artificial caller / agent)
+// Supabase Edge Function — enricher-agent-save-place-data (artificial caller / agent)
 //
 // The PERSIST half of the create pipeline. Takes the `place` JSON produced by
 // fetchGoogleBasics at create time (read-only) and writes it as the real rows:
@@ -12,17 +12,17 @@
 // against the live catalog. Inserts are sequenced places→units (shared id); a
 // units failure compensates by deleting the just-written place so we never
 // leave an orphan profile. Media is NOT handled here — the caller invokes
-// enricher-store-place-images next with the media_assets get-enriched returned.
+// enricher-agent-store-place-images next with the media_assets get-enriched returned.
 //
 // Ownership (project_members) is intentionally NOT created here — the caller
 // (business-web-create-project) owns the businesses upsert; ownership only lands when
 // admin-web-decide-verification approves a claim. This agent is place-only.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer. Mirrors how enricher-store-place-images is gated.
+// bearer. Mirrors how enricher-agent-store-place-images is gated.
 //
-// Local:  supabase functions serve enricher-save-place-data
-// Deploy: supabase functions deploy enricher-save-place-data
+// Local:  supabase functions serve enricher-agent-save-place-data
+// Deploy: supabase functions deploy enricher-agent-save-place-data
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
 
   // content_status is caller-controlled: the synchronous create lands 'ready'; the
   // async create path lands 'generating' (the n8n Enricher flips it to 'ready'
-  // later via enricher-write-place-data). Defaults to 'ready' for back-compat.
+  // later via enricher-agent-write-place-data). Defaults to 'ready' for back-compat.
   const ADEA_STATUSES = new Set(["queued", "generating", "ready", "failed"]);
   const adeaRaw = (bodyRes.body.content_status ?? "ready").toString().trim();
   const adeaStatus = ADEA_STATUSES.has(adeaRaw) ? adeaRaw : "ready";
