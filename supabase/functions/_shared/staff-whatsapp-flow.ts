@@ -679,7 +679,9 @@ async function handleSubmitBill(
       consumer_id: session.consumer_id,
       opened_by: opener,
       opened_by_staff_user_id: staff.staffUserId,
-      kind: "dp",
+      // Staff WhatsApp Type-A flow is discount-only (no story, no reservation),
+      // which persists as `coupon` under the collapsed ticket_kind enum.
+      kind: "coupon",
       status: "awaiting_payment_confirm",
       story_status: "not_required",
       check_subtotal_cents: calc.subtotal,
