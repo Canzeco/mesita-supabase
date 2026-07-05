@@ -7,6 +7,10 @@
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const TAGGER_MODEL = "gpt-4o-mini";
+const MAX_INFERRED_TAGS = 20;
+
 export type PlaceTag = {
   slug: string;
   label_es: string;
@@ -78,4 +82,82 @@ export async function resolvePlaceTags(
     .order("sort_order", { ascending: true });
   if (error || !data) return [];
   return data as PlaceTag[];
+}
+
+// Signals fed to the tag classifier (Enricher contents stage). All optional
+// except name — the richer the material, the sharper the picks.
+export type TagSignals = {
+  name: string;
+  category?: string | null;
+  description?: string | null;
+  googleReviewsText?: string | null;
+  serpSummary?: string | null;
+};
+
+// Picks up to 20 tag slugs from the closed vocabulary, strongly supported by
+// the place material. Returns [] when there's no OpenAI key, no vocabulary, or
+// the model errors — tags are additive polish, never worth failing a run over.
+// The vocabulary is passed in (the caller reads it once via fetchPlaceTags).
+export async function inferPlaceTags(
+  openaiKey: string | undefined,
+  vocabulary: PlaceTag[],
+  signals: TagSignals,
+): Promise<string[]> {
+  if (!openaiKey || vocabulary.length === 0) return [];
+  const valid = new Set(vocabulary.map((t) => t.slug));
+  const vocabText = vocabulary.map((t) => t.slug).join(", ");
+  const placeLines = [
+    `Name: ${signals.name}`,
+    signals.category ? `Category: ${signals.category}` : "",
+    signals.description ? `About: ${signals.description.slice(0, 1500)}` : "",
+    signals.googleReviewsText ? `Reviews: ${signals.googleReviewsText.slice(0, 800)}` : "",
+    signals.serpSummary ? `Editorial: ${signals.serpSummary}` : "",
+  ].filter(Boolean).join("\n");
+
+  const systemContent =
+    "You tag a place using ONLY slugs from a fixed vocabulary. Respond with a " +
+    `single JSON object {"tags": ["<slug>", ...]} containing at most ` +
+    `${MAX_INFERRED_TAGS} slugs copied verbatim from the vocabulary. Pick only ` +
+    "slugs strongly supported by the place material. Deduplicate. Never invent a slug.";
+  const userPrompt =
+    `Tag vocabulary (slugs):\n${vocabText}\n\nPlace:\n${placeLines}\n\n` +
+    `Return {"tags": [up to ${MAX_INFERRED_TAGS} slugs from the vocabulary]}.`;
+
+  try {
+    const r = await fetch(OPENAI_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: TAGGER_MODEL,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemContent },
+          { role: "user", content: userPrompt },
+        ],
+      }),
+    });
+    if (!r.ok) return [];
+    const data = (await r.json()) as { choices?: { message?: { content?: string } }[] };
+    let parsed: { tags?: unknown };
+    try {
+      parsed = JSON.parse(data.choices?.[0]?.message?.content ?? "") as { tags?: unknown };
+    } catch {
+      return [];
+    }
+    if (!Array.isArray(parsed.tags)) return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const t of parsed.tags) {
+      const slug = typeof t === "string" ? t.trim() : "";
+      if (slug && valid.has(slug) && !seen.has(slug)) {
+        seen.add(slug);
+        out.push(slug);
+        if (out.length >= MAX_INFERRED_TAGS) break;
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }

@@ -118,11 +118,13 @@ async function processAssetsInBackground(
   for (const asset of assets) {
     const mirrored = await mirrorOne(admin, supabaseUrl, projectId, asset.source_url, asset.source);
     mirroredBySource.set(asset.source_url, mirrored.url);
+    // NOTE: no image_id column here — the content hash lives inside
+    // storage_path (images/<sha256>.<ext>). Writing a dropped column made
+    // this UPDATE fail silently and stranded every row at 'pending'.
     const { error } = await admin
       .from("place_media_assets")
       .update({
         status: mirrored.ok ? "saved" : "failed",
-        image_id: mirrored.imageId,
         storage_path: mirrored.path,
         public_url: mirrored.publicUrl,
         mime_type: mirrored.contentType,

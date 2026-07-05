@@ -22,7 +22,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
 import { invokeArtificialCaller } from "../_shared/internal.ts";
-import { triggerEnrichPlace } from "../_shared/n8n.ts";
+import { seedPlaceResearch } from "../_shared/enrich-pipeline.ts";
 import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
 
 // `googlePlaceId` is the canonical key (Google Place ID). Legacy `placeId`
@@ -131,10 +131,11 @@ Deno.serve(async (req) => {
   const saved = saveRes.data;
   const project = { id: saved.unit_id, slug: saved.slug, name: saved.name, status: saved.status };
 
-  // ── 3) Hand deep enrichment to the n8n Enricher (async). Fire-and-forget: the
-  // webhook acks immediately, the workflow runs in n8n. A trigger failure NEVER
-  // fails the create — the row exists ('generating') and can be re-triggered. ──
-  const trigger = await triggerEnrichPlace(saved.unit_id, placeId);
+  // ── 3) Queue deep enrichment (async): seed the place_research row at
+  // stage='research'; the Enricher pipeline's pg_cron poller picks it up
+  // (supabase-cron-enrich-place-*). A seed failure NEVER fails the create —
+  // the row exists ('generating') and can be re-seeded. ──
+  const trigger = await seedPlaceResearch(admin, saved.unit_id, placeId, "business-web-create-project");
 
   // ── Respond — minimal row created; deep enrichment in flight. enrichment.* kept
   // for business-web response-contract compatibility (now async). ──

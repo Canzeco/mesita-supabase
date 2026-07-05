@@ -154,6 +154,21 @@ verify_jwt = true
 [functions.enricher-agent-report-step]
 verify_jwt = true
 
+# --- Enricher v2 pipeline (the Enricher is a PROCESS: cron-driven stages) ---
+#
+# Three stage EFs walk a place_research row research → analysis → contents.
+# The pg_cron poller (run_place_enrichment_stages) claims pending rows and
+# fires one net.http_post per row with the Vault service-role bearer; each EF
+# acks immediately and works in an EdgeRuntime background task. Internal-only.
+[functions.supabase-cron-enrich-place-research]
+verify_jwt = true
+
+[functions.supabase-cron-enrich-place-analysis]
+verify_jwt = true
+
+[functions.supabase-cron-enrich-place-contents]
+verify_jwt = true
+
 # LIVE admin create path — seeds the minimal 'generating' place via
 # enricher-agent-save-place-data and hands deep enrichment to the n8n Enricher
 # (fire-and-forget webhook). Operator JWT + super_admins allowlist.
