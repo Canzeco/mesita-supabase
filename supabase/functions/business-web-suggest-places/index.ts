@@ -1,9 +1,10 @@
 // Supabase Edge Function — business-web-suggest-places (natural caller)
 //
 // Thin facade for the business /add page picker. Resolves the caller's
-// user id (so the Enricher caller can flag verified_partner_self vs _other
-// on already-owned places) and forwards to enricher-suggest-places for the
-// actual Google+Mesita merge.
+// user id (so the suggest engine can flag verified_partner_self vs _other
+// on already-owned places) and runs the shared Google + Mesita merge
+// in-process (_shared/suggest-places.ts; the old enricher suggest-places
+// HTTP hop was absorbed in MESITA-55).
 //
 // JWT-protected: clients must send the Supabase anon JWT in Authorization.
 // Anonymous (anon key only, no user session) calls still get useful
@@ -16,7 +17,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { getOptionalAuthedUser, readEFEnv } from "../_shared/auth.ts";
-import { invokeArtificialCaller } from "../_shared/internal.ts";
+import { suggestPlaces } from "../_shared/suggest-places.ts";
 
 type Body = { input?: string; sessionToken?: string };
 
@@ -32,24 +33,16 @@ Deno.serve(async (req) => {
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
 
-  // Resolve caller user id from the bearer (if present). The Enricher caller
-  // uses this to mark verified_partner_self vs _other on Mesita-side
-  // matches. RLS-aware user client; anonymous degrades to "_other".
+  // Resolve caller user id from the bearer (if present). The suggest
+  // engine uses this to mark verified_partner_self vs _other on
+  // Mesita-side matches. RLS-aware user client; anonymous degrades to
+  // "_other".
   const { user } = await getOptionalAuthedUser(req, env);
   const callerUserId = user?.id ?? null;
 
-  const result = await invokeArtificialCaller<{
-    ok: boolean;
-    predictions?: unknown[];
-    error?: string;
-    code?: string;
-  }>(env, "business-web-suggest-places", "enricher-suggest-places", {
+  return await suggestPlaces(env, "business-web-suggest-places", {
     input: body.input,
     sessionToken: body.sessionToken,
     callerUserId,
   });
-  if (!result.ok) {
-    return json({ ok: false, error: result.error }, 502);
-  }
-  return json(result.data);
 });

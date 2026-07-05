@@ -1,4 +1,4 @@
-// Supabase Edge Function — enricher-store-place-images (artificial caller / async)
+// Supabase Edge Function — enricher-agent-store-place-images (artificial caller / async)
 //
 // Receives gathered source image URLs + metadata from Enricher enrichment, stores
 // metadata rows immediately, then mirrors assets to Supabase Storage in the
@@ -132,7 +132,7 @@ async function processAssetsInBackground(
       .eq("project_id", projectId)
       .eq("source_url", asset.source_url);
     if (error) {
-      console.error("[enricher-store-place-images] asset_update:", error.message);
+      console.error("[enricher-agent-store-place-images] asset_update:", error.message);
     }
   }
 
@@ -149,7 +149,7 @@ async function processAssetsInBackground(
     .update({ photos: finalPhotos })
     .eq("id", projectId);
   if (placeErr) {
-    console.error("[enricher-store-place-images] place_update:", placeErr.message);
+    console.error("[enricher-agent-store-place-images] place_update:", placeErr.message);
   }
 }
 

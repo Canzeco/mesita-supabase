@@ -1,4 +1,4 @@
-// Supabase Edge Function — enricher-report-step (artificial caller / agent)
+// Supabase Edge Function — enricher-agent-report-step (artificial caller / agent)
 //
 // Progress beacon for the n8n Enricher: one INSERT per completed (or failed)
 // pipeline step into public.place_enrichment_events, which powers the admin
@@ -17,10 +17,10 @@
 // }
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer + X-Internal-Caller header. Mirrors enricher-write-place-data gating.
+// bearer + X-Internal-Caller header. Mirrors enricher-agent-write-place-data gating.
 //
-// Local:  supabase functions serve enricher-report-step
-// Deploy: supabase functions deploy enricher-report-step
+// Local:  supabase functions serve enricher-agent-report-step
+// Deploy: supabase functions deploy enricher-agent-report-step
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";

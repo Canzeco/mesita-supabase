@@ -4,7 +4,7 @@
 // Google Places `placeId` and gets back a MINIMAL 'generating' place; deep
 // enrichment then runs ASYNC in the n8n Enricher. Pipeline: early dedupe →
 // fetchGoogleBasics (Google identity spine, category='undefined') →
-// enricher-save-place-data (places+projects, content_status='generating') →
+// enricher-agent-save-place-data (places+projects, content_status='generating') →
 // triggerEnrichPlace (n8n webhook, fire-and-forget).
 //
 // Roles are simple now: admins create from the admin app via THIS function;
@@ -30,7 +30,7 @@ import { fetchGoogleBasics } from "../_shared/atlas-google-basics.ts";
 
 type Body = { placeId?: string };
 
-// enricher-save-place-data response.
+// enricher-agent-save-place-data response.
 type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
 
 const CHANNEL_KEYS = [
@@ -99,12 +99,12 @@ Deno.serve(async (req) => {
   };
 
   // ── 2) Persist the minimal row — lands content_status='generating' until the
-  // Enricher flips it to 'ready' via enricher-write-place-data. No businesses
+  // Enricher flips it to 'ready' via enricher-agent-write-place-data. No businesses
   // upsert — admin creates an unowned listing. ──
   const saveRes = await invokeArtificialCaller<SaveResult>(
     env,
     "admin-web-create-unit",
-    "enricher-save-place-data",
+    "enricher-agent-save-place-data",
     { place, content_status: "generating" },
   );
   if (!saveRes.ok) {

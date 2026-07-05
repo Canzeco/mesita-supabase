@@ -1,6 +1,14 @@
-// Supabase Edge Function — enricher-suggest-places (artificial caller)
+// Shared suggest-places engine (Google + Mesita merge).
 //
-// Part of the Enricher namespace (place intelligence + encyclopaedia).
+// Formerly the enricher suggest-places artificial-caller EF. It was only
+// ever invoked by the three thin suggest facades (consumer-web-,
+// business-web-, admin-web-suggest-places), so per the caller-nomenclature
+// grammar (one endpoint = one caller) the HTTP hop didn't earn its cost on
+// this latency-sensitive autocomplete path — the merge now runs in-process
+// inside each facade (MESITA-55, mirroring the recommender absorb in
+// MESITA-54). The old enricher suggest-places cloud slug stays live for the
+// still-deployed old-name facades until the MESITA-59 cleanup deletes both.
+//
 // Proxies Google Places (New) Autocomplete + a Mesita-side name ILIKE
 // fallback in parallel, merges the two, and returns predictions tagged
 // with per-row status (`not_in_mesita`, `web_listed`,
@@ -10,20 +18,16 @@
 // so clients can navigate straight to the place row instead of
 // re-matching predictions by name; Google-only predictions omit both.
 //
-// The Google key never leaves Supabase — natural-caller EFs (currently
-// business-web-suggest-places, and any future consumer- or admin- surface)
-// invoke this with the caller's user id and we own the rest.
+// NOTE on `placeId`: in this response shape it is the GOOGLE Place ID
+// (addendum 9 of MESITA-51 — the place-row UUID semantic lives in
+// `mesitaId` here, so the two never collide in one key).
 //
-// Auth: artificial caller — verify_jwt = false at the gateway; the EF
-// itself enforces the service-role bearer via requireInternalCaller.
-//
-// Deploy: supabase functions deploy enricher-suggest-places
+// The Google key never leaves Supabase — the facades resolve the caller's
+// user id from the JWT and this module owns the rest.
 
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { corsPreflight, json, readJson } from "../_shared/http.ts";
-import { adminClient, readEFEnv } from "../_shared/auth.ts";
-import { requireInternalCaller } from "../_shared/internal.ts";
+import { json } from "./http.ts";
+import { adminClient, type EFEnv } from "./auth.ts";
 import {
   classifyGoogleError,
   escapeIlike,
@@ -31,14 +35,14 @@ import {
   GOOGLE_PLACES_AUTOCOMPLETE_URL,
   MESITA_PRIMARY_TYPES,
   readGooglePlacesKey,
-} from "../_shared/google-places.ts";
+} from "./google-places.ts";
 
-type Body = {
+export type SuggestPlacesArgs = {
   input?: string;
   sessionToken?: string;
-  // Caller-provided user id (the natural caller resolved this from the
-  // end-user JWT). When null, we can't flag verified_partner_self — only
-  // _other for any owned row.
+  // Caller user id resolved from the end-user JWT by the facade. When
+  // null, we can't flag verified_partner_self — only _other for any
+  // owned row.
   callerUserId?: string | null;
 };
 
@@ -61,27 +65,22 @@ type Prediction = {
   mesitaSlug?: string;
 };
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return corsPreflight();
-  if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
-
-  const envRes = readEFEnv();
-  if (!envRes.ok) return envRes.response;
-  const env = envRes.env;
-
-  const callerRes = requireInternalCaller(req, env);
-  if (!callerRes.ok) return callerRes.response;
-
+// Runs the merge and returns the full HTTP response for the facade to
+// send verbatim. `callerName` is echoed in the success envelope exactly
+// like the old artificial caller did, so the client-visible shape is
+// unchanged.
+export async function suggestPlaces(
+  env: EFEnv,
+  callerName: string,
+  args: SuggestPlacesArgs,
+): Promise<Response> {
   const keyRes = readGooglePlacesKey();
   if (!keyRes.ok) return keyRes.response;
   const apiKey = keyRes.key;
 
-  const bodyRes = await readJson<Body>(req);
-  if (!bodyRes.ok) return bodyRes.response;
-  const body = bodyRes.body;
-  const input = (body.input ?? "").toString().trim();
-  const sessionToken = (body.sessionToken ?? "").toString();
-  const callerUserId = body.callerUserId ?? null;
+  const input = (args.input ?? "").toString().trim();
+  const sessionToken = (args.sessionToken ?? "").toString();
+  const callerUserId = args.callerUserId ?? null;
 
   if (input.length < 2) return json({ ok: true, predictions: [] });
   if (!sessionToken) return json({ ok: false, error: "Missing sessionToken" });
@@ -156,8 +155,8 @@ Deno.serve(async (req) => {
     return aIn === bIn ? 0 : aIn ? -1 : 1;
   });
 
-  return json({ ok: true, predictions, caller: callerRes.callerName });
-});
+  return json({ ok: true, predictions, caller: callerName });
+}
 
 // ── Google ────────────────────────────────────────────────────────────
 
@@ -239,7 +238,7 @@ async function fetchMesitaPredictions(
     .not("google_place_id", "is", null)
     .limit(8);
   if (error) {
-    console.error("[enricher-suggest-places] mesita search:", error.message);
+    console.error("[suggest-places] mesita search:", error.message);
     return [];
   }
   type Row = {
@@ -273,7 +272,7 @@ async function enrichByPlaceIds(
     .select("id, slug, google_place_id")
     .in("google_place_id", placeIds);
   if (error) {
-    console.error("[enricher-suggest-places] placeId enrichment:", error.message);
+    console.error("[suggest-places] placeId enrichment:", error.message);
     return new Map();
   }
   type Row = { id: string; slug: string; google_place_id: string };
@@ -293,7 +292,7 @@ async function enrichByPlaceIds(
 // One owner-lookup pass over a place-row set, returning the per-placeId
 // PredictionStatus. `web_listed` for unowned rows;
 // `verified_partner_self/_other` for owned ones depending on whether the
-// caller (resolved by the natural EF before this call) is the owner.
+// caller (resolved by the facade before this call) is the owner.
 async function statusesForPlaces(
   admin: SupabaseClient,
   rows: Array<{ id: string; google_place_id: string }>,
@@ -306,7 +305,7 @@ async function statusesForPlaces(
     .in("project_id", rows.map((r) => r.id))
     .eq("role", "owner");
   if (error) {
-    console.error("[enricher-suggest-places] owner lookup:", error.message);
+    console.error("[suggest-places] owner lookup:", error.message);
   }
   const ownerByPlace = new Map<string, string>();
   for (const m of (data ?? []) as Array<{

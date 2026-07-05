@@ -1,4 +1,4 @@
-// Supabase Edge Function — enricher-get-config (artificial caller / agent)
+// Supabase Edge Function — enricher-agent-get-config (artificial caller / agent)
 //
 // Read-only init endpoint for the n8n Enricher. n8n NEVER reads the DB directly
 // (it is the N8N artificial caller); it calls THIS EF once at workflow start to
@@ -17,11 +17,11 @@
 //                  these slugs only.
 //
 // Contract: verify_jwt=false; requireInternalCaller gates the service-role
-// bearer + X-Internal-Caller header. Mirrors enricher-write-place-data /
-// enricher-store-place-images gating. GET or POST (no body needed).
+// bearer + X-Internal-Caller header. Mirrors enricher-agent-write-place-data /
+// enricher-agent-store-place-images gating. GET or POST (no body needed).
 //
-// Local:  supabase functions serve enricher-get-config
-// Deploy: supabase functions deploy enricher-get-config
+// Local:  supabase functions serve enricher-agent-get-config
+// Deploy: supabase functions deploy enricher-agent-get-config
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json } from "../_shared/http.ts";

@@ -19,7 +19,7 @@ const GOOGLE_PLACES_KEY_ENVS = ["GMP_KEY", "SUPA_GMP_KEY"] as const;
 // Table A; we pick the broadest 5 that cover Mesita's universe. Trade-off:
 // cuisine-specific Table A types (italian_restaurant, mexican_restaurant,
 // sushi_restaurant, …) get filtered out because each place has exactly one
-// primary type. The Mesita-side ILIKE fallback in enricher-suggest-places
+// primary type. The Mesita-side ILIKE fallback in _shared/suggest-places.ts (absorbed from enricher suggest-places, MESITA-55)
 // still surfaces them once they've been onboarded.
 export const MESITA_PRIMARY_TYPES = [
   "restaurant",
