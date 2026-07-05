@@ -21,7 +21,6 @@ import type {
   SessionRow,
   StaffContext,
   StaffIdentity,
-  StaffPlace,
 } from "./staff-whatsapp-types.ts";
 import {
   displayConsumerCode,

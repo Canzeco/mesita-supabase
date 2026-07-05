@@ -162,13 +162,6 @@ function mergeIntent(
 
   if (isPaymentConfirmState(sessionState) && fallback.intent === "confirm_payment") {
     intent = "confirm_payment";
-  } else if (
-    isPaymentConfirmState(sessionState) &&
-    intent === "submit_bill" &&
-    !messageLooksLikeBill(body) &&
-    fallback.intent === "confirm_payment"
-  ) {
-    intent = "confirm_payment";
   }
 
   if (
@@ -262,7 +255,6 @@ function heuristicParse(
 
   if (code && (sessionState === "idle" || sessionState === "consumer_identified")) {
     const parts = parseBillParts(body);
-    const hasBill = parts.subtotal_cents != null || parts.tip_cents != null;
     return {
       ...EMPTY_INTENT,
       intent: "lookup_code",

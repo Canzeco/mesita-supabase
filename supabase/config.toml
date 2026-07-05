@@ -144,8 +144,8 @@ verify_jwt = true
 [functions.supabase-cron-enrich-place-contents]
 verify_jwt = true
 
-# LIVE admin create path — seeds the minimal 'generating' place via
-# enricher-agent-save-place-data and queues deep enrichment (place_research →
+# LIVE admin create path — seeds the minimal 'generating' place in-process
+# (_shared/save-place.ts) and queues deep enrichment (place_research →
 # supabase-cron-enrich-place-*). Operator JWT + super_admins allowlist.
 [functions.admin-web-create-unit]
 verify_jwt = true

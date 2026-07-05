@@ -221,8 +221,8 @@ export function mapToObject<V>(m: Map<string, V> | null | undefined): Record<str
   return out;
 }
 
-// Build the media-asset payload rows for enricher-agent-store-place-images from
-// the analysis output + research metadata.
+// Build the media-asset payload rows for _shared/store-place-images from the
+// analysis output + research metadata.
 export function buildMediaAssets(
   gathered: GatheredPayload,
   analysis: AnalysisPayload,
