@@ -1,7 +1,7 @@
 // Supabase Edge Function — supabase-cron-run-project-creations (artificial caller / cron)
 //
 // The SERVICE-GATED internal create path the SQL scheduler poller invokes. It is
-// the headless twin of admin-web-create-project: the same createMinimalPlace
+// the headless twin of admin-web-create-unit: the same createMinimalPlace
 // core (_shared/create-place.ts: dedupe → Google spine → save 'generating' row →
 // seed place_research for the Enricher pipeline), but gated by
 // requireInternalCaller instead of getAuthedUser+requireSuperAdmin, because the
@@ -12,7 +12,7 @@
 // to 'done' (with the result summary) or 'failed' (with the error). The poller
 // already marked the row 'running' + bumped attempts before firing this call.
 //
-// Like admin-web-create-project, the scheduler creates an UNOWNED listing
+// Like admin-web-create-unit, the scheduler creates an UNOWNED listing
 // (listing_type='web' is set by savePlaceData); there is NO
 // accounts upsert here.
 //

@@ -5,7 +5,7 @@
 //   category='undefined') → savePlaceData (minimal 'generating' rows,
 //   in-process) → seedPlaceResearch (queue the Enricher pipeline).
 //
-// Callers: admin-web-create-unit, admin-web-create-project,
+// Callers: admin-web-create-unit,
 // business-web-create-project, supabase-cron-run-project-creations. They were
 // four near-identical copies of this block; only auth, dedupe copy, and
 // response shaping differ, so those stay in each EF.

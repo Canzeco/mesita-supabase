@@ -256,11 +256,6 @@ verify_jwt = true
 [functions.business-web-create-project]
 verify_jwt = true
 
-# Admin-app create path (operator JWT → admin allowlist). Same pipeline as
-# business-web-create-project, admin-gated, no businesses upsert.
-[functions.admin-web-create-project]
-verify_jwt = true
-
 # Staggered scheduler: consumer/admin enqueue a scheduled_project_creations row; the
 # pg_cron poller drips due rows to this service-gated EF. supabase-cron is
 # the actor-origin: the platform's own pg_cron poller originates the call
