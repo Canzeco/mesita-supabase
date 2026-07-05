@@ -1,7 +1,8 @@
-// Atlas enrichment: run-time config + shared types.
+// Enricher pipeline: run-time config + shared types.
 //
-// Every knob lives in app_settings and is read at run time — the DB is the
-// single source of truth; callers never pass overrides.
+// Every knob lives in app_settings (columns still named atlas_* for
+// historical continuity with the admin console) and is read at run time —
+// the DB is the single source of truth; callers never pass overrides.
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
@@ -33,8 +34,8 @@ export const PHOTO_CEILING = 50;
 
 // Atlas About target: a full public narrative, not a blurb. ~7 chars/word
 // (word + space) gives a predictable synthesis budget.
-export const ATLAS_DESCRIPTION_TARGET_WORDS = 1000;
-export const ATLAS_DESCRIPTION_MAX = ATLAS_DESCRIPTION_TARGET_WORDS * 7;
+export const ENRICH_DESCRIPTION_TARGET_WORDS = 1000;
+export const ENRICH_DESCRIPTION_MAX = ENRICH_DESCRIPTION_TARGET_WORDS * 7;
 
 // Rough per-call cost estimates (USD). Used by the admin cost calculator —
 // approximate, not billing.
@@ -66,7 +67,7 @@ export type MediaAssetPayload = {
   source_metadata?: Record<string, unknown> | null;
 };
 
-export type AtlasConfig = {
+export type EnrichConfig = {
   synthesisQuality: string;
   // GATHER caps — how many to PULL per source before anything else.
   gatherGoogleImages: number;
@@ -93,7 +94,7 @@ const DEFAULT_SORTING_PROMPT =
 // gates. The select is a single string LITERAL on purpose: supabase-js infers
 // the row type only from a literal argument — anything that widens to `string`
 // falls back to GenericStringError and untypes cfg.atlas_*.
-export async function loadAtlasConfig(admin: SupabaseClient): Promise<AtlasConfig> {
+export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichConfig> {
   const { data: cfg } = await admin
     .from("app_settings")
     .select(

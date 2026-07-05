@@ -2,8 +2,8 @@
 // their caller-specific auth:
 //
 //   early dedupe (google_place_id) → fetchGoogleBasics (identity spine,
-//   category='undefined') → enricher-agent-save-place-data (minimal
-//   'generating' row) → seedPlaceResearch (queue the Enricher pipeline).
+//   category='undefined') → savePlaceData (minimal 'generating' rows,
+//   in-process) → seedPlaceResearch (queue the Enricher pipeline).
 //
 // Callers: admin-web-create-unit, admin-web-create-project,
 // business-web-create-project, supabase-cron-run-project-creations. They were
@@ -11,19 +11,15 @@
 // response shaping differ, so those stay in each EF.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import type { EFEnv } from "./auth.ts";
-import { invokeArtificialCaller } from "./internal.ts";
 import { seedPlaceResearch } from "./enrich-pipeline.ts";
 import { fetchGoogleBasics } from "./enrich-google-basics.ts";
+import { savePlaceData } from "./save-place.ts";
 
 const CHANNEL_KEYS = [
   "website_url", "instagram_url", "facebook_url", "tiktok_url", "x_url", "threads_url",
   "reddit_url", "whatsapp_url", "opentable_url", "resy_url", "uber_eats_url",
   "didi_food_url", "tripadvisor_url", "yelp_url", "google_maps_url",
 ];
-
-// enricher-agent-save-place-data response.
-type SaveResult = { unit_id: string; place_id: string; slug: string; name: string; status: string };
 
 export type CreatedPlace = { id: string; slug: string; name: string; status: string };
 
@@ -52,19 +48,17 @@ export type CreatePlaceOutcome =
   | { ok: false; status: number; body: Record<string, unknown> };
 
 export async function createMinimalPlace(opts: {
-  env: EFEnv;
   admin: SupabaseClient;
-  // The natural caller's EF name — used as X-Internal-Caller on the save hop
-  // and as place_research.created_by.
+  // The natural caller's EF name — recorded as place_research.created_by.
   callerName: string;
   googlePlaceId: string;
   // Caller-specific copy for the 409 (e.g. the business app adds claim advice).
   dedupeError?: string;
 }): Promise<CreatePlaceOutcome> {
-  const { env, admin, callerName, googlePlaceId } = opts;
+  const { admin, callerName, googlePlaceId } = opts;
 
   // ── Early dedupe (idempotency on google_place_id): reject already-onboarded
-  // places BEFORE spending any budget. save-place-data dedupes again as a race
+  // places BEFORE spending any budget. savePlaceData dedupes again as a race
   // guard; gating here keeps a duplicate click cheap. ──
   const { data: existing } = await admin
     .from("projects_view")
@@ -112,22 +106,14 @@ export async function createMinimalPlace(opts: {
     category_label: null,
   };
 
-  // ── 2) Persist the minimal row — lands content_status='generating' until
-  // the Enricher pipeline's contents stage flips it to 'ready'. ──
-  const saveRes = await invokeArtificialCaller<SaveResult>(
-    env,
-    callerName,
-    "enricher-agent-save-place-data",
-    { place, content_status: "generating" },
-  );
+  // ── 2) Persist the minimal rows (in-process) — lands
+  // content_status='generating' until the Enricher pipeline's contents stage
+  // flips it to 'ready'. ──
+  const saveRes = await savePlaceData(admin, place, "generating");
   if (!saveRes.ok) {
-    return {
-      ok: false,
-      status: saveRes.status || 502,
-      body: { ok: false, error: saveRes.error },
-    };
+    return { ok: false, status: saveRes.status, body: saveRes.body };
   }
-  const saved = saveRes.data;
+  const saved = saveRes.saved;
 
   // ── 3) Queue deep enrichment (async): seed the place_research row at
   // stage='research'; the pg_cron poller picks it up

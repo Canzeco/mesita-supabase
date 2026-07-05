@@ -12,7 +12,7 @@ import {
   requireSuperAdmin,
 } from "../_shared/auth.ts";
 import { fetchPlaceCategories } from "../_shared/categories.ts";
-import { ATLAS_FIELD_LIMITS } from "../_shared/enrich-field-limits.ts";
+import { ENRICH_FIELD_LIMITS } from "../_shared/enrich-field-limits.ts";
 import { fetchPlaceTags, TAG_FACETS } from "../_shared/tags.ts";
 
 Deno.serve(async (req) => {
@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
     categories,
     tags,
     facets: TAG_FACETS,
-    fieldLimits: ATLAS_FIELD_LIMITS,
+    fieldLimits: ENRICH_FIELD_LIMITS,
     counts: {
       categories: categories.length,
       tags: tags.length,

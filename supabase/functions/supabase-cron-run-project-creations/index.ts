@@ -13,7 +13,7 @@
 // already marked the row 'running' + bumped attempts before firing this call.
 //
 // Like admin-web-create-project, the scheduler creates an UNOWNED listing
-// (listing_type='web' is set by enricher-agent-save-place-data); there is NO
+// (listing_type='web' is set by savePlaceData); there is NO
 // accounts upsert here.
 //
 // Contract: verify_jwt=true; the gateway verifies the service-role credential,
@@ -76,7 +76,6 @@ Deno.serve(async (req) => {
   };
 
   const created = await createMinimalPlace({
-    env,
     admin,
     callerName: "supabase-cron-run-project-creations",
     googlePlaceId,

@@ -22,13 +22,13 @@ import {
   inferPlaceCategory,
   type PlaceCategory,
 } from "../_shared/categories.ts";
-import { ATLAS_FIELD_LIMITS } from "../_shared/enrich-field-limits.ts";
+import { ENRICH_FIELD_LIMITS } from "../_shared/enrich-field-limits.ts";
 
-const MAX_PHOTOS = ATLAS_FIELD_LIMITS.photos.max;
-const MAX_TAGS = ATLAS_FIELD_LIMITS.tagsPerPlace.max;
-const MAX_TAG_LEN = ATLAS_FIELD_LIMITS.tagSlugLength.max;
-const MAX_PR_WHATSAPP = ATLAS_FIELD_LIMITS.prWhatsappNumbers.max;
-const MAX_PR_INSTAGRAM = ATLAS_FIELD_LIMITS.prInstagramAccounts.max;
+const MAX_PHOTOS = ENRICH_FIELD_LIMITS.photos.max;
+const MAX_TAGS = ENRICH_FIELD_LIMITS.tagsPerPlace.max;
+const MAX_TAG_LEN = ENRICH_FIELD_LIMITS.tagSlugLength.max;
+const MAX_PR_WHATSAPP = ENRICH_FIELD_LIMITS.prWhatsappNumbers.max;
+const MAX_PR_INSTAGRAM = ENRICH_FIELD_LIMITS.prInstagramAccounts.max;
 // Matches the business Place editor's About field cap (PLACE_DESCRIPTION_MAX).
 const MAX_DESCRIPTION_LEN = 2000;
 
@@ -173,7 +173,7 @@ Deno.serve(async (req) => {
   if ("name" in body) {
     const n = (body.name ?? "").toString().trim();
     if (!n) return json({ ok: false, error: "name cannot be empty" }, 400);
-    if (n.length > ATLAS_FIELD_LIMITS.placeName.max) {
+    if (n.length > ENRICH_FIELD_LIMITS.placeName.max) {
       return json({ ok: false, error: "name too long" }, 400);
     }
     update.name = n;

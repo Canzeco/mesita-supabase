@@ -4,8 +4,8 @@
 // from the admin 'synthesis quality' param.
 
 import {
-  ATLAS_DESCRIPTION_MAX,
-  ATLAS_DESCRIPTION_TARGET_WORDS,
+  ENRICH_DESCRIPTION_MAX,
+  ENRICH_DESCRIPTION_TARGET_WORDS,
   OPENAI_URL,
   QUALITY_MODEL,
 } from "./enrich-config.ts";
@@ -134,8 +134,8 @@ export async function synthesizeProfile(input: {
     `matching the schema. Build products.menu from website content when ` +
     `present (real dish names + prices only). Write "description" as the ` +
     `public About section for the Place page: a rich, inviting, factual ` +
-    `narrative of roughly ${ATLAS_DESCRIPTION_TARGET_WORDS} words (max ` +
-    `${ATLAS_DESCRIPTION_MAX} characters). Use short paragraphs. Cover ` +
+    `narrative of roughly ${ENRICH_DESCRIPTION_TARGET_WORDS} words (max ` +
+    `${ENRICH_DESCRIPTION_MAX} characters). Use short paragraphs. Cover ` +
     `atmosphere, cuisine, signature dishes or experiences, history or ` +
     `neighborhood context, and what makes a visit worthwhile — only when ` +
     `the sources support it. No filler or invented detail. ` +
@@ -200,7 +200,7 @@ export function applyProfileToUpdate(
   // The place's public About — hard cap at ~1000 words. Only overwrite when
   // synthesis actually produced text.
   if (parsed.description && parsed.description.trim()) {
-    update.description = parsed.description.trim().slice(0, ATLAS_DESCRIPTION_MAX);
+    update.description = parsed.description.trim().slice(0, ENRICH_DESCRIPTION_MAX);
   }
   if (parsed.details && typeof parsed.details === "object") {
     update.details = parsed.details;

@@ -22,10 +22,13 @@
 //
 // Beacons: each stage INSERTs place_enrichment_events rows directly (we're
 // already service-role inside an EF — no HTTP hop), keeping the admin console
-// notifications feed identical to the n8n Enricher's S1–S9 step semantics.
+// notifications feed on the S1–S9 step semantics (unchanged since the n8n era).
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import type { MediaAssetPayload } from "./enrich-config.ts";
+import { corsPreflight, json, readJson } from "./http.ts";
+import { adminClient, type EFEnv, readEFEnv } from "./auth.ts";
+import { requireInternalCaller } from "./internal.ts";
 
 export type ResearchStage = "research" | "analysis" | "contents" | "done" | "failed";
 
@@ -246,4 +249,47 @@ export function runInBackground(task: Promise<unknown>): void {
   }).EdgeRuntime;
   if (edgeRuntime?.waitUntil) edgeRuntime.waitUntil(task);
   else void task;
+}
+
+// ── Stage EF server ──────────────────────────────────────────────────────────
+
+// The boilerplate every stage EF shares: guards → internal-caller gate →
+// parse { project_id } → verify the row is claimed at this stage → ack 202 →
+// run the stage's work in the background. The runner owns
+// advance/release/fail; a thrown error releases the row for a retry.
+export function serveEnrichStage(
+  stage: ResearchStage,
+  run: (
+    admin: ReturnType<typeof adminClient>,
+    env: EFEnv,
+    row: PlaceResearchRow,
+  ) => Promise<void>,
+): void {
+  Deno.serve(async (req) => {
+    if (req.method === "OPTIONS") return corsPreflight();
+    if (req.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
+
+    const envRes = readEFEnv();
+    if (!envRes.ok) return envRes.response;
+    const callerRes = requireInternalCaller(req, envRes.env);
+    if (!callerRes.ok) return callerRes.response;
+
+    const bodyRes = await readJson<{ project_id?: string }>(req);
+    if (!bodyRes.ok) return bodyRes.response;
+    const projectId = (bodyRes.body.project_id ?? "").toString().trim();
+    if (!projectId) return json({ ok: false, error: "project_id is required" }, 400);
+
+    const admin = adminClient(envRes.env);
+    const rowRes = await loadClaimedRow(admin, projectId, stage);
+    if (!rowRes.ok) return json({ ok: false, error: rowRes.reason }, 409);
+
+    runInBackground(
+      run(admin, envRes.env, rowRes.row).catch(async (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[supabase-cron-enrich-place-${stage}]`, msg);
+        await releaseResearchRow(admin, projectId, `${stage}_crash: ${msg}`);
+      }),
+    );
+    return json({ ok: true, accepted: true, stage, project_id: projectId }, 202);
+  });
 }

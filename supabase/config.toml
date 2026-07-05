@@ -123,13 +123,6 @@ verify_jwt = true
 [functions.enricher-agent-discover-places]
 verify_jwt = true
 
-# Persist half of the create pipeline — INSERTs the minimal Google-basics profile
-# as places + units rows (shared PK, status='active'), with a caller-supplied
-# content_status (async create → 'generating'), idempotent on google_place_id.
-# Internal-only; the create/schedule callers invoke it with the service-role bearer.
-[functions.enricher-agent-save-place-data]
-verify_jwt = true
-
 # Async media persistence worker — stores source metadata immediately and mirrors
 # source images to Supabase Storage in background. Internal-only; invoked by
 # supabase-cron-enrich-place-contents (S9) so mirroring runs in its own wall clock.

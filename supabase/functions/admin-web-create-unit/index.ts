@@ -50,7 +50,6 @@ Deno.serve(async (req) => {
   if (!placeId) return json({ ok: false, error: "placeId is required" }, 400);
 
   const created = await createMinimalPlace({
-    env,
     admin,
     callerName: "admin-web-create-unit",
     googlePlaceId: placeId,
