@@ -11,7 +11,12 @@
 // instantly, matching the consumer app's VerifySocialSheet promise.
 //
 // Body: { followers: number, handle?: string }
-// Response: { ok: true, tier: "free"|"premium", followers: number }
+// Response: { ok: true, tier: "free"|"premium", followers: number,
+//             handle: string | null }
+//
+// `handle` (when sent) is normalized (leading @ stripped, lowercased) and
+// persisted to consumers.instagram_handle so the profile hero/settings can
+// show @handle instead of just the follower count (MESITA-74).
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -41,16 +46,25 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "followers must be a non-negative integer" }, 400);
   }
 
+  let handle: string | null = null;
+  if (body.handle !== undefined && body.handle !== null) {
+    handle = String(body.handle).trim().replace(/^@/, "").toLowerCase();
+    if (!/^[a-z0-9._]{1,30}$/.test(handle)) {
+      return json({ ok: false, error: "handle must be a valid Instagram username" }, 400);
+    }
+  }
+
   const admin = adminClient(envRes.env);
 
   const premium = await getTierConfig(admin, "premium");
   const threshold = premium?.follower_threshold ?? 1000;
   const qualifies = followers >= threshold;
 
-  // Always persist the latest follower count.
+  // Always persist the latest follower count (and handle when sent).
   const patch: Record<string, unknown> = {
     consumer_instagram_followers_count: followers,
   };
+  if (handle !== null) patch.instagram_handle = handle;
 
   if (qualifies) {
     patch.class_key = "premium";
@@ -59,7 +73,7 @@ Deno.serve(async (req) => {
     patch.class_expires_at = null;
     const { error } = await admin.from("consumers").update(patch).eq("id", consumerId);
     if (error) return json({ ok: false, error: error.message }, 500);
-    return json({ ok: true, tier: "premium", followers });
+    return json({ ok: true, tier: "premium", followers, handle });
   }
 
   // Below threshold: record followers; drop ONLY an instagram-origin Premium.
@@ -75,5 +89,5 @@ Deno.serve(async (req) => {
     .eq("id", consumerId)
     .eq("class_origin", "instagram");
 
-  return json({ ok: true, tier: "free", followers });
+  return json({ ok: true, tier: "free", followers, handle });
 });
