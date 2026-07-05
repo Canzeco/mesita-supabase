@@ -6,8 +6,9 @@
 // grammar (one endpoint = one caller) the HTTP hop didn't earn its cost on
 // this latency-sensitive autocomplete path — the merge now runs in-process
 // inside each facade (MESITA-55, mirroring the recommender absorb in
-// MESITA-54). The old enricher suggest-places cloud slug stays live for the
-// still-deployed old-name facades until the MESITA-59 cleanup deletes both.
+// MESITA-54). The old `enricher-suggest-places` cloud slug and the old-name
+// facades (admin-/business-/consumer-suggest-places) were deleted from cloud
+// on 2026-07-05 (MESITA-59 suggest cleanup); only the *-web- facades remain.
 //
 // Proxies Google Places (New) Autocomplete + a Mesita-side name ILIKE
 // fallback in parallel, merges the two, and returns predictions tagged
