@@ -69,15 +69,15 @@ export function staticCoachReply(ctx: StaffCoachContext): string {
   return fn(ctx);
 }
 
-export async function replyUnauthorizedStaff(
+export function replyUnauthorizedStaff(
   reason: StaffAccessDeniedReason,
   _userMessage: string,
   _conversationHistory = "",
-): Promise<string> {
+): string {
   return staticUnauthReply(reason);
 }
 
 /** Deterministic coach copy — never invent codes or amounts via LLM. */
-export async function replyStaffCoach(ctx: StaffCoachContext): Promise<string> {
+export function replyStaffCoach(ctx: StaffCoachContext): string {
   return staticCoachReply(ctx);
 }
