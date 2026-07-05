@@ -37,6 +37,17 @@
 // Unclaimed places report actor = null and meta.claimed = false. The exact
 // claimant, when it exists, is its own ownership_claimed event.
 //
+// Place embedding — each source resolves the place profile through the FK it
+// actually has (PostgREST embeds follow declared FKs only):
+//   • place_enrichment_events.project_id → places(id)      → embed places directly
+//   • project_verifications.project_id  → projects(id)     → hop projects → places
+// projects (the owned entity) shares its PK 1:1 with places and carries the
+// `slug`; the place profile columns (name/address/…) live on places. So the
+// claims source embeds `projects(id, slug, places(…))` and flattens the two
+// halves back into one PlaceRef. Do NOT embed `places` straight off
+// project_verifications — there is no such FK and PostgREST 500s with
+// "Could not find a relationship between 'project_verifications' and 'places'".
+//
 // Auth: caller's JWT email must be in public.super_admins.
 //
 // Deploy: supabase functions deploy admin-web-list-notifications
@@ -113,9 +124,10 @@ function one<T>(rel: T | T[] | null | undefined): T | null {
 
 type PlaceShape = {
   id: string;
-  // `slug` is a projects_view-only computed column — the base public.places
-  // table has none. Sources embedded via the places FK (steps, claims) can't
-  // select it, so it's optional here and defaults to null in placeRef.
+  // `slug` is a projects-only column — the base public.places table has none.
+  // Sources embedded via the places FK (steps) can't select it, so it's
+  // optional here and defaults to null in placeRef. The claims source hops
+  // through projects and DOES carry it (see projectPlaceRef).
   slug?: string | null;
   name: string | null;
   address: string | null;
@@ -132,6 +144,32 @@ function placeRef(v: PlaceShape | null): PlaceRef {
     address: v.address,
     categoryLabel: v.category_label,
     googlePlaceId: v.google_place_id,
+  };
+}
+
+// A place profile reached by hopping project_verifications → projects → places.
+// `slug` comes from the projects entity; the profile fields come from the
+// nested places embed. Shared PK means projects.id === places.id, so we key
+// the ref on the projects id.
+type ProjectPlaceShape = {
+  id: string;
+  slug: string | null;
+  place:
+    | Omit<PlaceShape, "id" | "slug">
+    | Array<Omit<PlaceShape, "id" | "slug">>
+    | null;
+};
+
+function projectPlaceRef(p: ProjectPlaceShape | null): PlaceRef {
+  if (!p) return null;
+  const pl = one(p.place);
+  return {
+    id: p.id,
+    slug: p.slug ?? null,
+    name: pl?.name ?? "(unnamed place)",
+    address: pl?.address ?? null,
+    categoryLabel: pl?.category_label ?? null,
+    googlePlaceId: pl?.google_place_id ?? null,
   };
 }
 
@@ -222,7 +260,10 @@ Deno.serve(async (req) => {
         let qb = admin
           .from("project_verifications")
           .select(
-            "id, project_id, method, requester_email, status, created_at, place:places(id, name, address, category_label, google_place_id)",
+            // project_verifications has no FK to places — it references the
+            // projects entity (shared PK with places). Hop through projects to
+            // reach the profile; slug lives on projects, the rest on places.
+            "id, project_id, method, requester_email, status, created_at, project:projects(id, slug, place:places(name, address, category_label, google_place_id))",
           )
           .order("created_at", { ascending: false })
           .limit(limit);
@@ -381,14 +422,14 @@ Deno.serve(async (req) => {
       requester_email: string | null;
       status: string | null;
       created_at: string;
-      place: PlaceShape | PlaceShape[] | null;
+      project: ProjectPlaceShape | ProjectPlaceShape[] | null;
     }>) {
       items.push({
         id: `atlas.ownership_claimed:${c.id}`,
         category: "atlas",
         type: "atlas.ownership_claimed",
         occurredAt: c.created_at,
-        place: placeRef(one(c.place)),
+        place: projectPlaceRef(one(c.project)),
         actor: c.requester_email ?? null,
         detail: null,
         meta: { method: c.method, status: c.status },
