@@ -16,7 +16,8 @@
 //                  section,sort_order). The Enricher picks place.tags (≤20) from
 //                  these slugs only.
 //
-// Contract: verify_jwt=false; requireInternalCaller gates the service-role
+// Contract: verify_jwt=true; the gateway verifies the service_role JWT signature,
+// then requireInternalCaller checks the role=service_role claim + reads the
 // bearer + X-Internal-Caller header. Mirrors enricher-agent-write-place-data /
 // enricher-agent-store-place-images gating. GET or POST (no body needed).
 //

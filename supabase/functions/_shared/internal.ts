@@ -9,30 +9,60 @@
 // hundreds of lines of code per natural EF.
 //
 // Wire protocol between the two:
-//   1. The natural caller sends `Authorization: Bearer <SERVICE_ROLE_KEY>`
+//   1. The natural caller sends `Authorization: Bearer <a service_role JWT>`
 //      and `X-Internal-Caller: <natural-EF-name>` to the artificial caller.
-//   2. The artificial caller has `verify_jwt = false` in supabase/config.toml
-//      so the gateway lets the request through unauthenticated.
-//   3. Inside the artificial caller, `requireInternalCaller(req, env)` checks
-//      the Authorization bearer matches SERVICE_ROLE_KEY exactly. Anything
-//      else gets a 403.
+//   2. The artificial caller has `verify_jwt = true` in supabase/config.toml,
+//      so Supabase's gateway VERIFIES THE JWT SIGNATURE before the function
+//      runs — a forged/unsigned token never reaches our code.
+//   3. Inside the artificial caller, `requireInternalCaller(req, env)` decodes
+//      the (already-signature-verified) JWT and requires `role === 'service_role'`.
+//      Anything else gets a 403.
 //
-// We avoid the more elaborate "issue a fresh service JWT per call" pattern
-// because the SERVICE_ROLE_KEY is already a long-lived secret that lives
-// inside every EF runtime — sharing it across EFs costs nothing extra.
+// This decouples internal auth from the *exact* SUPABASE_SERVICE_ROLE_KEY
+// string: any correctly-signed token bearing role=service_role passes, so
+// key rotation no longer requires a lockstep redeploy of every EF.
+//
+// ⚠️ SAFETY INVARIANT — READ BEFORE REUSING requireInternalCaller ⚠️
+// This role-claim check is safe ONLY because every EF that calls it is
+// `verify_jwt = true`. Under verify_jwt=true the Supabase gateway validates
+// the JWT signature (against the project's JWT secret) BEFORE the function
+// runs, so by the time we decode the payload here it is already authentic.
+// It MUST NEVER be used on a `verify_jwt = false` EF: there the gateway does
+// no verification, and an attacker could hand-craft an UNSIGNED JWT whose
+// payload literally says {"role":"service_role"} — this function would decode
+// it and wave it through. verify_jwt=true is the load-bearing half of the
+// check; the decode below trusts, it does not verify.
 
 import type { EFEnv } from "./auth.ts";
 import { json } from "./http.ts";
-// Constant-time bearer comparison so an attacker probing the header can't
-// extract bytes via timing analysis. The keys are short and the EF is
-// rate-limited at the gateway, but the helper costs nothing.
-import { timingSafeEqual } from "./timing-safe-equal.ts";
 
-// Verifies that a request was made by another EF with the service-role key.
-// Use this at the top of every artificial-caller EF.
+// Base64url-decode + JSON.parse the JWT payload (middle segment). Returns null
+// on any malformed input — callers treat null as "reject". We do NOT verify the
+// signature here; the gateway already did (see the invariant above).
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4 !== 0) b64 += "=";
+    const json = new TextDecoder().decode(
+      Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)),
+    );
+    const payload = JSON.parse(json);
+    return (payload && typeof payload === "object") ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+// Verifies that a request was made by another EF (or the pg_cron poller) with a
+// service_role JWT. Use this at the top of every artificial-caller EF — and
+// ONLY on EFs that are `verify_jwt = true` (see the invariant above). The `env`
+// argument is retained for signature stability; the check no longer reads
+// env.serviceKey (it trusts the gateway-verified role claim instead).
 export function requireInternalCaller(
   req: Request,
-  env: EFEnv,
+  _env: EFEnv,
 ):
   | { ok: true; callerName: string }
   | { ok: false; response: Response } {
@@ -44,7 +74,8 @@ export function requireInternalCaller(
     };
   }
   const token = authHeader.slice("Bearer ".length).trim();
-  if (!timingSafeEqual(token, env.serviceKey)) {
+  const payload = decodeJwtPayload(token);
+  if (!payload || payload.role !== "service_role") {
     return {
       ok: false,
       response: json({ ok: false, error: "Internal call rejected" }, 403),

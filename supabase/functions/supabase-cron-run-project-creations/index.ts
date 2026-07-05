@@ -17,7 +17,8 @@
 // (listing_type='web' is set by enricher-agent-save-place-data); there is NO businesses
 // upsert here.
 //
-// Contract: verify_jwt=false; requireInternalCaller gates the service-role
+// Contract: verify_jwt=true; the gateway verifies the service_role JWT signature,
+// then requireInternalCaller checks the role=service_role claim + reads the
 // bearer. Mirrors enricher-agent-save-place-data / enricher-agent-store-place-images.
 //
 // Local:  supabase functions serve supabase-cron-run-project-creations
