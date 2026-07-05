@@ -20,7 +20,8 @@
 // Media is NOT handled here — the Enricher invokes enricher-agent-store-place-images next
 // with the media_assets get-enriched returned.
 //
-// Contract: verify_jwt=false; requireInternalCaller gates the service-role
+// Contract: verify_jwt=true; the gateway verifies the service_role JWT signature,
+// then requireInternalCaller checks the role=service_role claim + reads the
 // bearer. Mirrors enricher-agent-save-place-data gating.
 //
 // Local:  supabase functions serve enricher-agent-write-place-data

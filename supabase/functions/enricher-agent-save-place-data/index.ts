@@ -18,7 +18,8 @@
 // (business-web-create-project) owns the businesses upsert; ownership only lands when
 // admin-web-decide-verification approves a claim. This agent is place-only.
 //
-// Contract: verify_jwt=false; requireInternalCaller gates the service-role
+// Contract: verify_jwt=true; the gateway verifies the service_role JWT signature,
+// then requireInternalCaller checks the role=service_role claim + reads the
 // bearer. Mirrors how enricher-agent-store-place-images is gated.
 //
 // Local:  supabase functions serve enricher-agent-save-place-data

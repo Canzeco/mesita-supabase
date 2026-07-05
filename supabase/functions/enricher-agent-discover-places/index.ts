@@ -10,8 +10,8 @@
 // the natural caller can render "already on Mesita" badges without a
 // second round-trip.
 //
-// Auth: artificial caller — verify_jwt = false at the gateway; the EF
-// itself enforces the service-role bearer via requireInternalCaller.
+// Auth: artificial caller — verify_jwt = true, so the gateway verifies the
+// service_role JWT signature; requireInternalCaller then checks role=service_role.
 //
 // Deploy: supabase functions deploy enricher-agent-discover-places
 
