@@ -65,12 +65,12 @@ Deno.serve(async (req) => {
   // without a deploy. Cancelled reservations don't count against the cap.
   const { data: consumerRow, error: consumerErr } = await admin
     .from("consumers")
-    .select("tier_key")
+    .select("class_key")
     .eq("id", consumerId)
     .maybeSingle();
   if (consumerErr) return json({ ok: false, error: consumerErr.message }, 500);
 
-  const tier = await getTierConfig(admin, consumerRow?.tier_key ?? "free");
+  const tier = await getTierConfig(admin, consumerRow?.class_key ?? "free");
   const monthlyLimit = tier?.monthly_reservation_limit ?? null;
   if (monthlyLimit != null) {
     const monthStart = new Date();
@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
           error:
             "You've reached your monthly reservation limit. Upgrade to Mesita Premium for unlimited reservations.",
           limit: monthlyLimit,
-          tier: consumerRow?.tier_key ?? "free",
+          tier: consumerRow?.class_key ?? "free",
         },
         409,
       );

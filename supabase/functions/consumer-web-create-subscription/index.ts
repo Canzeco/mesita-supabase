@@ -96,10 +96,10 @@ Deno.serve(async (req) => {
     const grant = await admin
       .from("consumers")
       .update({
-        tier_key: "premium",
-        tier_origin: "subscription",
-        tier_granted_at: new Date().toISOString(),
-        tier_expires_at: periodEnd,
+        class_key: "premium",
+        class_origin: "subscription",
+        class_granted_at: new Date().toISOString(),
+        class_expires_at: periodEnd,
       })
       .eq("id", consumerId);
     if (grant.error) {

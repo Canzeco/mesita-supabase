@@ -53,10 +53,10 @@ Deno.serve(async (req) => {
   };
 
   if (qualifies) {
-    patch.tier_key = "premium";
-    patch.tier_origin = "instagram";
-    patch.tier_granted_at = new Date().toISOString();
-    patch.tier_expires_at = null;
+    patch.class_key = "premium";
+    patch.class_origin = "instagram";
+    patch.class_granted_at = new Date().toISOString();
+    patch.class_expires_at = null;
     const { error } = await admin.from("consumers").update(patch).eq("id", consumerId);
     if (error) return json({ ok: false, error: error.message }, 500);
     return json({ ok: true, tier: "premium", followers });
@@ -71,9 +71,9 @@ Deno.serve(async (req) => {
 
   await admin
     .from("consumers")
-    .update({ tier_key: "free", tier_origin: "default", tier_expires_at: null })
+    .update({ class_key: "free", class_origin: "default", class_expires_at: null })
     .eq("id", consumerId)
-    .eq("tier_origin", "instagram");
+    .eq("class_origin", "instagram");
 
   return json({ ok: true, tier: "free", followers });
 });

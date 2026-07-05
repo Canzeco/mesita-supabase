@@ -57,7 +57,7 @@ export async function getTierConfig(
   tierKey: string,
 ): Promise<TierConfig | null> {
   const { data } = await admin
-    .from("plans")
+    .from("classes")
     .select(
       "key, label, rank, follower_threshold, monthly_reservation_limit, price_cents, currency, stripe_price_id, recommendation_weight",
     )

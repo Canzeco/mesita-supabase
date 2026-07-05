@@ -46,7 +46,7 @@ type UpdateBody = {
   fiscal_type?: "formal" | "informal";
   // NOTE: `plan` is deliberately NOT editable here. Plan changes are billing
   // and go through business-web-change-subscription (Stripe), so a client can't
-  // grant itself Promote/Ultra with a plain profile update.
+  // grant itself Pro/Ultra with a plain profile update.
   address?: string | null;
   closes_at?: string | null;
   hours?: PlaceHours | null;

@@ -406,7 +406,7 @@ async function handleLookupCode(
   const consumerRes = await admin
     .from("consumers")
     .select(
-      "id, code, full_name, first_name, last_name, tier_key, tier_origin, consumer_instagram_followers_count, phone",
+      "id, code, full_name, first_name, last_name, class_key, class_origin, consumer_instagram_followers_count, phone",
     )
     .eq("code", code)
     .maybeSingle();
@@ -429,7 +429,7 @@ async function handleLookupCode(
     admin,
     placeRow,
     c.id,
-    c.tier_key,
+    c.class_key,
   );
 
   const subRes = await admin
@@ -442,12 +442,12 @@ async function handleLookupCode(
   const name = c.full_name ||
     [c.first_name, c.last_name].filter(Boolean).join(" ") ||
     "Guest";
-  const tier = c.tier_key ?? "free";
+  const tier = c.class_key ?? "free";
   const ig = c.consumer_instagram_followers_count;
   const igLine = ig != null ? `\nInstagram followers: ${ig}` : "";
   const subLine = subRes.data
     ? `\nSubscription: active`
-    : `\nSubscription: none (${c.tier_origin ?? "default"})`;
+    : `\nSubscription: none (${c.class_origin ?? "default"})`;
 
   const guestBlock =
     `Comensal verificado ✓\n` +
@@ -647,7 +647,7 @@ async function handleSubmitBill(
   const consumerRes = await admin
     .from("consumers")
     .select(
-      "id, code, full_name, first_name, last_name, tier_key, tier_origin, consumer_instagram_followers_count, phone",
+      "id, code, full_name, first_name, last_name, class_key, class_origin, consumer_instagram_followers_count, phone",
     )
     .eq("id", session.consumer_id)
     .single();

@@ -25,8 +25,8 @@ export type ConsumerRow = {
   full_name: string | null;
   first_name: string | null;
   last_name: string | null;
-  tier_key: string | null;
-  tier_origin: string | null;
+  class_key: string | null;
+  class_origin: string | null;
   consumer_instagram_followers_count: number | null;
   phone: string | null;
 };
@@ -62,7 +62,7 @@ export async function computeInformalBill(
 ): Promise<InformalBillCalc> {
   const total = subtotal;
   const firstVisit = await isConsumerFirstVisit(admin, consumer.id, place.id);
-  const ratePercent = selectprojectRate(place, consumer.tier_key, firstVisit);
+  const ratePercent = selectprojectRate(place, consumer.class_key, firstVisit);
 
   const capPesos = place.monthly_promo_cap;
   const eligibleCents = promoEligibleSubtotalCents(subtotal, capPesos);

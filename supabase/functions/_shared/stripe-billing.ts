@@ -1,14 +1,14 @@
 // Shared Stripe billing helpers — the single place the Mesita subscription
 // catalog (three products, all monthly MXN) is defined and provisioned.
 //
-//   consumer_premium — Mesita Premium  · $100 MXN/mo · plans.premium
-//   business_pro     — Mesita Promote  · $100 MXN/mo · business_plans.pro
+//   consumer_premium — Mesita Premium  · $100 MXN/mo · classes.premium
+//   business_pro     — Mesita Pro  · $100 MXN/mo · business_plans.pro
 //   business_ultra   — Mesita Ultra    · $5,000 MXN/mo · business_plans.ultra
 //
 // resolvePlanPrice() is self-provisioning: the first real checkout after a
 // deploy materializes the product + price in whatever Stripe account
 // STRIPE_SECRET_KEY points at (live or sandbox), idempotently via lookup_key,
-// and caches the resulting price id back onto the lookup row (plans /
+// and caches the resulting price id back onto the lookup row (classes /
 // business_plans). A price change in the DB (e.g. Premium $200 → $100) is
 // self-healing too: the cached price is re-verified against the row and a
 // mismatched price is replaced (old one deactivated, lookup_key transferred).
@@ -26,7 +26,7 @@ export type PlanCatalogEntry = {
   // Stable Mesita-wide id, stored in Stripe metadata.mesita_plan.
   id: "consumer_premium" | "business_pro" | "business_ultra";
   // Lookup row backing this price.
-  table: "plans" | "business_plans";
+  table: "classes" | "business_plans";
   rowKey: string;
   // Stripe price lookup_key — the idempotency anchor.
   lookupKey: string;
@@ -37,7 +37,7 @@ export type PlanCatalogEntry = {
 export const STRIPE_CATALOG: PlanCatalogEntry[] = [
   {
     id: "consumer_premium",
-    table: "plans",
+    table: "classes",
     rowKey: "premium",
     lookupKey: "consumer_premium_monthly",
     productName: "Mesita Premium",
@@ -49,9 +49,9 @@ export const STRIPE_CATALOG: PlanCatalogEntry[] = [
     table: "business_plans",
     rowKey: "pro",
     lookupKey: "business_pro_monthly",
-    productName: "Mesita Promote",
+    productName: "Mesita Pro",
     productDescription:
-      "Mesita business Promote plan — medium visibility. Monthly subscription.",
+      "Mesita business Pro plan — medium visibility. Monthly subscription.",
   },
   {
     id: "business_ultra",
