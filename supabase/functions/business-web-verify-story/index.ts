@@ -85,16 +85,16 @@ Deno.serve(async (req) => {
   // Idempotency: once we've moved to a terminal verified/rejected state we
   // don't re-process. Re-submission returns the row.
   if (
-    ticket.story_status === "waiter_verified" ||
-    ticket.story_status === "waiter_rejected"
+    ticket.story_status === "staff_verified" ||
+    ticket.story_status === "staff_rejected"
   ) {
     return json({ ok: true, ticket, alreadyDecided: true });
   }
 
   const verifiedAt = new Date().toISOString();
   const nextStoryStatus = decision === "approve"
-    ? "waiter_verified"
-    : "waiter_rejected";
+    ? "staff_verified"
+    : "staff_rejected";
 
   // Approving the story advances Type B to the staff payment-confirm gate
   // (only if it's been billed). The ticket still closes later when staff tap
