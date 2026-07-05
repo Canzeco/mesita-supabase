@@ -116,7 +116,7 @@ async function processAssetsInBackground(
   const mirroredBySource = new Map<string, string>();
 
   for (const asset of assets) {
-    const mirrored = await mirrorOne(admin, supabaseUrl, projectId, asset.source_url, asset.source);
+    const mirrored = await mirrorOne(admin, supabaseUrl, asset.source_url);
     mirroredBySource.set(asset.source_url, mirrored.url);
     // NOTE: no image_id column here — the content hash lives inside
     // storage_path (images/<sha256>.<ext>). Writing a dropped column made
@@ -158,9 +158,7 @@ async function processAssetsInBackground(
 async function mirrorOne(
   admin: ReturnType<typeof adminClient>,
   supabaseUrl: string,
-  projectId: string,
   sourceUrl: string,
-  source: SourceKind,
 ): Promise<{
   ok: boolean;
   url: string;

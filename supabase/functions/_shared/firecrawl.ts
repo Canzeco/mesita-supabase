@@ -111,5 +111,9 @@ export async function firecrawlSearch(
       .filter(Boolean);
   } catch {
     return [];
+  } finally {
+    // firecrawlScrape clears its timer; this one never did — the leaked
+    // timeout kept a pending abort alive after every search (lint catch).
+    clearTimeout(timer);
   }
 }
