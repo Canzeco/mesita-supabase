@@ -3,13 +3,13 @@
 // Authenticated. The consumer uploads the URL of their Instagram-story
 // screenshot for a story-required ticket. Sets story_status to
 // 'submitted' and records the screenshot URL + timestamp, so the AI
-// verifier (or waiter fallback) can pick it up.
+// verifier (or staff fallback) can pick it up.
 //
 // This function is the *queue* feeder for the verification pipeline:
 //   - Submit moves the row from 'pending' (or 'ai_rejected') to 'submitted'.
 //   - The AI bot polls 'submitted' rows, attempts to match the @mention
 //     or location tag, and flips to 'ai_verified' / 'ai_rejected' on its own.
-//   - Anything that ends up 'ai_rejected' falls to the waiter via
+//   - Anything that ends up 'ai_rejected' falls to staff via
 //     business-web-verify-story.
 //
 // Auth model: the caller must be the ticket's consumer. The validator does
@@ -94,12 +94,16 @@ Deno.serve(async (req) => {
     );
   }
   if (
+    ticket.story_status === "staff_verified" ||
     ticket.story_status === "waiter_verified" ||
     ticket.story_status === "ai_verified"
   ) {
     return json({ ok: true, ticket, alreadyVerified: true });
   }
-  if (ticket.story_status === "waiter_rejected") {
+  if (
+    ticket.story_status === "staff_rejected" ||
+    ticket.story_status === "waiter_rejected"
+  ) {
     return json(
       {
         ok: false,

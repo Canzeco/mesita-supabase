@@ -60,6 +60,7 @@ Deno.serve(async (req) => {
 
   if (
     ticket.story_status === "ai_verified" ||
+    ticket.story_status === "staff_verified" ||
     ticket.story_status === "waiter_verified"
   ) {
     return json({ ok: true, ticket, alreadyVerified: true });
