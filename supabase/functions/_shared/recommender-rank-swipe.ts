@@ -33,6 +33,7 @@ import {
   stripInternal,
   type PlaceRow,
 } from "./recommender-pool.ts";
+import { demoteClosed, localHour } from "./local-time.ts";
 
 const CANDIDATE_POOL = 200;
 const MAX_PER_CATEGORY = 4;
@@ -118,13 +119,18 @@ export async function rankSwipeDeck(
     ranked = fallbackRank(candidates);
   }
 
-  // ── 5. Tier boost + diversity + partner-first trim ──────────────────
+  // ── 5. Tier boost + open-now demotion + diversity + trim ────────────
   // Premium guests get a stronger partner-first deck (a real perk: better,
   // more rewarding recommendations). Free guests keep the pure relevance
   // order. The boost is a stable partial reorder, so within partners /
   // within non-partners the relevance ranking from step 4 is preserved.
   const boosted = applyTierBoost(ranked, profile?.tier ?? null);
-  const deck = diversify(boosted, limit, MAX_PER_CATEGORY);
+  // "Demote, don't hide" (same product call as Memo): float open places above
+  // closed ones from each place's stored hours + local time, preserving the
+  // relevance/partner order inside each open/unknown/closed bucket. Places with
+  // no hours data are neutral — never penalised.
+  const opened = demoteClosed(boosted, (r) => r.hours, (r) => r.lng);
+  const deck = diversify(opened, limit, MAX_PER_CATEGORY);
 
   return {
     ok: true,
@@ -157,11 +163,11 @@ function composeIntent({
   candidates: PlaceRow[];
 }): string {
   const parts: string[] = [];
-  // Time-of-day handle. The Edge runtime is UTC; we don't know the
-  // consumer's timezone, so this is rough — gives the embedder a flavour,
-  // not a hard filter.
-  const now = new Date();
-  const hour = now.getUTCHours();
+  // Time-of-day handle. The Edge runtime clock is UTC, so we convert to the
+  // consumer's LOCAL hour from their longitude (see _shared/local-time.ts) —
+  // otherwise a 5am Mexico morning reads as ~11am UTC and pitches brunch. Still
+  // a flavour for the embedder, not a hard filter.
+  const hour = localHour(lng);
   if (hour < 11) parts.push("morning coffee and brunch energy");
   else if (hour < 16) parts.push("lunch and afternoon hangout vibes");
   else if (hour < 20) parts.push("golden hour rooftops and early dinner");

@@ -38,6 +38,7 @@ import {
   stripInternal,
   type PlaceRow,
 } from "./recommender-pool.ts";
+import { demoteClosed, localClock } from "./local-time.ts";
 
 const CANDIDATE_POOL = 300;
 const DEFAULT_MAX_CATEGORIES = 10;
@@ -181,6 +182,10 @@ export async function rankMapCatalog(
         (v.vibe ?? "").toLowerCase().includes(p.label.toLowerCase().split(" ")[0])
       );
     }
+    // "Demote, don't hide" (same product call as Memo): within each bucket
+    // float open places above closed ones by their stored hours + local time,
+    // preserving the cosine order inside each open/unknown/closed group.
+    ranked = demoteClosed(ranked, (r) => r.hours, (r) => r.lng);
 
     const picked: PlaceRow[] = [];
     for (const r of ranked) {
@@ -242,12 +247,16 @@ async function proposeCategories({
     listing_type: v.listing_type,
   }));
 
-  const now = new Date();
+  // Feed the LLM the user's LOCAL moment, not the UTC Edge clock — otherwise a
+  // 5am Mexico morning looks like ~11am UTC and it proposes brunch rows. Local
+  // clock is derived from lng (see _shared/local-time.ts); falls back to a
+  // neutral Central-Mexico midday when the zone can't be resolved.
+  const clock = localClock(lng);
   const userContext = {
     country: profile?.country ?? null,
     location: lat != null && lng != null ? { lat, lng } : null,
-    utc_hour: now.getUTCHours(),
-    weekday: now.toLocaleString("en", { weekday: "long" }),
+    local_hour: clock?.hour ?? 12,
+    weekday: clock?.weekday ?? "unknown",
     // Premium members get more aspirational, standout-leaning curation.
     membership: profile?.tier === "premium" ? "premium" : "free",
   };
