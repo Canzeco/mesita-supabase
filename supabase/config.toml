@@ -173,8 +173,13 @@ verify_jwt = true
 # synchronous 1:1 forward that didn't earn its cost. Their cloud slugs
 # stay live until the MESITA-59 cleanup.
 
-# Staggered scheduler: consumer/admin enqueue a scheduled_project_creations row; the
-# pg_cron poller drips due rows to the service-gated supabase-cron-run-project-creations.
+# Consumer "Add to Mesita": creates the place inline (MESITA-128; MESITA-127
+# dropped the staggered creation queue — only enrichment is scheduled now).
+[functions.consumer-web-create-place]
+verify_jwt = true
+
+# COMPAT ALIAS for the deployed consumer app (also creates inline, keeps the old
+# response keys). Delete once the app is verified on consumer-web-create-place.
 [functions.consumer-web-schedule-project-creation]
 verify_jwt = true
 
@@ -254,16 +259,6 @@ verify_jwt = true
 
 # Unit (place) lifecycle
 [functions.business-web-create-project]
-verify_jwt = true
-
-# Staggered scheduler: consumer/admin enqueue a scheduled_project_creations row; the
-# pg_cron poller drips due rows to this service-gated EF. supabase-cron is
-# the actor-origin: the platform's own pg_cron poller originates the call
-# with the service bearer; requireInternalCaller gates it inside the EF.
-# verify_jwt = true: the poller (public.run_scheduled_project_creations, migration
-# 20260705000000) sends Authorization: Bearer <vault scheduler_service_role_key>,
-# a real service_role JWT the gateway verifies before requireInternalCaller runs.
-[functions.supabase-cron-run-project-creations]
 verify_jwt = true
 
 [functions.business-web-update-project]
