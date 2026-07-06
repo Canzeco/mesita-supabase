@@ -12,6 +12,10 @@ const APIFY_BASE = "https://api.apify.com/v2/acts";
 // Store actor ids (the "~" form the API expects). Standard Apify store actors.
 export const APIFY_ACTORS = {
   instagramProfile: "apify~instagram-profile-scraper",
+  // Post depth beyond the profile scraper's embedded first grid page (~12):
+  // {username: [handle], resultsLimit: N} → the account's latest N posts,
+  // newest first ($2.70 / 1k results).
+  instagramPosts: "apify~instagram-post-scraper",
   facebookPages: "apify~facebook-pages-scraper",
   // Google Maps scraper — the depth Google's official API rations: ALL
   // reviews (Places caps at ~5) + popular_times, in one run.

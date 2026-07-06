@@ -22,6 +22,12 @@ export const QUALITY_MODEL: Record<string, string> = {
   high: "gpt-4o",
 };
 
+// Resolve the per-image vision model from the admin 'Image model' knob
+// (same economy/standard/high scale as synthesis).
+export function visionModelFor(quality: string): string {
+  return QUALITY_MODEL[quality] ?? VISION_MODEL;
+}
+
 // ADEA runs ALL steps S0–S6 on every enrichment. There is no admin "source step
 // ceiling" any more — each step fires whenever its real prerequisites hold (the
 // relevant API key is present AND its required input exists, e.g. a website to
@@ -69,6 +75,10 @@ export type MediaAssetPayload = {
 
 export type EnrichConfig = {
   synthesisQuality: string;
+  // Admin "Image model" knob — which model DESCRIBES photos (S5). The text
+  // sort (S6) and utility judges stay on the cheap VISION_MODEL, matching the
+  // admin cost calculator's lines.
+  visionQuality: string;
   // GATHER caps — how many to PULL per source before anything else.
   gatherGoogleImages: number;
   gatherWebsiteImages: number;
@@ -98,7 +108,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
   const { data: cfg } = await admin
     .from("app_settings")
     .select(
-      "atlas_synthesis_quality, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_website_crawl_max_pages",
+      "atlas_synthesis_quality, atlas_vision_quality, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_website_crawl_max_pages",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -108,6 +118,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
 
   return {
     synthesisQuality: (cfg?.atlas_synthesis_quality as string | undefined) ?? "economy",
+    visionQuality: (cfg?.atlas_vision_quality as string | undefined) ?? "economy",
     gatherGoogleImages: num(cfg?.atlas_gather_google_images, 10),
     gatherWebsiteImages: num(cfg?.atlas_gather_website_images, 10),
     gatherInstagramPosts: num(cfg?.atlas_gather_instagram_posts, 10),
