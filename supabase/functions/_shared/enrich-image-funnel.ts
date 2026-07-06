@@ -163,6 +163,46 @@ export async function rankWebsiteImagesByRelevance(
   }
 }
 
+// Hosts whose signed/CDN links reject OpenAI's third-party image fetcher, so we
+// must download the bytes inside the EF and inline them as a base64 data: URL.
+// Extend this predicate as new blocking hosts surface.
+const FETCHER_BLOCKED_HOST = /(^|\.)(cdninstagram\.com|fbcdn\.net)$/i;
+
+function needsInlineImage(url: string): boolean {
+  try {
+    return FETCHER_BLOCKED_HOST.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024; // ~2 MB cap per image
+
+// Download an image inside the EF and return it as a base64 data: URL. Returns
+// null (caller falls back to the remote URL) on any failure, oversize body, or
+// missing/non-image content. Shares the per-image AbortController so the 25 s
+// timeout covers download + describe together.
+async function fetchAsDataUrl(url: string, signal: AbortSignal): Promise<string | null> {
+  try {
+    const r = await fetch(url, { signal });
+    if (!r.ok) return null;
+    const contentType = r.headers.get("content-type") ?? "";
+    if (!/^image\//i.test(contentType)) return null;
+    const declared = Number(r.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_INLINE_IMAGE_BYTES) {
+      await r.body?.cancel();
+      return null;
+    }
+    const buf = new Uint8Array(await r.arrayBuffer());
+    if (buf.byteLength === 0 || buf.byteLength > MAX_INLINE_IMAGE_BYTES) return null;
+    let binary = "";
+    for (let i = 0; i < buf.length; i++) binary += String.fromCharCode(buf[i]);
+    return `data:${contentType.split(";")[0]};base64,${btoa(binary)}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function visionDescribe(
   openaiKey: string,
   urls: string[],
@@ -173,6 +213,11 @@ export async function visionDescribe(
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 25000);
     try {
+      let imageUrl = url;
+      if (needsInlineImage(url)) {
+        const dataUrl = await fetchAsDataUrl(url, ctrl.signal);
+        if (dataUrl) imageUrl = dataUrl;
+      }
       const r = await fetch(OPENAI_URL, {
         method: "POST",
         headers: {
@@ -188,7 +233,7 @@ export async function visionDescribe(
               role: "user",
               content: [
                 { type: "text", text: prompt },
-                { type: "image_url", image_url: { url, detail: "low" } },
+                { type: "image_url", image_url: { url: imageUrl, detail: "low" } },
               ],
             },
           ],
