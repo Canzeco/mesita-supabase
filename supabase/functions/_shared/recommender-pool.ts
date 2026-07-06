@@ -11,6 +11,7 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { PLACE_PUBLIC_COLUMNS } from "./place-columns.ts";
 import { haversineKm, radiusBoundingBox } from "./geo.ts";
+import type { WeeklyHours } from "./local-time.ts";
 
 // Same projection as PLACE_PUBLIC_COLUMNS but with the two ranker-internal
 // columns appended. Both columns are stripped by the ranker before the row
@@ -37,7 +38,13 @@ export type PlaceRow = {
   lat: number | null;
   lng: number | null;
   address: string | null;
+  // IANA timezone string when enrichment filled it; the rankers derive their
+  // own zone from lng (see _shared/local-time.ts) so this stays informational.
+  timezone: string | null;
   closes_at: string | null;
+  // Normalised weekly hours (see WeeklyHours / migrations 0008 + 20252120001).
+  // Powers the "open now" demotion in both rankers. Null when unenriched.
+  hours: WeeklyHours | null;
   phone: string | null;
   pitch: string | null;
   story: string | null;
