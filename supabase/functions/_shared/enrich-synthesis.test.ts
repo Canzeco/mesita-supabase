@@ -4,10 +4,16 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { applyProfileToUpdate, asProfileText, type ProfileResult } from "./enrich-synthesis.ts";
 
-Deno.test("asProfileText: trims strings, joins string arrays, drops the rest", () => {
+Deno.test("asProfileText: trims strings, joins arrays and string-valued objects, drops the rest", () => {
   assertEquals(asProfileText("  hola  "), "hola");
   assertEquals(asProfileText(["Para uno.", " Para dos. "]), "Para uno.\n\nPara dos.");
-  assertEquals(asProfileText({ text: "nope" }), null);
+  // gpt-4o-mini emits object-shaped Abouts under thin grounding — flatten them.
+  assertEquals(
+    asProfileText({ intro: "Un lugar.", ambiente: "Cálido." }),
+    "Un lugar.\n\nCálido.",
+  );
+  assertEquals(asProfileText([{ paragraph: "objeto" }, "y texto"]), "objeto\n\ny texto");
+  assertEquals(asProfileText({ n: 42 }), null);
   assertEquals(asProfileText(42), null);
   assertEquals(asProfileText(null), null);
   assertEquals(asProfileText([]), null);
@@ -29,12 +35,12 @@ Deno.test("applyProfileToUpdate: off-type LLM fields never throw — dropped or 
     popular_times: "busy",
   } as unknown as ProfileResult;
   applyProfileToUpdate(update, parsed);
-  assertEquals("description" in update, false);
+  assertEquals(update.description, "objeto");
   assertEquals("zone" in update, false);
   assertEquals("city" in update, false);
   assertEquals(update.established_year, 1998);
   assertEquals(update.executive_chef, "Ana\n\nLuis");
-  assertEquals("editorial_summary" in update, false);
+  assertEquals(update.editorial_summary, "x");
   assertEquals("details" in update, false);
   assertEquals("products" in update, false);
   assertEquals("popular_times" in update, false);

@@ -115,9 +115,12 @@ serveEnrichStage("contents", async (admin, env, row) => {
   place.enriched_at = new Date().toISOString();
   place.enrichment_sources = sources;
 
+  // Beacon reports what synthesis actually produced — a dropped/missing About
+  // must be visible in the feed, not claimed as written.
+  const aboutWritten = typeof place.description === "string" && place.description.length > 0;
   await reportEnrichmentStep(admin, projectId, "S7", "synthesis_category_tags", "completed",
-    `Synthesis complete — wrote the About summary, set category “${place.category ?? "n/a"}”, and applied ${inferredTags.length} tag(s).`,
-    { category: place.category ?? null, tags: inferredTags.length });
+    `Synthesis complete — About ${aboutWritten ? "written" : "MISSING"}, category “${place.category ?? "n/a"}”, ${inferredTags.length} tag(s).`,
+    { about: aboutWritten, category: place.category ?? null, tags: inferredTags.length });
 
   // ━━━ S8 — persist the profile (direct UPDATE; this EF IS the DB layer) ━━━
   // Strip identity/timestamps so the DB owns them; keys absent are untouched
