@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: supabase/functions
+
+jobs:
+  check:
+    name: deno lint · test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.1
+
+      # Supabase edge functions intentionally use unpinned jsr:/npm: and
+      # https:// import specifiers (per Supabase's own EF docs), so the
+      # no-unversioned-import / no-import-prefix rules are excluded — every
+      # other lint rule stays enforced and blocking.
+      - name: Lint
+        run: deno lint --rules-exclude=no-unversioned-import,no-import-prefix
+
+      - name: Test
+        run: deno test --allow-all
+
+  # Full type-check of every edge function against its remote (jsr/npm/https)
+  # imports. Non-blocking: it depends on live registries being reachable, so a
+  # registry hiccup should not block a merge. The blocking `test` job above
+  # already type-checks the tested modules.
+  typecheck:
+    name: deno check (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.1
+
+      - name: Check
+        run: deno check .
