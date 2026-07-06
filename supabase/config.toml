@@ -130,16 +130,6 @@ verify_jwt = true
 [functions.supabase-edgefunc-store-place-images]
 verify_jwt = true
 
-# --- TEMPORARY ALIASES (MESITA-137) -----------------------------------------
-# Old enricher-agent-* slugs kept live only until the renamed supabase-edgefunc-*
-# functions are deployed and both call sites are confirmed hitting them in prod.
-# DELETE these two entries (cloud + repo + dirs) in the coordinated follow-up.
-[functions.enricher-agent-discover-places]
-verify_jwt = true
-
-[functions.enricher-agent-store-place-images]
-verify_jwt = true
-
 # --- Enricher v2 pipeline (the Enricher is a PROCESS: cron-driven stages) ---
 #
 # Three stage EFs walk a place_research row research → analysis → contents.
@@ -159,12 +149,6 @@ verify_jwt = true
 # (_shared/save-place.ts) and queues deep enrichment (place_research →
 # supabase-cron-enrich-place-*). Operator JWT + super_admins allowlist.
 [functions.admin-web-create-project]
-verify_jwt = true
-
-# TEMP ALIAS (MESITA-135): the pre-rename slug of admin-web-create-project, kept
-# deployed only until the admin app is confirmed calling the new slug in prod.
-# Follow-up: delete this entry + the cloud/repo function after the flip.
-[functions.admin-web-create-unit]
 verify_jwt = true
 
 # Authed consumer writes / reads tied to the signed-in consumer's own data.
