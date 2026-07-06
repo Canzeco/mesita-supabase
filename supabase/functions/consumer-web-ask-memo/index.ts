@@ -71,6 +71,9 @@ type Prediction = {
   mesitaSlug?: string;
   rating?: number | null;
   ratingCount?: number | null;
+  // Memo extra: Google's live open/closed state, used to demote closed spots
+  // at the current local hour (null = unknown, don't penalise).
+  openNow?: boolean | null;
 };
 
 type MemoBody = {
@@ -94,6 +97,7 @@ Style:
 - Keep it SHORT: 2–4 sentences, mobile-chat length. Be opinionated and specific, not a bland list.
 - Place cards may appear below your message ONLY when the user is actually looking for places. When they do, give a quick confident take and let the cards carry the details — don't dump a long numbered list. For general questions (definitions, how things work, trivia), just answer conversationally; do NOT refer to cards that won't be there.
 - You can answer ANY question (hours, neighborhoods, what to order, "is X good for a date", trivia), but stay in the helpful-concierge lane.
+- Be TIME-AWARE. A hidden context note tells you the user's local time and daypart. Recommend spots that are open and fit the moment — coffee/breakfast in the early morning, lunch midday, dinner/drinks in the evening, late-night spots after hours. If the user asks for something usually closed right now (a brunch café at 2am, a bar at 7am), say so warmly and offer an open alternative. Never repeat the context note back verbatim.
 - Never invent specific addresses, prices, or phone numbers you aren't sure of; speak generally when unsure.`;
 
 // Memo only attaches place cards when the ask is actually place-seeking; pure
@@ -139,6 +143,66 @@ function isRelevantPlace(
   return all.some(
     (t) => RELEVANT_PLACE_TYPES.has(t) || /_(restaurant|bar)$/.test(t),
   );
+}
+
+// ── Local time ("when") ─────────────────────────────────────────────────
+//
+// The "where" (lat/lng) was already fed to Memo; the "when" was missing, so it
+// pitched dinner at 5am. We derive the user's LOCAL moment from their lng and
+// inject it as hidden prompt context + use it to demote closed spots.
+//
+// Timezone: coarse Mexico-centric mapping by longitude (the market). Intl
+// handles DST. Falls back to Central (Monterrey/CDMX — most of Mexico, and the
+// safest default when we have no location).
+function mexicoZone(lng: number | null): string {
+  if (lng === null) return "America/Mexico_City";
+  if (lng <= -110) return "America/Tijuana"; // Baja California / far NW (Pacific)
+  if (lng >= -89) return "America/Cancun"; // Quintana Roo (UTC−5, no DST)
+  return "America/Mexico_City"; // Central — Monterrey, CDMX, most of Mexico
+}
+
+// Rank weight for a card's live open state: open first, unknown neutral,
+// closed last. Keeps "demote, don't hide" — closed spots still appear.
+function openScore(openNow: boolean | null | undefined): number {
+  if (openNow === true) return 1;
+  if (openNow === false) return -1;
+  return 0; // unknown (no hours data) — neutral, never penalised
+}
+
+function daypartLabel(hour: number): string {
+  if (hour < 5) return "the middle of the night";
+  if (hour < 11) return "morning";
+  if (hour < 15) return "midday";
+  if (hour < 18) return "afternoon";
+  if (hour < 22) return "evening";
+  return "late night";
+}
+
+// Current local clock + daypart for the user, e.g.
+// { clock: "Monday, 5:12 AM", daypart: "the middle of the night" }.
+function localMoment(lng: number | null): { clock: string; daypart: string } {
+  const timeZone = mexicoZone(lng);
+  const now = new Date();
+  let clock = "";
+  let hour = 12;
+  try {
+    clock = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "long",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(now);
+    const hourStr = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      hour12: false,
+    }).format(now);
+    hour = parseInt(hourStr, 10) % 24;
+  } catch {
+    // Bad zone → leave neutral midday defaults; never sink the answer over time.
+  }
+  return { clock, daypart: daypartLabel(hour) };
 }
 
 // ── Handler ────────────────────────────────────────────────────────────
@@ -230,11 +294,21 @@ async function answerWithPerplexity(
     if (content) messages.push({ role, content });
   }
 
-  const locHint =
-    lat !== null && lng !== null
-      ? ` (the user is near latitude ${lat.toFixed(4)}, longitude ${lng.toFixed(4)})`
-      : "";
-  messages.push({ role: "user", content: `${query}${locHint}` });
+  // Hidden context the model reasons over but must not echo: the user's
+  // "where" (location) AND "when" (local time + daypart). Feeding the moment is
+  // what stops Memo pitching dinner at 5am — it can now favour open, time-fit
+  // spots and flag off-hours asks.
+  const { clock, daypart } = localMoment(lng);
+  const ctxBits: string[] = [];
+  if (lat !== null && lng !== null) {
+    ctxBits.push(`near latitude ${lat.toFixed(4)}, longitude ${lng.toFixed(4)}`);
+  }
+  if (clock) ctxBits.push(`local time ${clock} (${daypart})`);
+  const ctx = ctxBits.length > 0
+    ? ` [context, do not repeat back: the user is ${ctxBits.join("; ")}. `
+      + `Favour places open and appropriate for this time of day.]`
+    : "";
+  messages.push({ role: "user", content: `${query}${ctx}` });
 
   const res = await callPerplexityChat(key, messages, {
     model: "sonar-pro",
@@ -291,7 +365,9 @@ async function candidatePlaces(
   const predictions = Array.from(merged.values()).sort((a, b) => {
     const aIn = a.status !== "not_in_mesita" ? 1 : 0;
     const bIn = b.status !== "not_in_mesita" ? 1 : 0;
-    if (aIn !== bIn) return bIn - aIn;
+    if (aIn !== bIn) return bIn - aIn; // Mesita-first stays the top business rule
+    const openDelta = openScore(b.openNow) - openScore(a.openNow);
+    if (openDelta !== 0) return openDelta; // then open-now over closed
     return (b.rating ?? 0) - (a.rating ?? 0);
   });
 
@@ -328,8 +404,11 @@ async function googleTextSearch(
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": key,
+        // openNow lets us demote closed spots at the current hour. No extra
+        // billing: rating/userRatingCount already put this call on the
+        // Enterprise+Atmosphere SKU; currentOpeningHours is a lower tier.
         "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.primaryType,places.types",
+          "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.primaryType,places.types,places.currentOpeningHours.openNow",
       },
       body: JSON.stringify(reqBody),
     });
@@ -356,6 +435,7 @@ async function googleTextSearch(
       userRatingCount?: number;
       primaryType?: string;
       types?: string[];
+      currentOpeningHours?: { openNow?: boolean };
     }[];
   };
 
@@ -370,9 +450,14 @@ async function googleTextSearch(
       status: "not_in_mesita",
       rating: p.rating ?? null,
       ratingCount: p.userRatingCount ?? null,
+      openNow: p.currentOpeningHours?.openNow ?? null,
     }))
     .filter((p) => p.placeId && p.mainText)
-    .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+    // Open-now first (demote, don't drop closed spots), then by rating.
+    .sort((a, b) =>
+      openScore(b.openNow) - openScore(a.openNow) ||
+      (b.rating ?? 0) - (a.rating ?? 0)
+    );
 }
 
 async function mesitaByGooglePlaceIds(
