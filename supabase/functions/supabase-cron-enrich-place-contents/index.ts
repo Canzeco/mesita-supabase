@@ -115,12 +115,9 @@ serveEnrichStage("contents", async (admin, env, row) => {
   place.enriched_at = new Date().toISOString();
   place.enrichment_sources = sources;
 
-  // Beacon reports what synthesis actually produced — a dropped/missing About
-  // must be visible in the feed, not claimed as written.
+  // Captured for the single stage beacon below — a dropped/missing About must
+  // be visible in the feed, not claimed as written.
   const aboutWritten = typeof place.description === "string" && place.description.length > 0;
-  await reportEnrichmentStep(admin, projectId, "S7", "synthesis_category_tags", "completed",
-    `Synthesis complete — About ${aboutWritten ? "written" : "MISSING"}, category “${place.category ?? "n/a"}”, ${inferredTags.length} tag(s).`,
-    { about: aboutWritten, category: place.category ?? null, tags: inferredTags.length });
 
   // ━━━ S8 — persist the profile (direct UPDATE; this EF IS the DB layer) ━━━
   // Strip identity/timestamps so the DB owns them; keys absent are untouched
@@ -129,7 +126,9 @@ serveEnrichStage("contents", async (admin, env, row) => {
     place as Record<string, unknown> & { id?: unknown; created_at?: unknown; updated_at?: unknown };
   const { error: placeErr } = await admin.from("places").update(placeUpdate).eq("id", projectId);
   if (placeErr) {
-    await reportEnrichmentStep(admin, projectId, "S8", "data_persisted", "failed",
+    // Persist failed — the run is aborted here, so this failed beacon IS the
+    // stage's single notification.
+    await reportEnrichmentStep(admin, projectId, "S7", "publish", "failed",
       "Profile persist failed — the place record was not updated.", { error: placeErr.message });
     await releaseResearchRow(admin, projectId, `place_update: ${placeErr.message}`);
     return;
@@ -142,11 +141,14 @@ serveEnrichStage("contents", async (admin, env, row) => {
     await releaseResearchRow(admin, projectId, `content_status: ${projErr.message}`);
     return;
   }
-  await reportEnrichmentStep(admin, projectId, "S8", "data_persisted", "completed",
-    "Enriched profile persisted to the place record (ready).", { contentStatus: "ready" });
 
   // ━━━ S9 — store images (own EF: storage mirroring gets its own wall clock) ━━━
+  // Profile is already persisted (ready); image mirroring is best-effort — a
+  // failure still leaves photos rendering from source URLs, and a re-run can
+  // re-mirror. So it never fails the run, only colours the summary below.
   const assets = buildMediaAssets(gathered, analysis);
+  let imagesSummary: string;
+  const imagesMeta: Record<string, unknown> = {};
   if (assets.length > 0) {
     const storeRes = await invokeArtificialCaller<{ queued?: number }>(
       env,
@@ -155,19 +157,25 @@ serveEnrichStage("contents", async (admin, env, row) => {
       { project_id: projectId, assets, preferred_photo_urls: analysis.finalPhotos },
     );
     if (storeRes.ok) {
-      await reportEnrichmentStep(admin, projectId, "S9", "images_stored", "completed",
-        `Stored ${storeRes.data.queued ?? assets.length} image(s) to the media bucket — enrichment run complete.`,
-        { queued: storeRes.data.queued ?? assets.length });
+      const queued = storeRes.data.queued ?? assets.length;
+      imagesSummary = `stored ${queued} image(s)`;
+      imagesMeta.images = "stored";
+      imagesMeta.imagesStored = queued;
     } else {
-      // Profile is saved; image mirroring failed. Report and finish anyway —
-      // photos still render from source URLs and a re-run can re-mirror.
-      await reportEnrichmentStep(admin, projectId, "S9", "images_stored", "failed",
-        "Image storage failed — profile saved but media were not stored.", { error: storeRes.error });
+      imagesSummary = "image storage failed (profile saved)";
+      imagesMeta.images = "failed";
+      imagesMeta.imagesError = storeRes.error;
     }
   } else {
-    await reportEnrichmentStep(admin, projectId, "S9", "images_stored", "skipped",
-      "No candidate images gathered — nothing to store.");
+    imagesSummary = "no images to store";
+    imagesMeta.images = "skipped";
   }
+
+  // One beacon for the whole contents stage (S7–S9) — one notification per
+  // function. Reports synthesis + persist + image outcome in a single line.
+  await reportEnrichmentStep(admin, projectId, "S7", "publish", "completed",
+    `Enrichment complete for “${name}” — About ${aboutWritten ? "written" : "MISSING"}, category “${place.category ?? "n/a"}”, ${inferredTags.length} tag(s); ${imagesSummary}.`,
+    { about: aboutWritten, category: place.category ?? null, tags: inferredTags.length, ...imagesMeta });
 
   await advanceResearchStage(admin, projectId, "done");
 });

@@ -68,13 +68,11 @@ serveEnrichStage("analysis", async (admin, _env, row) => {
     imageSortingPrompt: cfg.imageSortingPrompt,
   });
 
+  // One beacon for the whole analysis stage (S5–S6) — one notification per function.
   const described = funnel.imageAnalysisByUrl.size;
-  await reportEnrichmentStep(admin, projectId, "S5", "image_descriptions", "completed",
-    `Vision pass done — described ${described} candidate photo(s) for ranking.`,
-    { described });
-  await reportEnrichmentStep(admin, projectId, "S6", "image_ranking", "completed",
-    `Image ranking done — selected ${funnel.finalPhotos.length} final photo(s) for the profile.`,
-    { finalPhotos: funnel.finalPhotos.length });
+  await reportEnrichmentStep(admin, projectId, "S5", "images", "completed",
+    `Image analysis complete — described ${described} candidate photo(s), selected ${funnel.finalPhotos.length} final photo(s) for the profile.`,
+    { described, finalPhotos: funnel.finalPhotos.length });
 
   const analysis: AnalysisPayload = {
     finalPhotos: funnel.finalPhotos,
