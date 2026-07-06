@@ -253,6 +253,14 @@ export function runInBackground(task: Promise<unknown>): void {
 
 // ── Stage EF server ──────────────────────────────────────────────────────────
 
+// First step of each stage's S-range (research S1–S4, analysis S5–S6,
+// contents S7–S9) — anchors the crash beacon in the admin feed's step model.
+const STAGE_CRASH_STEP: Partial<Record<ResearchStage, `S${number}`>> = {
+  research: "S1",
+  analysis: "S5",
+  contents: "S7",
+};
+
 // The boilerplate every stage EF shares: guards → internal-caller gate →
 // parse { project_id } → verify the row is claimed at this stage → ack 202 →
 // run the stage's work in the background. The runner owns
@@ -287,6 +295,12 @@ export function serveEnrichStage(
       run(admin, envRes.env, rowRes.row).catch(async (err) => {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[supabase-cron-enrich-place-${stage}]`, msg);
+        // Surface the crash in the admin feed — silent crashes hid a wedged
+        // pipeline for hours (MESITA-123). Beacon first: release must run
+        // even though reportEnrichmentStep is already best-effort inside.
+        await reportEnrichmentStep(admin, projectId, STAGE_CRASH_STEP[stage] ?? "S1",
+          `${stage}_crash`, "failed",
+          `The ${stage} stage crashed and was released for retry — ${msg}`.slice(0, 490));
         await releaseResearchRow(admin, projectId, `${stage}_crash: ${msg}`);
       }),
     );
