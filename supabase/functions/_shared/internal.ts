@@ -108,7 +108,7 @@ export function requireInternalCaller(
 export async function invokeArtificialCaller<T = unknown>(
   env: EFEnv,
   callerName: string, // who the natural caller is, e.g. "consumer-web-recommend-swipe"
-  artificialName: string, // who we're calling, e.g. "enricher-agent-store-place-images"
+  artificialName: string, // who we're calling, e.g. "supabase-edgefunc-store-place-images"
   body: unknown,
 ): Promise<
   | { ok: true; data: T }

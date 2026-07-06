@@ -118,14 +118,25 @@ verify_jwt = true
 [functions.business-web-accept-invite]
 verify_jwt = true
 
-# Internal-only (artificial caller). verify_jwt = true so the gateway verifies
-# the service_role JWT signature; requireInternalCaller then checks role=service_role.
-[functions.enricher-agent-discover-places]
+# Internal-only (supabase-edgefunc caller). verify_jwt = true so the gateway
+# verifies the service_role JWT signature; requireInternalCaller then checks
+# role=service_role.
+[functions.supabase-edgefunc-discover-places]
 verify_jwt = true
 
 # Async media persistence worker — stores source metadata immediately and mirrors
 # source images to Supabase Storage in background. Internal-only; invoked by
 # supabase-cron-enrich-place-contents (S9) so mirroring runs in its own wall clock.
+[functions.supabase-edgefunc-store-place-images]
+verify_jwt = true
+
+# --- TEMPORARY ALIASES (MESITA-137) -----------------------------------------
+# Old enricher-agent-* slugs kept live only until the renamed supabase-edgefunc-*
+# functions are deployed and both call sites are confirmed hitting them in prod.
+# DELETE these two entries (cloud + repo + dirs) in the coordinated follow-up.
+[functions.enricher-agent-discover-places]
+verify_jwt = true
+
 [functions.enricher-agent-store-place-images]
 verify_jwt = true
 

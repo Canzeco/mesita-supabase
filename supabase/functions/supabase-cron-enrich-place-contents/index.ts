@@ -8,7 +8,7 @@
 //       category inference + tag inference (closed vocabularies)
 //   S8  persist the enriched profile onto the places row (direct UPDATE — this
 //       EF is already the DB layer; no HTTP hop) + content_status='ready'
-//   S9  store images via enricher-agent-store-place-images (kept as an EF call
+//   S9  store images via supabase-edgefunc-store-place-images (kept as an EF call
 //       on purpose: the storage mirroring runs in that worker's own wall clock)
 //
 // Ends the pipeline: place_research.stage='done'. The gathered/analysis jsonb
@@ -151,7 +151,7 @@ serveEnrichStage("contents", async (admin, env, row) => {
     const storeRes = await invokeArtificialCaller<{ queued?: number }>(
       env,
       "supabase-cron-enrich-place-contents",
-      "enricher-agent-store-place-images",
+      "supabase-edgefunc-store-place-images",
       { project_id: projectId, assets, preferred_photo_urls: analysis.finalPhotos },
     );
     if (storeRes.ok) {
