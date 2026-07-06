@@ -1,0 +1,502 @@
+[
+  {
+    "id": 1,
+    "name": "Pujol",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://pujol.com.mx",
+    "instagram": "https://www.instagram.com/restaurantepujol",
+    "confidence": "high",
+    "note": "Enrique Olvera flagship, Polanco. Site pujol.com.mx confirmed (World's 50 Best / Michelin). Primary official IG is @restaurantepujol (479K followers); @pujolrestaurant also exists but is the older/secondary handle."
+  },
+  {
+    "id": 2,
+    "name": "Quintonil",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://quintonil.com",
+    "instagram": "https://www.instagram.com/rest_quintonil",
+    "confidence": "high",
+    "note": "Jorge Vallejo, Polanco. Site quintonil.com confirmed via World's 50 Best (#3 2025) and Michelin. Official IG is @rest_quintonil (corrected from candidate @quintonil, which is not the active account)."
+  },
+  {
+    "id": 3,
+    "name": "Contramar",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://contramar.com.mx",
+    "instagram": "https://www.instagram.com/contramarmx",
+    "confidence": "high",
+    "note": "Gabriela Cámara, Roma. Site contramar.com.mx confirmed. Official IG is @contramarmx (132K); corrected from candidate @contramaroficial."
+  },
+  {
+    "id": 4,
+    "name": "Rosetta",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://rosetta.com.mx",
+    "instagram": "https://www.instagram.com/restauranterosetta",
+    "confidence": "high",
+    "note": "Elena Reygadas, Roma Norte (1 Michelin star). Site rosetta.com.mx confirmed. Official IG @restauranterosetta (171K); corrected from candidate @rosetta_restaurante."
+  },
+  {
+    "id": 5,
+    "name": "Máximo Bistrot",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://maximobistrot.com.mx",
+    "instagram": "https://www.instagram.com/maximobistrot",
+    "confidence": "high",
+    "note": "Chef Eduardo 'Lalo' García, Roma Norte. Site maximobistrot.com.mx and IG @maximobistrot (156K) both confirmed via search and official site."
+  },
+  {
+    "id": 6,
+    "name": "Sud 777",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://sud777.com.mx",
+    "instagram": "https://www.instagram.com/sud777mx",
+    "confidence": "high",
+    "note": "Chef Edgar Núñez, Jardines del Pedregal. Site sud777.com.mx and IG @sud777mx (83K) both confirmed."
+  },
+  {
+    "id": 7,
+    "name": "Nicos",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://nicos.mx",
+    "instagram": "https://www.instagram.com/nicosmexico",
+    "confidence": "medium",
+    "note": "Historic Mexican restaurant (est. 1957), Clavería / Azcapotzalco. Live official site is nicos.mx (Wix); candidate nicosmexico.mx does not serve over HTTPS (parked/broken) though aggregators still cite it — hence medium on the domain. IG @nicosmexico confirmed."
+  },
+  {
+    "id": 8,
+    "name": "El Cardenal",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://restauranteelcardenal.com",
+    "instagram": "https://www.instagram.com/restaurante.elcardenal",
+    "confidence": "high",
+    "note": "Classic Mexican breakfast/cuisine institution (est. 1969), Centro Histórico + branches. Site restauranteelcardenal.com confirmed. Official IG @restaurante.elcardenal (57K); corrected from candidate @elcardenalrestaurante."
+  },
+  {
+    "id": 9,
+    "name": "Azul Histórico",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://azul.rest",
+    "instagram": "https://www.instagram.com/azulhistoricomx",
+    "confidence": "high",
+    "note": "Chef Ricardo Muñoz Zurita's Azul group, Centro Histórico (Downtown Mexico). Group site azul.rest confirmed. Venue-specific official IG is @azulhistoricomx (65K, linked from the site footer, bio cites @chefzurita); @azulrestaurantes is the group umbrella account. Corrected from candidate @azulrestaurantes."
+  },
+  {
+    "id": 10,
+    "name": "Limosneros",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": null,
+    "instagram": "https://www.instagram.com/limosnerosmx",
+    "confidence": "high",
+    "note": "Contemporary Mexican, Centro Histórico (Michelin-recommended). Candidate limosneros.com.mx resolves to 127.0.0.1 (dead/parked, no working own site) — effectively IG-only. Official IG @limosnerosmx (35K); candidate @limosneros is a near-empty impostor. Valid null-website test case."
+  },
+  {
+    "id": 11,
+    "name": "Fonda Fina",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://fondafina.shop",
+    "instagram": "https://www.instagram.com/fondafinamx",
+    "confidence": "medium",
+    "note": "Roma Norte (Medellín 79). Candidate fondafina.com.mx returns HTTP 526 (Cloudflare origin down/unreliable); the live official own-domain site is fondafina.shop (HTTP 200, self-canonical, links IG). Official IG @fondafinamx (50K) confirmed. Medium confidence due to the .com.mx vs .shop domain ambiguity."
+  },
+  {
+    "id": 12,
+    "name": "Lardo",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://lardo.com.mx",
+    "instagram": "https://www.instagram.com/lardomexico",
+    "confidence": "high",
+    "note": "Elena Reygadas' casual Condesa restaurant. Working site is lardo.com.mx (corrected from candidate lardo.mx). Official IG @lardomexico (88K); corrected from candidate @lardo_mx."
+  },
+  {
+    "id": 13,
+    "name": "Blanco Colima",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://blancocolimamx.com",
+    "instagram": "https://www.instagram.com/blanco_colima",
+    "confidence": "high",
+    "note": "Roma Norte (Colima 168). Working site is blancocolimamx.com (corrected from candidate blancocolima.com). Official IG @blanco_colima (50K); corrected from candidate @blancocolima."
+  },
+  {
+    "id": 14,
+    "name": "Meroma",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://meroma.mx",
+    "instagram": "https://www.instagram.com/meromamx",
+    "confidence": "high",
+    "note": "Contemporary, Roma Norte (Michelin-recommended). Site meroma.mx confirmed. Official IG @meromamx (39K); corrected from candidate @meroma_."
+  },
+  {
+    "id": 15,
+    "name": "Taquería Orinoco",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://taqueriaorinoco.com",
+    "instagram": "https://www.instagram.com/taqueriaorinoco",
+    "confidence": "high",
+    "note": "Popular taquería chain. Official site is taqueriaorinoco.com (corrected from candidate orinoco.mx). IG @taqueriaorinoco (109K) confirmed."
+  },
+  {
+    "id": 16,
+    "name": "Em",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": "https://itsemilia.rest",
+    "instagram": "https://www.instagram.com/em.rest",
+    "confidence": "high",
+    "note": "REPLACEMENT for 'Máku' — candidate @maku.mx could not be verified as a real, unambiguous CDMX restaurant (search returned an unrelated bakery/café 'Maque'). Swapped to Em, chef Lucho Martínez's Michelin-starred Roma Norte restaurant. Site itsemilia.rest and IG @em.rest confirmed (Wikipedia, Michelin)."
+  },
+  {
+    "id": 17,
+    "name": "Pangea",
+    "city": "Monterrey",
+    "country": "Mexico",
+    "website": "https://grupopangea.com",
+    "instagram": "https://www.instagram.com/restaurantepangea",
+    "confidence": "high",
+    "note": "Fine dining by Guillermo González Beristáin, San Pedro Garza García. Site grupopangea.com confirmed. Official IG @restaurantepangea (~48K); corrected from candidate @pangea_restaurante."
+  },
+  {
+    "id": 18,
+    "name": "Koli Cocina de Origen",
+    "city": "Monterrey",
+    "country": "Mexico",
+    "website": "https://koli.mx",
+    "instagram": "https://www.instagram.com/koli.rest",
+    "confidence": "high",
+    "note": "Northeastern Mexican cuisine, Monterrey. Candidate assumed IG-only, but restaurant has own site koli.mx (linked to IG). Official IG @koli.rest (~62K); corrected from candidate @kolicocina."
+  },
+  {
+    "id": 19,
+    "name": "Mochomos Monterrey",
+    "city": "Monterrey",
+    "country": "Mexico",
+    "website": "https://mochomos.mx",
+    "instagram": "https://www.instagram.com/mochomosmty",
+    "confidence": "high",
+    "note": "Grupo Sonora steakhouse. Brand site is mochomos.mx (not gruposonora.com/mochomos.com). Monterrey-location IG @mochomosmty (~61K); corrected from candidate @mochomos_monterrey."
+  },
+  {
+    "id": 20,
+    "name": "Cara de Vaca",
+    "city": "Monterrey",
+    "country": "Mexico",
+    "website": "https://caradevaca.com",
+    "instagram": "https://www.instagram.com/caradevacamexico",
+    "confidence": "high",
+    "note": "Fire-grilled restaurant, San Pedro Garza García (chef Chuy Villarreal). Own site caradevaca.com confirmed. Official IG @caradevacamexico; corrected from candidate @caradevacamx."
+  },
+  {
+    "id": 21,
+    "name": "El Gran Pastor",
+    "city": "Monterrey",
+    "country": "Mexico",
+    "website": "https://elgranpastor.com",
+    "instagram": "https://www.instagram.com/elgranpastormx",
+    "confidence": "high",
+    "note": "REPLACEMENT for 'Romero Restaurante' — candidate @romerorestaurante was a tiny/ambiguous account with no clear prominent MTY identity. Swapped to El Gran Pastor, a famous 50+ year Monterrey cabrito institution. Site elgranpastor.com and IG @elgranpastormx (~23K) confirmed via search (site returns 403 to bots)."
+  },
+  {
+    "id": 22,
+    "name": "Alcalde",
+    "city": "Guadalajara",
+    "country": "Mexico",
+    "website": "https://alcalde.com.mx",
+    "instagram": "https://www.instagram.com/restalcalde",
+    "confidence": "high",
+    "note": "Chef Paco Ruano, Guadalajara. Official site is alcalde.com.mx (candidate restaurantealcalde.com does not resolve). Official IG @restalcalde; corrected from candidate @alcalde_gdl."
+  },
+  {
+    "id": 23,
+    "name": "Hueso",
+    "city": "Guadalajara",
+    "country": "Mexico",
+    "website": "https://huesorestaurant.com",
+    "instagram": "https://www.instagram.com/hueso_restaurante",
+    "confidence": "high",
+    "note": "Chef Alfonso Cadena, Guadalajara. Site huesorestaurant.com confirmed. Official IG @hueso_restaurante; corrected from candidate @hueso_restaurant."
+  },
+  {
+    "id": 24,
+    "name": "Xokol",
+    "city": "Guadalajara",
+    "country": "Mexico",
+    "website": null,
+    "instagram": "https://www.instagram.com/xokol_",
+    "confidence": "high",
+    "note": "Heirloom-corn cuisine, Santa Teresita, Guadalajara (Michelin Guide). No own website found — IG-only. Handle @xokol_; corrected from candidate @xokolgdl. Valid null-website test case."
+  },
+  {
+    "id": 25,
+    "name": "I Latina",
+    "city": "Guadalajara",
+    "country": "Mexico",
+    "website": null,
+    "instagram": "https://www.instagram.com/ilatinarest",
+    "confidence": "high",
+    "note": "Av. Inglaterra 3128, Guadalajara. No own website found (IG/Facebook only). IG @ilatinarest (~21K); corrected from candidate @ilatinagdl. Valid null-website test case."
+  },
+  {
+    "id": 26,
+    "name": "Anita Li",
+    "city": "Guadalajara",
+    "country": "Mexico",
+    "website": null,
+    "instagram": "https://www.instagram.com/anitalirest",
+    "confidence": "high",
+    "note": "Sister venue of I Latina ('Familia i Latina'), Guadalajara. IG-only. IG @anitalirest; corrected from candidate @anitali.gdl. Valid null-website test case."
+  },
+  {
+    "id": 27,
+    "name": "La Docena",
+    "city": "Guadalajara",
+    "country": "Mexico",
+    "website": "https://ladocena.com.mx",
+    "instagram": "https://www.instagram.com/ladocenaoysterbar",
+    "confidence": "high",
+    "note": "Oyster bar & grill (Guadalajara / Andares among several locations). Site ladocena.com.mx confirmed. Official IG @ladocenaoysterbar; corrected from candidate @ladocenaoyster."
+  },
+  {
+    "id": 28,
+    "name": "Bruna",
+    "city": "Guadalajara",
+    "country": "Mexico",
+    "website": "https://bruna.com.mx",
+    "instagram": "https://www.instagram.com/bruna_mx",
+    "confidence": "high",
+    "note": "Guadalajara (Lerdo de Tejada 2418, Col. Lafayette). Own site bruna.com.mx confirmed. Official IG @bruna_mx; corrected from candidate @bruna.gdl."
+  },
+  {
+    "id": 29,
+    "name": "Mochomos Culiacán",
+    "city": "Culiacán",
+    "country": "Mexico",
+    "website": "https://mochomos.mx",
+    "instagram": "https://www.instagram.com/mochomosculiacan",
+    "confidence": "high",
+    "note": "Grupo Sonora steakhouse, Culiacán. Brand site mochomos.mx (not gruposonora.com). Location IG @mochomosculiacan; corrected from candidate @mochomos_culiacan."
+  },
+  {
+    "id": 30,
+    "name": "El Farallón",
+    "city": "Culiacán",
+    "country": "Mexico",
+    "website": "https://restaurantelfarallon.com",
+    "instagram": "https://www.instagram.com/elfarallonrestaurante",
+    "confidence": "high",
+    "note": "REPLACEMENT for ambiguous 'Los Arcos'. Iconic Culiacán seafood restaurant (since 1961). Site restaurantelfarallon.com and IG @elfarallonrestaurante (29K) confirmed."
+  },
+  {
+    "id": 31,
+    "name": "Panamá Restaurantes y Pastelerías",
+    "city": "Culiacán",
+    "country": "Mexico",
+    "website": "https://panama.com.mx",
+    "instagram": "https://www.instagram.com/panamamx",
+    "confidence": "high",
+    "note": "REPLACEMENT for unverifiable 'La Chalupa'. Landmark Culiacán/Sinaloa restaurant-bakery chain. Site panama.com.mx and IG @panamamx (107K) confirmed."
+  },
+  {
+    "id": 32,
+    "name": "Casa Oaxaca El Restaurante",
+    "city": "Oaxaca",
+    "country": "Mexico",
+    "website": "https://casaoaxacaelrestaurante.com",
+    "instagram": "https://www.instagram.com/casaoaxacaelrestaurante",
+    "confidence": "high",
+    "note": "Chef Alejandro Ruiz, Oaxaca. Site casaoaxacaelrestaurante.com and IG @casaoaxacaelrestaurante (40K) both confirmed."
+  },
+  {
+    "id": 33,
+    "name": "Los Danzantes Oaxaca",
+    "city": "Oaxaca",
+    "country": "Mexico",
+    "website": "https://losdanzantesoaxaca.com.mx",
+    "instagram": "https://www.instagram.com/danzantesoaxaca",
+    "confidence": "high",
+    "note": "Zócalo, Oaxaca. Canonical Oaxaca-location site is losdanzantesoaxaca.com.mx (candidate losdanzantes.com is the group/other domain). IG @danzantesoaxaca (67K) confirmed."
+  },
+  {
+    "id": 34,
+    "name": "Origen",
+    "city": "Oaxaca",
+    "country": "Mexico",
+    "website": "https://origenoaxaca.com",
+    "instagram": "https://www.instagram.com/origenoax",
+    "confidence": "high",
+    "note": "Chef Rodolfo Castellanos, Oaxaca. Site origenoaxaca.com. Active official IG is @origenoax; corrected from candidate @origenoaxaca."
+  },
+  {
+    "id": 35,
+    "name": "Criollo",
+    "city": "Oaxaca",
+    "country": "Mexico",
+    "website": "https://criollo.mx",
+    "instagram": "https://www.instagram.com/criollo_oax",
+    "confidence": "high",
+    "note": "Enrique Olvera / Luis Arellano project, Oaxaca. Site criollo.mx. Official IG @criollo_oax (139K); corrected from candidate @criollooaxaca."
+  },
+  {
+    "id": 36,
+    "name": "Augurio",
+    "city": "Puebla",
+    "country": "Mexico",
+    "website": "https://augurio.mx",
+    "instagram": "https://www.instagram.com/augurio.restaurante",
+    "confidence": "high",
+    "note": "Chef Ángel Vázquez, Puebla (Michelin Guide 2026). Site augurio.mx. Official IG @augurio.restaurante (dotted handle, matches Facebook /AugurioRestaurante)."
+  },
+  {
+    "id": 37,
+    "name": "El Mural de los Poblanos",
+    "city": "Puebla",
+    "country": "Mexico",
+    "website": "https://elmuraldelospoblanos.com",
+    "instagram": "https://www.instagram.com/muraldelospoblanos",
+    "confidence": "high",
+    "note": "Traditional Poblano cuisine, Puebla Centro. Site elmuraldelospoblanos.com. Active official IG @muraldelospoblanos (36K); @elmuraldelospoblanos also exists but is secondary."
+  },
+  {
+    "id": 38,
+    "name": "Kuuk",
+    "city": "Mérida",
+    "country": "Mexico",
+    "website": "https://kuukrestaurant.com",
+    "instagram": "https://www.instagram.com/kuukrestaurant",
+    "confidence": "high",
+    "note": "Contemporary Yucatecan fine dining, Mérida. Site kuukrestaurant.com and IG @kuukrestaurant both confirmed."
+  },
+  {
+    "id": 39,
+    "name": "Micaela Mar y Leña",
+    "city": "Mérida",
+    "country": "Mexico",
+    "website": "https://restaurantemicaela.com",
+    "instagram": "https://www.instagram.com/micaelamarylena",
+    "confidence": "high",
+    "note": "Seafood, Mérida (Michelin Guide 2026). Own site restaurantemicaela.com. IG @micaelamarylena (39K) confirmed."
+  },
+  {
+    "id": 40,
+    "name": "Néctar",
+    "city": "Mérida",
+    "country": "Mexico",
+    "website": "https://nectarmerida.com.mx",
+    "instagram": "https://www.instagram.com/nectarmid",
+    "confidence": "high",
+    "note": "Chef Roberto Solís, Mérida. Site nectarmerida.com.mx. Official IG is @nectarmid (matches Facebook /nectarmid); corrected from candidate @nectarmerida."
+  },
+  {
+    "id": 41,
+    "name": "Misión 19",
+    "city": "Tijuana",
+    "country": "Mexico",
+    "website": "https://mision19.com",
+    "instagram": "https://www.instagram.com/mision.19",
+    "confidence": "high",
+    "note": "Chef Javier Plascencia, Zona Urbana Río, Tijuana. Site mision19.com. Official IG @mision.19 (dotted handle, linked on site); corrected from candidate @mision19."
+  },
+  {
+    "id": 42,
+    "name": "Fauna",
+    "city": "Valle de Guadalupe",
+    "country": "Mexico",
+    "website": null,
+    "instagram": "https://www.instagram.com/faunarestaurante",
+    "confidence": "high",
+    "note": "Chef David Castro Hussong, inside Bruma winery/resort. faunarestaurante.mx 301-redirects to brumawineresort.com (no standalone own domain), so website is null. IG @faunarestaurante confirmed. Valid null-website test case."
+  },
+  {
+    "id": 43,
+    "name": "Deckman's en el Mogor",
+    "city": "Valle de Guadalupe",
+    "country": "Mexico",
+    "website": "https://deckmans.com",
+    "instagram": "https://www.instagram.com/deckmansenelmogor",
+    "confidence": "high",
+    "note": "Michelin-star chef Drew Deckman, San Antonio de las Minas. Own site deckmans.com. Active official IG @deckmansenelmogor (54K); corrected from candidate @deckmans."
+  },
+  {
+    "id": 44,
+    "name": "Corazón de Tierra",
+    "city": "Valle de Guadalupe",
+    "country": "Mexico",
+    "website": "https://corazondetierra.com",
+    "instagram": "https://www.instagram.com/_corazondetierra",
+    "confidence": "high",
+    "note": "Chef Diego Hernández, Rancho San Marcos. Own site corazondetierra.com. Official IG @_corazondetierra (leading underscore); corrected from candidate @corazondetierra."
+  },
+  {
+    "id": 45,
+    "name": "Animalón",
+    "city": "Valle de Guadalupe",
+    "country": "Mexico",
+    "website": "https://animalonbaja.com",
+    "instagram": "https://www.instagram.com/animalonbaja",
+    "confidence": "high",
+    "note": "Chef Javier Plascencia, seasonal oak-tree restaurant (Michelin star). Own site animalonbaja.com. Official IG @animalonbaja (53.6K); corrected from candidate @animalon.oficial."
+  },
+  {
+    "id": 46,
+    "name": "Hartwood",
+    "city": "Tulum",
+    "country": "Mexico",
+    "website": "https://hartwoodtulum.com",
+    "instagram": "https://www.instagram.com/hartwoodtulum",
+    "confidence": "high",
+    "note": "Founders Eric Werner & Mya Henry, Tulum beach road. Site hartwoodtulum.com and IG @hartwoodtulum (56K) both confirmed."
+  },
+  {
+    "id": 47,
+    "name": "Arca",
+    "city": "Tulum",
+    "country": "Mexico",
+    "website": "https://arcatulum.com",
+    "instagram": "https://www.instagram.com/arcatulum",
+    "confidence": "high",
+    "note": "Contemporary Mexican over open fire, Tulum-Boca Paila km 7.6. Site arcatulum.com and IG @arcatulum (linked on site) confirmed."
+  },
+  {
+    "id": 48,
+    "name": "Kitchen Table Tulum",
+    "city": "Tulum",
+    "country": "Mexico",
+    "website": null,
+    "instagram": "https://www.instagram.com/kitchentabletulum",
+    "confidence": "high",
+    "note": "Jungle restaurant, Tulum Beach Road Km 7. No own website found — IG-only (@kitchentabletulum, 13K). Valid null-website test case."
+  },
+  {
+    "id": 49,
+    "name": "Áperi",
+    "city": "San Miguel de Allende",
+    "country": "Mexico",
+    "website": "https://aperi.mx",
+    "instagram": "https://www.instagram.com/aperimx",
+    "confidence": "medium",
+    "note": "Chef Matteo Salas, inside Dos Casas Hotel Boutique & Spa (Centro). IG @aperimx verified active; corrected from candidate @aperisma. Site aperi.mx serves correct content but its /en/ subpath currently renders an unrelated parked page — medium confidence on domain stability."
+  },
+  {
+    "id": 50,
+    "name": "Entremar",
+    "city": "Ciudad de México",
+    "country": "Mexico",
+    "website": null,
+    "instagram": "https://www.instagram.com/entremarmx",
+    "confidence": "high",
+    "note": "REPLACEMENT for the duplicated/placeholder slots ('The Restaurant SMA' was retained separately; this fills to 50). Gabriela Cámara's Polanco sister to Contramar (Red Contramar group). No dedicated own website found — IG-only (@entremarmx, 20K). Valid null-website test case."
+  }
+]

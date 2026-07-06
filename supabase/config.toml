@@ -438,3 +438,9 @@ verify_jwt = false
 
 [functions.twilio-webhook-update-delivery]
 verify_jwt = false
+
+# Diagnostic-only (not client-wired): runs the 5 link-discovery strategies from
+# _shared/linklab against a venue and returns each strategy's {website, instagram}.
+# Same module the offline benchmark (scripts/linklab) scores. Service-role JWT.
+[functions.staff-web-benchmark-link-strategies]
+verify_jwt = true
