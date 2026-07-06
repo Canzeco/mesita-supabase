@@ -1,14 +1,19 @@
 // Supabase Edge Function — consumer-web-schedule-project-creation (consumer caller)
 //
-// Enqueues a staggered create for a Google Places `placeId`. Instead of running
-// the (expensive, synchronous) create pipeline inline, it inserts a row into
-// public.scheduled_project_creations; the pg_cron poller picks due rows up and fires
-// the service-gated supabase-cron-run-project-creations EF. exec_at defaults to now() (run
-// ASAP) but the caller may pass an ISO timestamp to defer.
+// COMPATIBILITY ALIAS of consumer-web-create-place (MESITA-128) — the slug the
+// previously-deployed consumer app still calls. Places are created IMMEDIATELY
+// now (Pato directive: only enrichment is scheduled); the queue this EF used to
+// feed (scheduled_project_creations + its cron) is retired.
 //
-// Gating: a signed-in consumer session (getAuthedUser). No DB write happens from
-// the client — every write goes through this EF (client-DB-access rule); the EF
-// uses the service-role key to insert into the service-role-only queue table.
+// Legacy response semantics preserved for the deployed app:
+//   • success → 201 { ok, scheduled_id: <place id>, exec_at: <now>, place }
+//   • duplicate → 201 with the EXISTING place id (the old queue accepted
+//     duplicates silently and the cron dropped them later — the alias must not
+//     start erroring on the deployed Add button).
+//   • exec_at input is accepted and ignored (deferred creation retired).
+//
+// New clients call consumer-web-create-place instead. Delete this alias once
+// every deployed client has flipped.
 //
 // Local:  supabase functions serve consumer-web-schedule-project-creation
 // Deploy: supabase functions deploy consumer-web-schedule-project-creation
@@ -16,8 +21,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
+import { createMinimalPlace } from "../_shared/create-place.ts";
 
-type Body = { placeId?: string; exec_at?: string };
+type Body = { googlePlaceId?: string; placeId?: string; exec_at?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -30,36 +36,46 @@ Deno.serve(async (req) => {
   // Authenticate the consumer.
   const authRes = await getAuthedUser(req, env);
   if (!authRes.ok) return authRes.response;
-  const createdBy = authRes.user.id;
 
-  // Parse input.
+  // Parse input (legacy body key is `placeId`; exec_at ignored).
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
-  const placeId = (bodyRes.body.placeId ?? "").toString().trim();
-  if (!placeId) return json({ ok: false, error: "placeId is required" }, 400);
-
-  // exec_at optional — default now() (DB column default). When provided it must
-  // parse as a valid timestamp; an unparseable value is a 400, not a silent now().
-  let execAt: string | undefined;
-  if (bodyRes.body.exec_at != null) {
-    const ms = Date.parse(bodyRes.body.exec_at);
-    if (Number.isNaN(ms)) return json({ ok: false, error: "exec_at must be an ISO timestamp" }, 400);
-    execAt = new Date(ms).toISOString();
-  }
+  const googlePlaceId = (bodyRes.body.googlePlaceId ?? bodyRes.body.placeId ?? "")
+    .toString()
+    .trim();
+  if (!googlePlaceId) return json({ ok: false, error: "placeId is required" }, 400);
 
   const admin = adminClient(env);
 
-  const insert: Record<string, unknown> = { place_id: placeId, created_by: createdBy };
-  if (execAt) insert.exec_at = execAt;
+  const created = await createMinimalPlace({
+    admin,
+    callerName: "consumer-web-schedule-project-creation",
+    googlePlaceId,
+    dedupeError: "This place is already on Mesita.",
+  });
 
-  const { data: row, error } = await admin
-    .from("scheduled_project_creations")
-    .insert(insert)
-    .select("id, exec_at")
-    .single();
-  if (error || !row) {
-    return json({ ok: false, error: `schedule_insert: ${error?.message ?? "no row"}` }, 500);
+  const nowIso = new Date().toISOString();
+  if (!created.ok) {
+    // Legacy silent-dedupe: a duplicate Add reads as success, pointing at the
+    // existing place. Everything else is a real error.
+    if (created.body.code === "place_already_exists") {
+      const existing = created.body.existing as { id?: string } | undefined;
+      return json({
+        ok: true,
+        scheduled_id: existing?.id ?? googlePlaceId,
+        exec_at: nowIso,
+        already_exists: true,
+        place: existing ?? null,
+      }, 201);
+    }
+    return json(created.body, created.status);
   }
 
-  return json({ ok: true, scheduled_id: row.id, exec_at: row.exec_at }, 201);
+  return json({
+    ok: true,
+    scheduled_id: created.place.id,
+    exec_at: nowIso,
+    place: created.place,
+    enrichment: created.enrichment,
+  }, 201);
 });
