@@ -139,6 +139,8 @@ export async function synthesizeProfile(input: {
     `atmosphere, cuisine, signature dishes or experiences, history or ` +
     `neighborhood context, and what makes a visit worthwhile — only when ` +
     `the sources support it. No filler or invented detail. ` +
+    `"description" and every other text field MUST be a single JSON string — ` +
+    `never an array or nested object. ` +
     `Use null or [] for anything the ` +
     `sources don't support. Never invent ratings, reviewer quotes, prices, or ` +
     `a chef's name.` +
@@ -152,7 +154,9 @@ export async function synthesizeProfile(input: {
     "Output a SINGLE valid JSON object (no prose, no markdown fences) matching " +
     "this shape, using null or [] when the sources don't support a field: " +
     JSON.stringify(PROFILE_SCHEMA.properties) +
-    " Never invent ratings, reviewer quotes, prices, or a chef's name.";
+    " Text fields (zone, city, executive_chef, editorial_summary, description) " +
+    "are single JSON strings — never arrays or nested objects. " +
+    "Never invent ratings, reviewer quotes, prices, or a chef's name.";
 
   try {
     const r = await fetch(OPENAI_URL, {
@@ -185,16 +189,29 @@ export async function synthesizeProfile(input: {
 }
 
 // Coerce an LLM-produced value to usable text: a string is trimmed; an array
-// of strings becomes paragraphs. Anything else (object, number, null) is
-// dropped. json_object mode only *describes* the schema — the model can and
-// does return off-type fields, and one bad field must never throw the stage.
+// of strings becomes paragraphs; a plain object's string values (a shape
+// gpt-4o-mini actually emits for the About, e.g. {intro, ambiente, cocina})
+// become paragraphs too, one level deep. Anything else is dropped.
+// json_object mode only *describes* the schema — the model can and does
+// return off-type fields, and one bad field must never throw the stage.
 export function asProfileText(v: unknown): string | null {
   if (typeof v === "string" && v.trim()) return v.trim();
+  const parts: string[] = [];
   if (Array.isArray(v)) {
-    const parts = v.filter((x): x is string => typeof x === "string" && !!x.trim());
-    if (parts.length > 0) return parts.map((s) => s.trim()).join("\n\n");
+    for (const x of v) {
+      if (typeof x === "string" && x.trim()) parts.push(x.trim());
+      else if (x && typeof x === "object") {
+        for (const y of Object.values(x)) {
+          if (typeof y === "string" && y.trim()) parts.push(y.trim());
+        }
+      }
+    }
+  } else if (v && typeof v === "object") {
+    for (const y of Object.values(v)) {
+      if (typeof y === "string" && y.trim()) parts.push(y.trim());
+    }
   }
-  return null;
+  return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
 // Apply the synthesized profile onto the place update object (mutates it).
