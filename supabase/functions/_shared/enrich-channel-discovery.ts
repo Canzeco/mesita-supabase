@@ -1,14 +1,17 @@
 // Atlas channel URL discovery — Step S3, WEBSITE-FIRST: a place's own site footer
 // is the highest-precision source of its official channels, so we anchor on the
-// website, classify its outbound links, then make ONE Perplexity Agent call — P3,
+// website, classify its outbound links, then make ONE Perplexity Sonar call — P3,
 // the niche gap-filler — to fill only what's still missing. Every URL is host + shape
 // validated before it's trusted. No scoring engine, no multi-pass FP/FN review.
 //
 //   Phase 0  SEED      keep anything already supplied (Google/Mesita); freeze it.
 //   Phase 1  ANCHOR    if no website, one Firecrawl search to find it.
 //   Phase 2  FOOTER    scrape the site, classifyLinks() the footer, validate.
-//   Phase 3  FILL      one Perplexity Agent call for fields still missing.
-//                      (no Perplexity key → degraded per-field Firecrawl search)
+//   Phase 3  FILL      one Perplexity Sonar (sonar-pro) structured judge for fields
+//                      still missing, grounded on Firecrawl candidate URLs + an
+//                      own-account-over-group rule. Benchmarked winner (linklab
+//                      strategy C) over the older Agent fill. (no Perplexity key →
+//                      degraded per-field Firecrawl search)
 //
 // Phone + email are NOT URLs; they ride outside the channel set as last-resort
 // Perplexity lookups (discoverPhonePerplexity / discoverEmailPerplexity), used
@@ -25,7 +28,8 @@ import {
 } from "./channels.ts";
 import { firecrawlScrape, firecrawlSearch } from "./firecrawl.ts";
 import { callPerplexityAgent } from "./perplexity-agent.ts";
-import { dedup } from "./parse-utils.ts";
+import { callPerplexityChat } from "./perplexity-chat.ts";
+import { dedup, safeParseJson } from "./parse-utils.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +58,19 @@ const CHANNEL_FIELDS: ChannelField[] = [
   "opentable_url",
   "uber_eats_url",
 ];
+
+// Per-field search term used to gather candidate URLs (Phase 3 grounding + the
+// no-Perplexity degraded leg).
+const CHANNEL_SEARCH_TERM: Record<ChannelField, string> = {
+  website_url: "official website",
+  instagram_url: "instagram",
+  facebook_url: "facebook",
+  opentable_url: "opentable",
+  uber_eats_url: "uber eats",
+  tiktok_url: "tiktok",
+  tripadvisor_url: "tripadvisor",
+  yelp_url: "yelp",
+};
 
 export type ResolvedChannels = ChannelMap & {
   // Diagnostics only (orchestrator stuffs these into sources.discovery).
@@ -249,11 +266,14 @@ async function harvestFooter(
   return out;
 }
 
-// ── Phase 3 — one Perplexity Agent call to fill what's still missing ─────────
-// The schema is built dynamically so the agent is only asked for the missing
-// fields. Already-resolved siblings anchor the prompt. Every returned URL (JSON
-// answer first, then cited URLs) is host + shape validated. Also reused by S4
-// (atlas-instagram.ts) to re-find an Instagram handle. Best-effort → {}.
+// ── Phase 3 — one Perplexity Sonar call to fill what's still missing ─────────
+// A single sonar-pro structured judge, web-grounded AND fed Firecrawl candidate
+// URLs, picks the official URL for each still-missing field. The schema is built
+// dynamically so it's only asked for the missing fields; already-resolved siblings
+// anchor the prompt. Every returned URL (JSON answer, then cited URLs, then the
+// Firecrawl candidates) is host + shape validated. Benchmarked winner (linklab
+// strategy C) over the older Agent fill. Also reused by S4 (enrich-instagram.ts)
+// to re-find an Instagram handle. Best-effort → {}.
 const FILL_FIELD_SPEC: Record<ChannelField, string> = {
   website_url: "website_url: the place's official website. null if none.",
   instagram_url:
@@ -282,6 +302,7 @@ export async function fillMissingChannels(
   want: Set<ChannelField>,
   siblings: Partial<ChannelMap> = {},
   serpContext?: string,
+  firecrawlKey?: string,
 ): Promise<Partial<ChannelMap>> {
   const fields = CHANNEL_FIELDS.filter((f) => want.has(f));
   if (!fields.length) return {};
@@ -290,11 +311,32 @@ export async function fillMissingChannels(
   for (const f of fields) properties[f] = { type: ["string", "null"] };
   const schema = { type: "object", properties };
 
+  // Ground the judge on real candidate URLs (one Firecrawl search per missing
+  // field) so it picks from what exists instead of hallucinating. Kept per-field
+  // too, as a validated fallback when the model's own answer is null.
+  const perField: Partial<Record<ChannelField, string[]>> = {};
+  if (firecrawlKey) {
+    const runs = await Promise.all(
+      fields.map((f) => firecrawlSearch(firecrawlKey, `${place.name} ${CHANNEL_SEARCH_TERM[f]}`, 6)),
+    );
+    fields.forEach((f, i) => (perField[f] = dedup(runs[i])));
+  }
+  const candidatePool = dedup(fields.flatMap((f) => perField[f] ?? [])).slice(0, 30);
+  const candidateBlock = candidatePool.length
+    ? `Candidate URLs found by search (prefer one of these when it is correct; ignore unrelated ones):\n${candidatePool.join("\n")}\n\n`
+    : "";
+
   const sibLines = (["website_url", "instagram_url", "facebook_url"] as ChannelField[])
     .filter((f) => siblings[f])
     .map((f) => `- ${f}: ${siblings[f]}`)
     .join("\n");
   const askLines = fields.map((f) => `- ${FILL_FIELD_SPEC[f]}`).join("\n");
+  // Own-account-over-group rule — the linklab R2 win for Instagram precision.
+  const igRule = want.has("instagram_url")
+    ? `For instagram_url, prefer the venue's OWN account over a parent brand / group / umbrella ` +
+      `account that spans many locations; if several official accounts exist, prefer the primary ` +
+      `(most-active) one. `
+    : "";
 
   const prompt =
     `Find the official online channels for the place "${place.name}"` +
@@ -304,20 +346,36 @@ export async function fillMissingChannels(
     (sibLines
       ? `Anchor on these already-known official channels (the missing ones almost always share the same brand handle / are linked from these):\n${sibLines}\n\n`
       : "") +
-    `Find the official WEBSITE first and trust the channels the site itself links to. ` +
+    candidateBlock +
+    `Find the official WEBSITE first and trust the channels the site itself links to. ${igRule}` +
     `Return strict JSON with ONLY these keys (null any you cannot confirm belongs to THIS place):\n${askLines}\n` +
     `A franchise / multi-location brand's MAIN account or page is acceptable. ` +
     `Be conservative — prefer null over a guess. Never invent a URL.`;
 
-  const res = await callPerplexityAgent(key, prompt, schema);
+  const res = await callPerplexityChat(
+    key,
+    [
+      {
+        role: "system",
+        content:
+          "You resolve a place's official channel URLs from web search plus a candidate list. " +
+          "Return ONLY strict JSON with the requested keys. Never invent a URL; prefer null over a wrong guess.",
+      },
+      { role: "user", content: prompt },
+    ],
+    { responseFormat: { type: "json_schema", json_schema: { schema } }, returnRelated: false },
+  );
   if (!res) return {};
-  const { answer, hitUrls } = res;
+  const answer = (safeParseJson(res.text) as Record<string, unknown> | null) ?? {};
+  const hitUrls = res.citations;
   const out: Partial<ChannelMap> = {};
   for (const f of fields) {
     const fromAnswer = typeof answer[f] === "string"
       ? validateFieldUrl(f, answer[f] as string)
       : null;
-    const valid = fromAnswer ?? firstValidFromList(f, hitUrls);
+    const valid = fromAnswer ??
+      firstValidFromList(f, hitUrls) ??
+      firstValidFromList(f, perField[f] ?? []);
     if (valid) out[f] = valid;
   }
   return out;
@@ -331,19 +389,9 @@ async function firecrawlSearchFill(
   want: Set<ChannelField>,
 ): Promise<Partial<ChannelMap>> {
   const scope = [name, city ?? ""].map((s) => s.trim()).filter(Boolean).join(" ");
-  const term: Record<ChannelField, string> = {
-    website_url: "official website",
-    instagram_url: "instagram",
-    facebook_url: "facebook",
-    opentable_url: "opentable",
-    uber_eats_url: "uber eats",
-    tiktok_url: "tiktok",
-    tripadvisor_url: "tripadvisor",
-    yelp_url: "yelp",
-  };
   const fields = CHANNEL_FIELDS.filter((f) => want.has(f));
   const runs = await Promise.all(
-    fields.map((f) => firecrawlSearch(firecrawlKey, `${scope} ${term[f]}`, 6)),
+    fields.map((f) => firecrawlSearch(firecrawlKey, `${scope} ${CHANNEL_SEARCH_TERM[f]}`, 6)),
   );
   const out: Partial<ChannelMap> = {};
   fields.forEach((f, i) => {
@@ -439,6 +487,7 @@ export async function resolveChannels(opts: {
         missing(),
         siblings,
         serpContext,
+        firecrawlKey,
       );
       for (const f of CHANNEL_FIELDS) {
         const u = filled[f];
