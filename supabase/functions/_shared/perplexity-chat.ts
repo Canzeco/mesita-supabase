@@ -39,6 +39,9 @@ export type PplxChatOpts = {
   // Restrict/boost specific domains (e.g. review sites). Empty = no filter.
   searchDomainFilter?: string[];
   returnRelated?: boolean;
+  // Force structured output, e.g. { type: "json_schema", json_schema: { schema } }.
+  // When set, the model returns strict JSON in message.content (parse it yourself).
+  responseFormat?: unknown;
 };
 
 // Call Perplexity Chat Completions once. Returns the assistant prose plus the
@@ -61,6 +64,7 @@ export async function callPerplexityChat(
         max_tokens: opts.maxTokens ?? 700,
         temperature: opts.temperature ?? 0.3,
         return_related_questions: opts.returnRelated ?? true,
+        ...(opts.responseFormat ? { response_format: opts.responseFormat } : {}),
         ...(opts.recency ? { search_recency_filter: opts.recency } : {}),
         ...(opts.searchDomainFilter && opts.searchDomainFilter.length > 0
           ? { search_domain_filter: opts.searchDomainFilter }
