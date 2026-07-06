@@ -92,9 +92,54 @@ const SYSTEM_PROMPT = `You are Memo, Mesita's warm, sharp local concierge for di
 Style:
 - Reply in the SAME language the user wrote in (Spanish or English). Default to a friendly, concise voice.
 - Keep it SHORT: 2–4 sentences, mobile-chat length. Be opinionated and specific, not a bland list.
-- A separate UI rail shows tappable place cards below your message, so DON'T dump a long numbered list of places — give a quick, confident take and let the cards carry the details.
+- Place cards may appear below your message ONLY when the user is actually looking for places. When they do, give a quick confident take and let the cards carry the details — don't dump a long numbered list. For general questions (definitions, how things work, trivia), just answer conversationally; do NOT refer to cards that won't be there.
 - You can answer ANY question (hours, neighborhoods, what to order, "is X good for a date", trivia), but stay in the helpful-concierge lane.
 - Never invent specific addresses, prices, or phone numbers you aren't sure of; speak generally when unsure.`;
+
+// Memo only attaches place cards when the ask is actually place-seeking; pure
+// knowledge/chat turns ("what does al pastor mean", "how do tips work") get a
+// text-only reply. Heuristic, bilingual (ES/EN): explicit place words always
+// search; an otherwise bare question reads as definitional → text only.
+const PLACE_INTENT =
+  /\b(near|nearby|around|close|best|top|recommend|recommendation|where|spot|spots|place|places|bar|bars|club|clubs|nightlife|restaurant|restaurants|cafe|coffee|taco|tacos|dinner|lunch|brunch|breakfast|drink|drinks|rooftop|date night|eat|food|hungry|open now|tonight|cerca|cercano|mejor|mejores|dónde|donde|lugar|lugares|antro|antros|comer|cena|cenar|comida|desayun|almuerz|bares|restaurante|café|reserva|abierto|esta noche|recomienda|recomiénda)\b/i;
+const DEFINITIONAL =
+  /^\s*(what|why|how|who|when|which|is|are|does|do|can|should|explain|tell me|qué|que|por qué|porque|cómo|como|quién|quien|cuándo|cuando|cuál|cual|explica|dime)\b/i;
+
+function isPlaceSeeking(query: string): boolean {
+  if (PLACE_INTENT.test(query)) return true; // explicit place words win
+  if (DEFINITIONAL.test(query)) return false; // a bare question → text only
+  return true; // short noun-ish fragments ("sushi san pedro") read as searches
+}
+
+// Keep only Google results in Mesita's universe (F&B · nightlife · experiences /
+// wellness). Drops the department stores, phone shops, etc. that Text Search
+// returns for loose queries. Cuisine subtypes end in _restaurant / _bar.
+const RELEVANT_PLACE_TYPES = new Set([
+  "restaurant", "bar", "cafe", "coffee_shop", "night_club", "bakery",
+  "meal_takeaway", "meal_delivery", "food", "bar_and_grill", "pub", "wine_bar",
+  "brewery", "ice_cream_shop", "dessert_shop", "dessert_restaurant", "tea_house",
+  "fine_dining_restaurant", "tourist_attraction", "spa", "wellness_center",
+  "art_gallery", "museum", "amusement_park", "park", "movie_theater",
+  "bowling_alley", "casino", "banquet_hall", "event_venue",
+  "performing_arts_theater", "concert_hall", "karaoke", "comedy_club",
+  "hookah_bar",
+]);
+
+function isRelevantPlace(
+  primaryType: string | undefined,
+  types: string[] | undefined,
+): boolean {
+  const all = [primaryType, ...(types ?? [])].filter(
+    (t): t is string => !!t,
+  );
+  // No type info at all → don't over-filter. Generic markers
+  // (point_of_interest, establishment) aren't in the set, so they can't
+  // rescue an off-domain result on their own.
+  if (all.length === 0) return true;
+  return all.some(
+    (t) => RELEVANT_PLACE_TYPES.has(t) || /_(restaurant|bar)$/.test(t),
+  );
+}
 
 // ── Handler ────────────────────────────────────────────────────────────
 
@@ -126,11 +171,17 @@ Deno.serve(async (req) => {
   const admin = adminClient(env);
   const perplexityKey = Deno.env.get("PERPLEXITY_KEY") ?? "";
 
+  // Only look up places when the ask is actually place-seeking — a definition
+  // or general question gets a text-only reply (no forced cards).
+  const placeSeeking = isPlaceSeeking(query);
+
   // Fan out the two slow legs (Perplexity + Google) in parallel; neither can
   // sink the other.
   const [answerLeg, placesLeg] = await Promise.allSettled([
     answerWithPerplexity(perplexityKey, query, lat, lng, body.history),
-    candidatePlaces(admin, query, lat, lng),
+    placeSeeking
+      ? candidatePlaces(admin, query, lat, lng)
+      : Promise.resolve({ predictions: [] as Prediction[] }),
   ]);
 
   const perplexity =
@@ -138,7 +189,7 @@ Deno.serve(async (req) => {
   const placeResult =
     placesLeg.status === "fulfilled"
       ? placesLeg.value
-      : { predictions: [] as Prediction[], mocked: false };
+      : { predictions: [] as Prediction[] };
 
   const predictions = placeResult.predictions.slice(0, MAX_CARDS);
   const onMesita = predictions.filter((p) => p.status !== "not_in_mesita").length;
@@ -147,7 +198,7 @@ Deno.serve(async (req) => {
   const answer =
     perplexity?.text && perplexity.text.length > 0
       ? perplexity.text
-      : fallbackAnswer(query, onMesita, fromGoogle, placeResult.mocked);
+      : fallbackAnswer(query, onMesita, fromGoogle, placeSeeking);
 
   return json({
     ok: true,
@@ -155,7 +206,6 @@ Deno.serve(async (req) => {
     predictions,
     related: perplexity?.related ?? [],
     citations: perplexity?.citations ?? [],
-    mocked: placeResult.mocked,
     userId: user?.id ?? null,
   });
 });
@@ -203,7 +253,7 @@ async function candidatePlaces(
   query: string,
   lat: number | null,
   lng: number | null,
-): Promise<{ predictions: Prediction[]; mocked: boolean }> {
+): Promise<{ predictions: Prediction[] }> {
   const keyRes = readGooglePlacesKey();
 
   let googlePreds: Prediction[] = [];
@@ -238,22 +288,17 @@ async function candidatePlaces(
   for (const p of mesitaPreds) merged.set(p.placeId, p);
   for (const p of googlePreds) if (!merged.has(p.placeId)) merged.set(p.placeId, p);
 
-  let predictions = Array.from(merged.values()).sort((a, b) => {
+  const predictions = Array.from(merged.values()).sort((a, b) => {
     const aIn = a.status !== "not_in_mesita" ? 1 : 0;
     const bIn = b.status !== "not_in_mesita" ? 1 : 0;
     if (aIn !== bIn) return bIn - aIn;
     return (b.rating ?? 0) - (a.rating ?? 0);
   });
 
-  // Nothing real to show → fall back to a random sample of live Mesita places
-  // so the chat still renders suggestion cards ("mock" rail, real rows).
-  let mocked = false;
-  if (predictions.length === 0) {
-    predictions = await sampleMesitaPlaces(admin);
-    mocked = predictions.length > 0;
-  }
-
-  return { predictions, mocked };
+  // No random-sample fallback: if nothing genuinely matches, we return an
+  // empty rail and Memo replies text-only. Better a clean answer than
+  // irrelevant cards (a department store for a nightlife ask).
+  return { predictions };
 }
 
 async function googleTextSearch(
@@ -284,7 +329,7 @@ async function googleTextSearch(
         "Content-Type": "application/json",
         "X-Goog-Api-Key": key,
         "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount",
+          "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.primaryType,places.types",
       },
       body: JSON.stringify(reqBody),
     });
@@ -309,10 +354,15 @@ async function googleTextSearch(
       formattedAddress?: string;
       rating?: number;
       userRatingCount?: number;
+      primaryType?: string;
+      types?: string[];
     }[];
   };
 
   return (d.places ?? [])
+    // Drop off-domain results (department stores, phone shops, …) Text Search
+    // returns for loose queries — keep only Mesita's hospitality universe.
+    .filter((p) => isRelevantPlace(p.primaryType, p.types))
     .map<Prediction>((p) => ({
       placeId: p.id ?? "",
       mainText: p.displayName?.text ?? "",
@@ -401,62 +451,20 @@ async function mesitaByName(
   }));
 }
 
-async function sampleMesitaPlaces(
-  admin: SupabaseClient,
-): Promise<Prediction[]> {
-  const { data, error } = await admin
-    .from("projects_view")
-    .select(
-      "id, slug, name, address, google_place_id, listing_type, google_stars_overall",
-    )
-    .eq("status", "active")
-    .order("google_stars_overall", { ascending: false, nullsFirst: false })
-    .limit(24);
-  if (error) {
-    console.error("[ask-memo] mesita sample:", error.message);
-    return [];
-  }
-  const rows = (data ?? []) as {
-    id: string;
-    slug: string;
-    name: string;
-    address: string | null;
-    google_place_id: string | null;
-    listing_type: string | null;
-    google_stars_overall: number | null;
-  }[];
-
-  // Shuffle so the "mock" rail feels fresh turn to turn, then take a handful.
-  for (let i = rows.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [rows[i], rows[j]] = [rows[j], rows[i]];
-  }
-  return rows.slice(0, MAX_CARDS).map<Prediction>((row) => ({
-    placeId: row.google_place_id ?? row.id,
-    mainText: row.name,
-    secondaryText: row.address ?? "On Mesita",
-    status: row.listing_type === "partner"
-      ? "verified_partner_other"
-      : "web_listed",
-    mesitaId: row.id,
-    mesitaSlug: row.slug,
-    rating: row.google_stars_overall,
-  }));
-}
-
 // ── Fallback prose (Perplexity unavailable) ────────────────────────────
 
 function fallbackAnswer(
   query: string,
   onMesita: number,
   fromGoogle: number,
-  mocked: boolean,
+  placeSeeking: boolean,
 ): string {
+  // Non-place question and no prose → generic recovery (don't promise spots).
+  if (!placeSeeking) {
+    return `My brain hiccuped for a second — ask me again in a moment and I'll give you a proper answer.`;
+  }
   if (onMesita === 0 && fromGoogle === 0) {
     return `I couldn't pull spots for “${query}” right now — try a place name, a dish, or a neighborhood.`;
-  }
-  if (mocked) {
-    return `My concierge brain is catching its breath, but here are a few Mesita spots you might like while I reconnect.`;
   }
   const parts: string[] = [];
   if (onMesita > 0) parts.push(`${onMesita} on Mesita`);
