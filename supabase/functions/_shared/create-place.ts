@@ -5,7 +5,7 @@
 //   category='undefined') → savePlaceData (minimal 'generating' rows,
 //   in-process) → seedPlaceResearch (queue the Enricher pipeline).
 //
-// Callers: admin-web-create-unit, business-web-create-project,
+// Callers: admin-web-create-project, business-web-create-project,
 // consumer-web-create-place (+ its consumer-web-schedule-project-creation
 // compat alias). All create IMMEDIATELY (MESITA-127/128 dropped the staggered
 // queue); only auth, dedupe copy, and response shaping differ per EF.
