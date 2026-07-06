@@ -1,6 +1,6 @@
 // Shared place-image persistence — upserts place_media_assets rows immediately,
 // then mirrors source URLs to the place-images bucket in a background task.
-// Used by enricher-agent-store-place-images (kept as a separate EF so mirroring
+// Used by supabase-edgefunc-store-place-images (kept as a separate EF so mirroring
 // gets its own wall clock) and callable in-process when that hop isn't needed.
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
