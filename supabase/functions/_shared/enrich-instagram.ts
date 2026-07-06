@@ -58,6 +58,10 @@ export async function gatherInstagram(opts: {
   } = opts;
   const instagramAssetMeta = new Map<string, InstagramAssetMeta>();
   const tried = new Set<string>();
+  // handle → API-level failure ("<status>: <body head>"). When EVERY tried
+  // handle failed at the API layer (vs a real scrape of a dead/other account),
+  // the caller may lean on the leniency fallback — we never got to look.
+  const apiErrors: Record<string, string> = {};
 
   // corroborateFb=true means the candidate was found INDEPENDENTLY (Firecrawl/
   // Google/Perplexity), so agreement with the Facebook slug is real corroboration.
@@ -66,12 +70,13 @@ export async function gatherInstagram(opts: {
   const attempt = async (handle: string | null, corroborateFb = true) => {
     if (!handle || tried.has(handle.toLowerCase())) return null;
     tried.add(handle.toLowerCase());
-    const items = await runApifyActor<Record<string, unknown>>(
+    const run = await runApifyActor<Record<string, unknown>>(
       APIFY_ACTORS.instagramProfile,
       { usernames: [handle] },
       apifyKey,
     );
-    const p = items?.[0];
+    if (run.error) apiErrors[handle] = `${run.status ?? "net"}: ${run.error}`;
+    const p = run.items?.[0];
     // A NONEXISTENT handle still returns a non-null object — the username echoed
     // back with every field null/empty. Treat that empty stub as not-found so a
     // dead handle (e.g. a guessed FB-slug) never reaches the identity judge.
@@ -100,7 +105,12 @@ export async function gatherInstagram(opts: {
   }
 
   if (!chosen?.ok) {
-    // No account passed identity verification — attach nothing.
+    // No account passed identity verification — attach nothing here. When the
+    // failure was pure infrastructure (every scrape errored at the API layer),
+    // say so: the research stage then attaches the discovered handle
+    // UNVERIFIED instead of dropping it (leniency — a missing channel is the
+    // worse miss). A judge rejection or dead handle keeps infra_fail false.
+    const failedTried = [...tried].filter((h) => apiErrors[h]);
     return {
       verifiedInstagramUrl: null,
       igBio: "",
@@ -112,6 +122,8 @@ export async function gatherInstagram(opts: {
         reason: chosen ? "unverified" : "not_found",
         candidate: igHandle ?? fbHandleCandidate,
         tried: [...tried],
+        infra_fail: tried.size > 0 && failedTried.length === tried.size,
+        ...(failedTried.length > 0 ? { errors: apiErrors } : {}),
       },
     };
   }

@@ -18,14 +18,26 @@ export const APIFY_ACTORS = {
   googleMaps: "compass~crawler-google-places",
 } as const;
 
+// One actor run's outcome. `items` is null on any failure; `status`/`error`
+// carry the WHY into the per-source diags — a v2 launch bug hid weeks of
+// silent 4xx behind indistinguishable nulls (MESITA-120).
+export type ApifyRunResult<T = Record<string, unknown>> = {
+  items: T[] | null;
+  // HTTP status of the run-sync call (null = network error / client abort).
+  status: number | null;
+  // Failure detail: non-ok body head, timeout note, or fetch error message.
+  error: string | null;
+};
+
 // Runs an actor synchronously and returns its dataset items. Capped so a
-// stuck actor can't hang the enrichment past the EF wall-clock.
+// stuck actor can't hang the enrichment past the EF wall-clock (note the
+// actor keeps running — and billing — on Apify after a client abort).
 export async function runApifyActor<T = Record<string, unknown>>(
   actorId: string,
   input: Record<string, unknown>,
   token: string,
   timeoutMs = 45000,
-): Promise<T[] | null> {
+): Promise<ApifyRunResult<T>> {
   const url = `${APIFY_BASE}/${actorId}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -36,11 +48,22 @@ export async function runApifyActor<T = Record<string, unknown>>(
       body: JSON.stringify(input),
       signal: ctrl.signal,
     });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      const body = (await r.text().catch(() => "")).slice(0, 200);
+      return { items: null, status: r.status, error: body || r.statusText };
+    }
     const data = await r.json();
-    return Array.isArray(data) ? (data as T[]) : null;
-  } catch {
-    return null;
+    return Array.isArray(data)
+      ? { items: data as T[], status: r.status, error: null }
+      : { items: null, status: r.status, error: "non-array response body" };
+  } catch (err) {
+    return {
+      items: null,
+      status: null,
+      error: ctrl.signal.aborted
+        ? `client timeout after ${timeoutMs}ms`
+        : (err instanceof Error ? err.message : String(err)).slice(0, 200),
+    };
   } finally {
     clearTimeout(timer);
   }

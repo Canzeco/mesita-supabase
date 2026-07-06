@@ -19,7 +19,9 @@ export async function gatherGoogleMaps(opts: {
   gatherGoogleImages: number;
 }): Promise<GoogleMapsResult> {
   const { apifyKey, placeId, gatherGoogleImages } = opts;
-  const items = await runApifyActor<Record<string, unknown>>(
+  // 100 reviews + images is a MINUTES-scale crawl — 120 s cap, not the 45 s
+  // default (the old 60 s cap starved healthy runs).
+  const run = await runApifyActor<Record<string, unknown>>(
     APIFY_ACTORS.googleMaps,
     {
       placeIds: [placeId],
@@ -30,9 +32,9 @@ export async function gatherGoogleMaps(opts: {
       reviewsPersonalData: true,
     },
     apifyKey,
-    60000,
+    120000,
   );
-  const p = items?.[0] as Record<string, unknown> | undefined;
+  const p = run.items?.[0] as Record<string, unknown> | undefined;
   const raw = Array.isArray(p?.reviews) ? (p!.reviews as Record<string, unknown>[]) : [];
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
   const reviews = raw
@@ -67,6 +69,7 @@ export async function gatherGoogleMaps(opts: {
       with_text: withText.length,
       images: googleImages.length,
       sample_keys: raw[0] ? Object.keys(raw[0]).slice(0, 25) : [],
+      ...(run.error ? { status: run.status, error: run.error } : {}),
     },
   };
 }

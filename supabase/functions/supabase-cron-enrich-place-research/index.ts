@@ -268,9 +268,29 @@ serveEnrichStage("research", async (admin, _env, row) => {
   if (fbR?.fbRating != null) place.facebook_rating = fbR.fbRating;
   if (igR?.verifiedInstagramUrl) place.instagram_url = igR.verifiedInstagramUrl;
 
+  // Leniency fallback (MESITA-120): when the IG scraper never got a real look
+  // (no APIFY key, or every scrape failed at the API layer), attach the
+  // independently discovered handle UNVERIFIED rather than nothing — a missing
+  // channel is the worse miss. A judge rejection or dead handle still drops it.
+  const igUnverifiedFallback = !igR?.verifiedInstagramUrl && !!resolvedInstagram &&
+    (!runInstagram || igR?.diag.infra_fail === true);
+  if (igUnverifiedFallback) {
+    place.instagram_url = resolvedInstagram;
+    sources.instagram_fallback = { attached_unverified: true, url: resolvedInstagram };
+  }
+
+  // Beacons report actual gather success, not mere "the call returned"
+  // (fbR exists even when the page scrape failed).
+  const fbOk = !!fbR && fbR.diag.ok === true;
+  const igMark = igR?.verifiedInstagramUrl ? "✓" : igUnverifiedFallback ? "~" : "—";
   await reportEnrichmentStep(admin, projectId, "S4", "source_harvest", "completed",
-    `Source harvest complete — Instagram ${igR?.verifiedInstagramUrl ? "✓" : "—"}, Facebook ${fbR ? "✓" : "—"}, website ${webR ? "✓" : "—"}.`,
-    { instagram: !!igR?.verifiedInstagramUrl, facebook: !!fbR, website: !!webR });
+    `Source harvest complete — Instagram ${igMark}, Facebook ${fbOk ? "✓" : "—"}, website ${webR ? "✓" : "—"}.`,
+    {
+      instagram: !!igR?.verifiedInstagramUrl,
+      instagram_unverified: igUnverifiedFallback,
+      facebook: fbOk,
+      website: !!webR,
+    });
 
   // ━━━ hand off to the analysis stage ━━━
   const gathered: GatheredPayload = {
