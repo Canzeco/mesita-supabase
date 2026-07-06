@@ -1,18 +1,19 @@
 // Supabase Edge Function — consumer-web-schedule-project-creation (consumer caller)
 //
-// COMPAT SHIM (MESITA-127): the staggered creation queue is gone
-// (scheduled_project_creations table + pg_cron poller + the
-// supabase-cron-run-project-creations EF were all dropped). Creation is now
-// immediate for every caller; only enrichment is scheduled (the seeded
-// place_research row drives the cron Enricher pipeline).
+// COMPATIBILITY ALIAS of consumer-web-create-place (MESITA-128) — the slug the
+// previously-deployed consumer app still calls. Places are created IMMEDIATELY
+// now (Pato directive: only enrichment is scheduled); the queue this EF used to
+// feed (scheduled_project_creations + its cron) is retired.
 //
-// This slug survives ONLY because the deployed consumer app still calls it
-// (half-rename lesson: never delete the old slug until the app flips). It runs
-// the same inline create as consumer-web-create-project and keeps the old
-// response keys (`scheduled_id`, `exec_at`) so the stale client stays happy.
-// `exec_at` in the body is accepted and ignored — there is no deferral anymore.
+// Legacy response semantics preserved for the deployed app:
+//   • success → 201 { ok, scheduled_id: <place id>, exec_at: <now>, place }
+//   • duplicate → 201 with the EXISTING place id (the old queue accepted
+//     duplicates silently and the cron dropped them later — the alias must not
+//     start erroring on the deployed Add button).
+//   • exec_at input is accepted and ignored (deferred creation retired).
 //
-// DELETE this EF once the consumer app is verified on consumer-web-create-project.
+// New clients call consumer-web-create-place instead. Delete this alias once
+// every deployed client has flipped.
 //
 // Local:  supabase functions serve consumer-web-schedule-project-creation
 // Deploy: supabase functions deploy consumer-web-schedule-project-creation
@@ -22,7 +23,7 @@ import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
 import { createMinimalPlace } from "../_shared/create-place.ts";
 
-type Body = { placeId?: string; googlePlaceId?: string; exec_at?: string };
+type Body = { googlePlaceId?: string; placeId?: string; exec_at?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -36,10 +37,12 @@ Deno.serve(async (req) => {
   const authRes = await getAuthedUser(req, env);
   if (!authRes.ok) return authRes.response;
 
-  // Parse input. The old client sends the Google Place ID under `placeId`.
+  // Parse input (legacy body key is `placeId`; exec_at ignored).
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
-  const googlePlaceId = (bodyRes.body.placeId ?? bodyRes.body.googlePlaceId ?? "").toString().trim();
+  const googlePlaceId = (bodyRes.body.googlePlaceId ?? bodyRes.body.placeId ?? "")
+    .toString()
+    .trim();
   if (!googlePlaceId) return json({ ok: false, error: "placeId is required" }, 400);
 
   const admin = adminClient(env);
@@ -50,18 +53,29 @@ Deno.serve(async (req) => {
     googlePlaceId,
     dedupeError: "This place is already on Mesita.",
   });
-  if (!created.ok) return json(created.body, created.status);
 
-  // Old response contract: the stale client types `{ scheduled_id, exec_at }`
-  // (it reads neither — the Add flow is fire-and-forget — but keep the keys).
-  return json(
-    {
-      ok: true,
-      scheduled_id: created.place.id,
-      exec_at: new Date().toISOString(),
-      place: created.place,
-      enrichment: created.enrichment,
-    },
-    201,
-  );
+  const nowIso = new Date().toISOString();
+  if (!created.ok) {
+    // Legacy silent-dedupe: a duplicate Add reads as success, pointing at the
+    // existing place. Everything else is a real error.
+    if (created.body.code === "place_already_exists") {
+      const existing = created.body.existing as { id?: string } | undefined;
+      return json({
+        ok: true,
+        scheduled_id: existing?.id ?? googlePlaceId,
+        exec_at: nowIso,
+        already_exists: true,
+        place: existing ?? null,
+      }, 201);
+    }
+    return json(created.body, created.status);
+  }
+
+  return json({
+    ok: true,
+    scheduled_id: created.place.id,
+    exec_at: nowIso,
+    place: created.place,
+    enrichment: created.enrichment,
+  }, 201);
 });

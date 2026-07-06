@@ -2,7 +2,7 @@
 -- MESITA-127 — drop the staggered creation queue: creation is IMMEDIATE now.
 --
 -- Every caller (admin-web-create-unit, business-web-create-project, and the
--- new consumer-web-create-project) runs the shared createMinimalPlace core
+-- new consumer-web-create-place) runs the shared createMinimalPlace core
 -- inline; the only scheduled machinery left is the Enricher pipeline
 -- (run-place-enrichment-stages over place_research, untouched here).
 --

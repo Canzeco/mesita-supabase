@@ -6,8 +6,8 @@
 //   in-process) → seedPlaceResearch (queue the Enricher pipeline).
 //
 // Callers: admin-web-create-unit, business-web-create-project,
-// consumer-web-create-project (+ its consumer-web-schedule-project-creation
-// compat shim). All create IMMEDIATELY (MESITA-127 dropped the staggered
+// consumer-web-create-place (+ its consumer-web-schedule-project-creation
+// compat alias). All create IMMEDIATELY (MESITA-127/128 dropped the staggered
 // queue); only auth, dedupe copy, and response shaping differ per EF.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";

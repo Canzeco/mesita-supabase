@@ -173,13 +173,13 @@ verify_jwt = true
 # synchronous 1:1 forward that didn't earn its cost. Their cloud slugs
 # stay live until the MESITA-59 cleanup.
 
-# Consumer "Add to Mesita": creates the place inline (MESITA-127 dropped the
-# staggered creation queue; only enrichment is scheduled now).
-[functions.consumer-web-create-project]
+# Consumer "Add to Mesita": creates the place inline (MESITA-128; MESITA-127
+# dropped the staggered creation queue — only enrichment is scheduled now).
+[functions.consumer-web-create-place]
 verify_jwt = true
 
-# COMPAT SHIM for the deployed consumer app (also creates inline, keeps the old
-# response keys). Delete once the app is verified on consumer-web-create-project.
+# COMPAT ALIAS for the deployed consumer app (also creates inline, keeps the old
+# response keys). Delete once the app is verified on consumer-web-create-place.
 [functions.consumer-web-schedule-project-creation]
 verify_jwt = true
 
