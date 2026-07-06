@@ -143,6 +143,10 @@ supabase db push
 
 # Deploy changed functions
 supabase functions deploy <name> [<name> ...]
+
+# Run the Edge Function test suite (billing math + money-path contract smoke
+# tests). Offline: no DB, no live Stripe. Also runs in CI on every PR.
+deno task test
 ```
 
 ---

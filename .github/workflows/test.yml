@@ -1,0 +1,22 @@
+name: Edge Function tests
+
+# Money-path + billing coverage (MESITA-142). Runs the Deno test suite for the
+# Supabase Edge Functions on every push and PR. No secrets, no live Stripe, no
+# DB: the smoke tests intercept Deno.serve to exercise handlers offline.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  deno-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run Edge Function tests
+        run: deno task test
