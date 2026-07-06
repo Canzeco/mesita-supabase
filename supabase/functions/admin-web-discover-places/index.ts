@@ -24,6 +24,8 @@ type RequestBody = {
   queries?: string[];
   regionCode?: string;
   maxResultsPerQuery?: number;
+  minRating?: number;
+  minUserRatingCount?: number;
 };
 
 Deno.serve(async (req) => {

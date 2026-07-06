@@ -6,6 +6,17 @@
 // the API max (3 pages × 20 = 60 results) and runs queries with bounded
 // concurrency so a 50-query batch completes well inside the EF timeout.
 //
+// Quality filters (optional): minRating and minUserRatingCount let the
+// operator drop low-signal places (a place with 800 reviews at 4.6 is
+// almost always a real, good venue; one with 3 reviews usually isn't).
+// Both are applied EF-side after the Google fetch — Google's Text Search
+// has no server-side review-count filter, and filtering both here (rather
+// than passing minRating natively) keeps a single code path AND lets us
+// report per-query rawCount (fetched before filtering) so the UI can say
+// "12 found · 4 shown" instead of a bare "4" that reads like the search
+// found nothing. rating + userRatingCount stay in the Text Search Pro
+// SKU, so surfacing them does not change the per-call price.
+//
 // Returned places are enriched with Mesita-side existence + timestamps so
 // the natural caller can render "already on Mesita" badges without a
 // second round-trip.
@@ -40,6 +51,13 @@ type RequestBody = {
   queries?: string[];
   regionCode?: string;
   maxResultsPerQuery?: number;
+  // Quality filters. minRating is 0–5 (Google ratings are 1–5); 0 = off.
+  // minUserRatingCount is a review-count floor; 0 = off. A place must
+  // clear BOTH to survive. Places Google returns without a rating or
+  // review count are treated as "unknown" and dropped only when the
+  // corresponding filter is active (see passesQualityFilter).
+  minRating?: number;
+  minUserRatingCount?: number;
 };
 
 type PlaceLite = {
@@ -48,6 +66,11 @@ type PlaceLite = {
   formattedAddress: string;
   lat: number | null;
   lng: number | null;
+  // Google quality signals from the Text Search Pro SKU. null when Google
+  // returns the place without the field (rare, but e.g. brand-new listings
+  // have no rating yet).
+  rating: number | null;
+  userRatingCount: number | null;
   // Mesita-side enrichment, populated after the Google round-trip by
   // looking each Place ID up against public.places.google_place_id.
   // Defaults to (false, null, null); the top-level mesitaLookupError
@@ -60,6 +83,9 @@ type PlaceLite = {
 type QueryResult = {
   query: string;
   places: PlaceLite[];
+  // Total places Google returned for this query, before quality filters.
+  // places.length ≤ rawCount; the gap is what the filters removed.
+  rawCount: number;
   truncated: boolean;
   error: string | null;
 };
@@ -108,6 +134,10 @@ Deno.serve(async (req) => {
     Math.max(1, body.maxResultsPerQuery ?? MAX_RESULTS_PER_QUERY),
   );
 
+  // Quality filters — clamp to sane ranges; 0 disables each one.
+  const minRating = clamp(Number(body.minRating ?? 0), 0, 5);
+  const minUserRatingCount = Math.max(0, Math.floor(Number(body.minUserRatingCount ?? 0)));
+
   // --- Run queries with bounded concurrency ---
   const results = new Array<QueryResult>(queries.length);
   let cursor = 0;
@@ -117,17 +147,22 @@ Deno.serve(async (req) => {
       if (i >= queries.length) return;
       const q = queries[i];
       try {
-        const places = await searchTextWithPagination(q, regionCode, maxResults, apiKey);
+        const fetched = await searchTextWithPagination(q, regionCode, maxResults, apiKey);
+        const places = fetched.filter((p) =>
+          passesQualityFilter(p, minRating, minUserRatingCount),
+        );
         results[i] = {
           query: q,
           places,
-          truncated: places.length >= maxResults,
+          rawCount: fetched.length,
+          truncated: fetched.length >= maxResults,
           error: null,
         };
       } catch (err) {
         results[i] = {
           query: q,
           places: [],
+          rawCount: 0,
           truncated: false,
           error: err instanceof Error ? err.message : String(err),
         };
@@ -191,6 +226,13 @@ Deno.serve(async (req) => {
     }
   }
 
+  // How many places the quality filters removed, summed across queries
+  // (pre-dedupe — this is a "signal-to-noise" tally for the operator, not
+  // a unique count).
+  const rawTotal = results.reduce((n, r) => n + r.rawCount, 0);
+  const keptTotal = results.reduce((n, r) => n + r.places.length, 0);
+  const filteredOutCount = rawTotal - keptTotal;
+
   return json({
     ok: true,
     queries: results,
@@ -198,11 +240,40 @@ Deno.serve(async (req) => {
     uniqueCount: uniquePlaces.length,
     regionCode,
     maxResultsPerQuery: maxResults,
+    minRating,
+    minUserRatingCount,
+    filteredOutCount,
     mesitaMatchCount,
     mesitaLookupError,
     caller: callerRes.callerName,
   });
 });
+
+// A place passes when it clears BOTH active filters. When a filter is off
+// (0) it never rejects. When a filter is on but the place is missing that
+// signal (null rating / null review count), it's rejected — an unrated
+// place can't be shown to clear a rating floor, and the operator asked to
+// see only places above the bar.
+function passesQualityFilter(
+  p: PlaceLite,
+  minRating: number,
+  minUserRatingCount: number,
+): boolean {
+  if (minRating > 0) {
+    if (p.rating === null || p.rating < minRating) return false;
+  }
+  if (minUserRatingCount > 0) {
+    if (p.userRatingCount === null || p.userRatingCount < minUserRatingCount) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  if (Number.isNaN(n)) return lo;
+  return Math.min(hi, Math.max(lo, n));
+}
 
 async function searchTextWithPagination(
   textQuery: string,
@@ -229,7 +300,7 @@ async function searchTextWithPagination(
         "Content-Type": "application/json",
         "X-Goog-Api-Key": apiKey,
         "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.location,nextPageToken",
+          "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,nextPageToken",
       },
       body: JSON.stringify(body),
     });
@@ -244,6 +315,8 @@ async function searchTextWithPagination(
         displayName?: { text?: string };
         formattedAddress?: string;
         location?: { latitude?: number; longitude?: number };
+        rating?: number;
+        userRatingCount?: number;
       }>;
       nextPageToken?: string;
     };
@@ -256,6 +329,9 @@ async function searchTextWithPagination(
         formattedAddress: p.formattedAddress ?? "",
         lat: typeof p.location?.latitude === "number" ? p.location.latitude : null,
         lng: typeof p.location?.longitude === "number" ? p.location.longitude : null,
+        rating: typeof p.rating === "number" ? p.rating : null,
+        userRatingCount:
+          typeof p.userRatingCount === "number" ? p.userRatingCount : null,
         existsInMesita: false,
         createdAt: null,
         updatedAt: null,
