@@ -184,25 +184,44 @@ export async function synthesizeProfile(input: {
   }
 }
 
+// Coerce an LLM-produced value to usable text: a string is trimmed; an array
+// of strings becomes paragraphs. Anything else (object, number, null) is
+// dropped. json_object mode only *describes* the schema — the model can and
+// does return off-type fields, and one bad field must never throw the stage.
+export function asProfileText(v: unknown): string | null {
+  if (typeof v === "string" && v.trim()) return v.trim();
+  if (Array.isArray(v)) {
+    const parts = v.filter((x): x is string => typeof x === "string" && !!x.trim());
+    if (parts.length > 0) return parts.map((s) => s.trim()).join("\n\n");
+  }
+  return null;
+}
+
 // Apply the synthesized profile onto the place update object (mutates it).
 // Only sets a field when synthesis actually produced a usable value.
 export function applyProfileToUpdate(
   update: Record<string, unknown>,
   parsed: ProfileResult,
 ): void {
-  if (parsed.zone) update.zone = parsed.zone;
-  if (parsed.city) update.city = parsed.city;
-  if (typeof parsed.established_year === "number") {
-    update.established_year = parsed.established_year;
-  }
-  if (parsed.executive_chef) update.executive_chef = parsed.executive_chef;
-  if (parsed.editorial_summary) update.editorial_summary = parsed.editorial_summary;
+  const zone = asProfileText(parsed.zone);
+  if (zone) update.zone = zone;
+  const city = asProfileText(parsed.city);
+  if (city) update.city = city;
+  const year = typeof parsed.established_year === "number"
+    ? parsed.established_year
+    : typeof parsed.established_year === "string"
+      ? parseInt(parsed.established_year, 10)
+      : NaN;
+  if (Number.isInteger(year)) update.established_year = year;
+  const chef = asProfileText(parsed.executive_chef);
+  if (chef) update.executive_chef = chef;
+  const editorial = asProfileText(parsed.editorial_summary);
+  if (editorial) update.editorial_summary = editorial;
   // The place's public About — hard cap at ~1000 words. Only overwrite when
   // synthesis actually produced text.
-  if (parsed.description && parsed.description.trim()) {
-    update.description = parsed.description.trim().slice(0, ENRICH_DESCRIPTION_MAX);
-  }
-  if (parsed.details && typeof parsed.details === "object") {
+  const description = asProfileText(parsed.description);
+  if (description) update.description = description.slice(0, ENRICH_DESCRIPTION_MAX);
+  if (parsed.details && typeof parsed.details === "object" && !Array.isArray(parsed.details)) {
     update.details = parsed.details;
   }
   const productMenu = Array.isArray(parsed.products?.menu)
