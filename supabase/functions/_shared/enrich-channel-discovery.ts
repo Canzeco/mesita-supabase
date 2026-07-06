@@ -349,7 +349,9 @@ export async function fillMissingChannels(
     candidateBlock +
     `Find the official WEBSITE first and trust the channels the site itself links to. ${igRule}` +
     `Return strict JSON with ONLY these keys (null any you cannot confirm belongs to THIS place):\n${askLines}\n` +
-    `A franchise / multi-location brand's MAIN account or page is acceptable. ` +
+    `A franchise / multi-location brand's MAIN account or page is acceptable, but each URL must be ` +
+    `the venue's OWN channel — NEVER a review site, ranking / "best of" list (e.g. World's 50 Best), ` +
+    `guide, directory, aggregator, or a source you merely cited. ` +
     `Be conservative — prefer null over a guess. Never invent a URL.`;
 
   const res = await callPerplexityChat(
@@ -373,13 +375,21 @@ export async function fillMissingChannels(
     const fromAnswer = typeof answer[f] === "string"
       ? validateFieldUrl(f, answer[f] as string)
       : null;
-    const valid = fromAnswer ??
-      firstValidFromList(f, hitUrls) ??
-      firstValidFromList(f, perField[f] ?? []);
+    // The blind citation/candidate fallback only runs for the two benchmarked,
+    // high-precision fields. For facebook / opentable / uber_eats a shape-valid
+    // URL from an unrelated cited source (e.g. a review site's own Facebook) would
+    // pass validation as the wrong entity, so those trust the judge's answer only.
+    const valid = FALLBACK_FIELDS.has(f)
+      ? (fromAnswer ?? firstValidFromList(f, hitUrls) ?? firstValidFromList(f, perField[f] ?? []))
+      : fromAnswer;
     if (valid) out[f] = valid;
   }
   return out;
 }
+
+// Fields where a blind fallback to cited/candidate URLs is safe enough (linklab
+// benchmarked website + instagram precision; the others are answer-only).
+const FALLBACK_FIELDS = new Set<ChannelField>(["website_url", "instagram_url"]);
 
 // ── Degraded leg — Firecrawl per-field search (only when no Perplexity key) ──
 async function firecrawlSearchFill(
