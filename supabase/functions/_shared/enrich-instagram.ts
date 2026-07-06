@@ -131,7 +131,37 @@ export async function gatherInstagram(opts: {
   const p = chosen.p;
   const igFollowers = numOf(p.followersCount);
   const igBio = typeof p.biography === "string" ? p.biography : "";
-  const posts = Array.isArray(p.latestPosts) ? (p.latestPosts as Record<string, unknown>[]) : [];
+
+  // Post depth (MESITA-131): the profile scrape only embeds the first grid
+  // page (~12 posts). When the admin "Instagram posts" knob asks for more,
+  // fetch the verified account's latest N via the dedicated post scraper
+  // (newest first; we rank that window by likes below). The embedded posts
+  // stay as the fallback so a posts-run failure never loses the images the
+  // profile call already delivered.
+  let posts = Array.isArray(p.latestPosts) ? (p.latestPosts as Record<string, unknown>[]) : [];
+  let postsSource = "profile-embedded";
+  let postsError: string | null = null;
+  if (gatherInstagramPosts > posts.length) {
+    const postsRun = await runApifyActor<Record<string, unknown>>(
+      APIFY_ACTORS.instagramPosts,
+      { username: [chosen.handle], resultsLimit: gatherInstagramPosts },
+      apifyKey,
+      60000,
+    );
+    if (postsRun.items && postsRun.items.length > 0) {
+      // The post scraper marks videos via `type`/`videoUrl` instead of the
+      // profile scraper's `isVideo` — normalize so the meta below just works.
+      posts = postsRun.items.map((it) => ({
+        ...it,
+        isVideo: it.isVideo ??
+          (it.type === "Video" || (typeof it.videoUrl === "string" && it.videoUrl.length > 0)),
+      }));
+      postsSource = "post-scraper";
+    } else if (postsRun.error) {
+      postsError = `${postsRun.status ?? "net"}: ${postsRun.error}`;
+    }
+  }
+
   const orderedPosts = posts
     // Videos are kept: their displayUrl is the cover frame, analyzed as a photo.
     .filter(
@@ -167,6 +197,8 @@ export async function gatherInstagram(opts: {
       ok: true,
       verified: true,
       posts: posts.length,
+      posts_source: postsSource,
+      ...(postsError ? { posts_error: postsError } : {}),
       images: instagramImages.length,
     },
   };

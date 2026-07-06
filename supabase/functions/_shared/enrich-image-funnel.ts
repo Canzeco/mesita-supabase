@@ -167,6 +167,7 @@ export async function visionDescribe(
   openaiKey: string,
   urls: string[],
   prompt: string,
+  model: string = VISION_MODEL,
 ): Promise<string[] | null> {
   const describeOne = async (url: string): Promise<string> => {
     const ctrl = new AbortController();
@@ -179,7 +180,7 @@ export async function visionDescribe(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: VISION_MODEL,
+          model,
           temperature: 0,
           max_tokens: 200,
           messages: [
@@ -325,6 +326,9 @@ export async function runImageFunnel(opts: {
   photoCeiling: number;
   runVision: boolean;
   openaiKey: string | undefined;
+  // Per-image describe model (admin "Image model" knob). Sort stays on the
+  // cheap VISION_MODEL — matches the cost calculator.
+  visionModel?: string;
   analyze: { google: number; website: number; instagram: number };
   imageAnalysisPrompt: string;
   imageSortingPrompt: string;
@@ -339,6 +343,7 @@ export async function runImageFunnel(opts: {
     photoCeiling,
     runVision,
     openaiKey,
+    visionModel,
     analyze,
     imageAnalysisPrompt,
     imageSortingPrompt,
@@ -389,6 +394,7 @@ export async function runImageFunnel(opts: {
         openaiKey,
         toAnalyze.map((i) => i.url),
         imageAnalysisPrompt,
+        visionModel ?? VISION_MODEL,
       );
       let order: number[] | null = null;
       if (descriptions) {
@@ -410,6 +416,7 @@ export async function runImageFunnel(opts: {
         diag = {
           ...diag,
           vision: true,
+          model: visionModel ?? VISION_MODEL,
           analyzed: toAnalyze.length,
           described: !!descriptions,
           sorted: true,

@@ -21,7 +21,7 @@
 // Deploy: supabase functions deploy supabase-cron-enrich-place-analysis
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { loadEnrichConfig, PHOTO_CEILING } from "../_shared/enrich-config.ts";
+import { loadEnrichConfig, PHOTO_CEILING, visionModelFor } from "../_shared/enrich-config.ts";
 import { runImageFunnel } from "../_shared/enrich-image-funnel.ts";
 import {
   advanceResearchStage,
@@ -58,6 +58,7 @@ serveEnrichStage("analysis", async (admin, _env, row) => {
     photoCeiling: PHOTO_CEILING,
     runVision,
     openaiKey: OPENAI_KEY,
+    visionModel: visionModelFor(cfg.visionQuality),
     analyze: {
       google: cfg.analyzeGoogleImages,
       website: cfg.analyzeWebsiteImages,
