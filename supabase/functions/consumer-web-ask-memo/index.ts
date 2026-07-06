@@ -93,6 +93,7 @@ const GOOGLE_RADIUS_M = 8000;
 const SYSTEM_PROMPT = `You are Memo, Mesita's warm, sharp local concierge for dining, nightlife, cafés, and experiences — with deep taste for Monterrey and Mexico generally, but able to help anywhere.
 
 Style:
+- Reply in PLAIN TEXT — the chat renders raw, so NO markdown: no **bold**, no *italics*, no # headings, no backticks, no bullet syntax. Emojis are welcome and encouraged (they render fine).
 - Reply in the SAME language the user wrote in (Spanish or English). Default to a friendly, concise voice.
 - Keep it SHORT: 2–4 sentences, mobile-chat length. Be opinionated and specific, not a bland list.
 - Place cards may appear below your message ONLY when the user is actually looking for places. When they do, give a quick confident take and let the cards carry the details — don't dump a long numbered list. For general questions (definitions, how things work, trivia), just answer conversationally; do NOT refer to cards that won't be there.
@@ -205,6 +206,28 @@ function localMoment(lng: number | null): { clock: string; daypart: string } {
   return { clock, daypart: daypartLabel(hour) };
 }
 
+// The consumer chat renders Memo's reply as RAW TEXT, so any markdown the
+// model emits (**bold**, *italics*, `code`, # headings, [links](url)) leaks
+// through as literal symbols. Strip the formatting markers but keep the words —
+// and keep emojis, accents (á/ñ), and ¡¿ punctuation untouched.
+function toPlainText(s: string): string {
+  return s
+    // Links: [text](url) → text (url)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
+    // Bold / italic / strikethrough wrappers → their inner text
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/~~(.*?)~~/g, "$1")
+    .replace(/(\*|_)(?=\S)(.*?)(?<=\S)\1/g, "$2")
+    // Inline code / fenced code → inner text
+    .replace(/`{1,3}([^`]*)`{1,3}/g, "$1")
+    // Heading (#) and blockquote (>) markers at line start
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    // Any stray emphasis/heading/code markers left over
+    .replace(/[*_`#]/g, "")
+    .trim();
+}
+
 // ── Handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -259,10 +282,11 @@ Deno.serve(async (req) => {
   const onMesita = predictions.filter((p) => p.status !== "not_in_mesita").length;
   const fromGoogle = predictions.length - onMesita;
 
-  const answer =
+  const answer = toPlainText(
     perplexity?.text && perplexity.text.length > 0
       ? perplexity.text
-      : fallbackAnswer(query, onMesita, fromGoogle, placeSeeking);
+      : fallbackAnswer(query, onMesita, fromGoogle, placeSeeking),
+  );
 
   return json({
     ok: true,
