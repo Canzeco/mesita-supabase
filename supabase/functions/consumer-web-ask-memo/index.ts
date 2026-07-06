@@ -4,29 +4,26 @@
 // Reservationist). Unlike those two — n8n workflows — Memo lives here, as an
 // Edge Function, because it sits on the consumer's synchronous chat path.
 //
-// One turn of the concierge chat runs a three-source pipeline in parallel and
-// merges the results:
+// One turn of the concierge chat:
 //
-//   1. PERPLEXITY (sonar-pro, web-grounded)  → the natural-language ANSWER.
-//      This is the real, functional brain of the chat: it can answer any
-//      question, reason about "rooftop date under $$$", compare neighborhoods,
-//      etc., and returns citations + follow-up questions.
-//
-//   2. GOOGLE PLACES (Text Search, New)      → real place CANDIDATES.
-//      The raw query (location-biased when the client sends lat/lng) is thrown
-//      at Google Text Search; results are sorted by Google star rating. This
-//      realizes asks like "top 3 bars near me" — Google understands the query,
-//      we rank by stars.
-//
-//   3. MESITA DB (projects_view)             → which candidates are ON MESITA.
-//      Google place ids are cross-referenced against our catalog so cards get
+//   1. GOOGLE PLACES (Text Search, New) + MESITA DB → the place CANDIDATES.
+//      Only when the ask is place-seeking (isPlaceSeeking). Google understands
+//      the query (location-biased on lat/lng); results are type-filtered to
+//      Mesita's hospitality universe and ranked open-now-first then by rating.
+//      Google ids are cross-referenced against projects_view so cards get
 //      tagged on-Mesita (partner/web-listed) vs not, and a name search surfaces
-//      on-platform spots Google may have missed. (Future: RAG over the catalog
-//      swaps in here.)
+//      on-platform spots Google missed. (Future: RAG over the catalog here.)
 //
-// If Google is unconfigured/empty we fall back to a random sample of live
-// Mesita places so the chat still ships suggestion cards — "just mocks" for
-// the place rail, while the TEXT stays fully real.
+//   2. PERPLEXITY (sonar-pro, web-grounded) → the natural-language ANSWER.
+//      The candidates from step 1 are fed to Perplexity as context so its
+//      recommendation names the ACTUAL cards the user sees — the prose and the
+//      rail stay coherent instead of drifting apart. It still adds web-grounded
+//      color (what to order, vibe) + citations + follow-up questions, and can
+//      answer ANY question. Non-place-seeking turns skip step 1 and reply text-
+//      only. Hidden context feeds the user's location + local time so Memo
+//      favours open, time-appropriate spots.
+//
+// No random-sample fallback: no genuine match → empty rail + text-only reply.
 //
 // Secrets: PERPLEXITY_KEY (shared with Atlas/ADEA) + GMP_KEY (Google Maps
 // Platform, shared with the enricher). Neither key ever leaves Supabase.
@@ -254,25 +251,30 @@ Deno.serve(async (req) => {
   // or general question gets a text-only reply (no forced cards).
   const placeSeeking = isPlaceSeeking(query);
 
-  // Fan out the two slow legs (Perplexity + Google) in parallel; neither can
-  // sink the other.
-  const [answerLeg, placesLeg] = await Promise.allSettled([
-    answerWithPerplexity(perplexityKey, query, lat, lng, body.history),
-    placeSeeking
-      ? candidatePlaces(admin, query, lat, lng)
-      : Promise.resolve({ predictions: [] as Prediction[] }),
-  ]);
-
-  const perplexity =
-    answerLeg.status === "fulfilled" ? answerLeg.value : null;
-  const placeResult =
-    placesLeg.status === "fulfilled"
-      ? placesLeg.value
-      : { predictions: [] as Prediction[] };
-
-  const predictions = placeResult.predictions.slice(0, MAX_CARDS);
+  // Candidates FIRST (place-seeking only), so Perplexity can write its
+  // recommendation ABOUT the exact cards the user sees — prose and rail stay
+  // coherent. The Google leg is ~0.5s; worth the small serialization for a
+  // reply that names the real cards. Never let it sink the answer.
+  let predictions: Prediction[] = [];
+  if (placeSeeking) {
+    try {
+      const placeResult = await candidatePlaces(admin, query, lat, lng);
+      predictions = placeResult.predictions.slice(0, MAX_CARDS);
+    } catch (e) {
+      console.error("[ask-memo] places leg:", (e as Error).message);
+    }
+  }
   const onMesita = predictions.filter((p) => p.status !== "not_in_mesita").length;
   const fromGoogle = predictions.length - onMesita;
+
+  const perplexity = await answerWithPerplexity(
+    perplexityKey,
+    query,
+    lat,
+    lng,
+    body.history,
+    predictions,
+  );
 
   const answer = toPlainText(
     perplexity?.text && perplexity.text.length > 0
@@ -298,6 +300,7 @@ async function answerWithPerplexity(
   lat: number | null,
   lng: number | null,
   history: MemoBody["history"],
+  candidates: Prediction[],
 ): Promise<{ text: string; related: string[]; citations: string[] } | null> {
   if (!key) return null;
 
@@ -324,7 +327,12 @@ async function answerWithPerplexity(
     ? ` [context, do not repeat back: the user is ${ctxBits.join("; ")}. `
       + `Favour places open and appropriate for this time of day.]`
     : "";
-  messages.push({ role: "user", content: `${query}${ctx}` });
+
+  // Feed the exact cards the user will see so the recommendation stays
+  // coherent with the rail — Memo names the real cards instead of drifting to
+  // web-only spots. Empty/absent when the ask isn't place-seeking or nothing
+  // matched.
+  messages.push({ role: "user", content: `${query}${ctx}${candidateBlock(candidates)}` });
 
   const res = await callPerplexityChat(key, messages, {
     model: "sonar-pro",
@@ -334,6 +342,27 @@ async function answerWithPerplexity(
   });
   if (!res) return null;
   return { text: res.text, related: res.related, citations: res.citations };
+}
+
+// Hidden prompt block listing the actual place cards (max 6) so Perplexity
+// recommends FROM them. Not echoed back; the model weaves 1–3 in naturally.
+function candidateBlock(candidates: Prediction[]): string {
+  if (candidates.length === 0) return "";
+  const lines = candidates.slice(0, MAX_CARDS).map((c, i) => {
+    const bits: string[] = [c.mainText];
+    if (c.secondaryText) bits.push(c.secondaryText.split(",")[0].trim());
+    if (typeof c.rating === "number") bits.push(`★${c.rating.toFixed(1)}`);
+    if (c.status !== "not_in_mesita") bits.push("on Mesita");
+    if (c.openNow === true) bits.push("open now");
+    else if (c.openNow === false) bits.push("closed now");
+    return `${i + 1}. ${bits.join(" · ")}`;
+  });
+  return (
+    ` [cards shown to the user below your reply — recommend from THESE so your` +
+    ` words match the cards; weave 1–3 in naturally, don't list them all` +
+    ` mechanically, and prefer open ones. If none truly fit the ask, say so` +
+    ` briefly and give general guidance:\n${lines.join("\n")}]`
+  );
 }
 
 // ── Leg 2: place candidates (Google Text Search + Mesita merge) ─────────
