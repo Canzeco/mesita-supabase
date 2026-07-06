@@ -14,9 +14,7 @@
 //     the new price id is cached back onto the row.
 
 import { assert, assertEquals } from "jsr:@std/assert@1";
-// deno-lint-ignore no-explicit-any
 import type Stripe from "npm:stripe@17";
-// deno-lint-ignore no-explicit-any
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { resolvePlanPrice, STRIPE_CATALOG } from "./stripe-billing.ts";
 

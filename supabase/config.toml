@@ -159,6 +159,14 @@ verify_jwt = false
 [functions.consumer-web-get-place]
 verify_jwt = false
 
+# Memo — the consumer AI concierge (Mesita's third agent, alongside the
+# Enricher/Atlas and the Reservationist). Public like the catalog reads:
+# decision — the concierge answers signed-out visitors, and it only READS
+# (Perplexity + Google Places + projects_view). Auth is read optionally for
+# personalisation via getOptionalAuthedUser; RLS still gates place visibility.
+[functions.consumer-web-ask-memo]
+verify_jwt = false
+
 # Personalised discovery surfaces. JWT required so we can read the
 # consumer's class + history; the recommendation logic still respects
 # RLS for place visibility.
