@@ -84,10 +84,6 @@ serveEnrichStage("research", async (admin, _env, row) => {
   const locationLine = [basics.address, basics.city].filter(Boolean).join(", ");
   const category = basics.category;
 
-  await reportEnrichmentStep(admin, projectId, "S1", "google_profile", "completed",
-    `Google profile confirmed for “${name}” — identity spine locked with ${basics.photos.length} photo(s).`,
-    { photoCount: basics.photos.length });
-
   // ━━━ S2 — parallel: Apify GMaps reviews ‖ Perplexity SERP blurb ━━━
   let reviews: Record<string, unknown>[] = [];
   let reviewCount: number | null = null;
@@ -115,9 +111,6 @@ serveEnrichStage("research", async (admin, _env, row) => {
       sources.serp = serp.diag;
     })(),
   ]);
-  await reportEnrichmentStep(admin, projectId, "S2", "reviews_and_serp", "completed",
-    `Research gathered — ${reviews.length} Google review(s) pulled${serpSummary ? " and a web editorial blurb found." : "; no editorial blurb found."}`,
-    { reviews: reviews.length, serpFound: !!serpSummary });
 
   // ━━━ S3 — channel discovery + phone/email ━━━
   let resolvedInstagram = basics.instagram_url;
@@ -208,9 +201,6 @@ serveEnrichStage("research", async (admin, _env, row) => {
 
   const resolvedCount = ["facebook_url", "website_url", "opentable_url", "uber_eats_url", "phone", "email"]
     .filter((k) => !!place[k]).length + (resolvedInstagram ? 1 : 0);
-  await reportEnrichmentStep(admin, projectId, "S3", "links_and_contacts", "completed",
-    `Channel discovery done — resolved ${resolvedCount} official link/contact field(s) (website, socials, phone, email).`,
-    { resolved: resolvedCount });
 
   const igHandle = instagramHandleFromUrl(resolvedInstagram);
   const fbHandleCandidate = fbSlugCandidate(resolvedFacebook);
@@ -279,13 +269,21 @@ serveEnrichStage("research", async (admin, _env, row) => {
     sources.instagram_fallback = { attached_unverified: true, url: resolvedInstagram };
   }
 
-  // Beacons report actual gather success, not mere "the call returned"
+  // The beacon reports actual gather success, not mere "the call returned"
   // (fbR exists even when the page scrape failed).
   const fbOk = !!fbR && fbR.diag.ok === true;
   const igMark = igR?.verifiedInstagramUrl ? "✓" : igUnverifiedFallback ? "~" : "—";
-  await reportEnrichmentStep(admin, projectId, "S4", "source_harvest", "completed",
-    `Source harvest complete — Instagram ${igMark}, Facebook ${fbOk ? "✓" : "—"}, website ${webR ? "✓" : "—"}.`,
+
+  // One beacon for the whole research stage (S1–S4) — one notification per
+  // function. Summarises everything gathered; granular per-source diag lives
+  // in gathered->sources.
+  await reportEnrichmentStep(admin, projectId, "S1", "gather", "completed",
+    `Research complete for “${name}” — ${basics.photos.length} Google photo(s), ${reviews.length} review(s), ${resolvedCount} link/contact field(s); Instagram ${igMark}, Facebook ${fbOk ? "✓" : "—"}, website ${webR ? "✓" : "—"}.`,
     {
+      photoCount: basics.photos.length,
+      reviews: reviews.length,
+      serpFound: !!serpSummary,
+      resolved: resolvedCount,
       instagram: !!igR?.verifiedInstagramUrl,
       instagram_unverified: igUnverifiedFallback,
       facebook: fbOk,

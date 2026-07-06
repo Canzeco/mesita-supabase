@@ -20,9 +20,12 @@
 //   gathered  — research output: partial place update + grounding + image pools
 //   analysis  — analysis output: ranked/selected photos + per-image descriptions
 //
-// Beacons: each stage INSERTs place_enrichment_events rows directly (we're
-// already service-role inside an EF — no HTTP hop), keeping the admin console
-// notifications feed on the S1–S9 step semantics (unchanged since the n8n era).
+// Beacons: each stage INSERTs a place_enrichment_events row directly (we're
+// already service-role inside an EF — no HTTP hop). ONE beacon per stage run
+// (per Pato: one notification per function, not per S-step) — the stage's
+// summary is anchored at its first S-code (research S1, analysis S5, contents
+// S7) so the admin feed still colours it by phase. The granular S1–S9 diagnostics
+// live in gathered->sources, not the feed (the judge reads those, never beacons).
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import type { MediaAssetPayload } from "./enrich-config.ts";
