@@ -1,14 +1,14 @@
-// Shared create-place core — the pipeline all four create paths run after
-// their caller-specific auth:
+// Shared create-place core — the pipeline every create path runs after its
+// caller-specific auth:
 //
 //   early dedupe (google_place_id) → fetchGoogleBasics (identity spine,
 //   category='undefined') → savePlaceData (minimal 'generating' rows,
 //   in-process) → seedPlaceResearch (queue the Enricher pipeline).
 //
-// Callers: admin-web-create-unit,
-// business-web-create-project, supabase-cron-run-project-creations. They were
-// four near-identical copies of this block; only auth, dedupe copy, and
-// response shaping differ, so those stay in each EF.
+// Callers: admin-web-create-unit, business-web-create-project,
+// consumer-web-create-project (+ its consumer-web-schedule-project-creation
+// compat shim). All create IMMEDIATELY (MESITA-127 dropped the staggered
+// queue); only auth, dedupe copy, and response shaping differ per EF.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { seedPlaceResearch } from "./enrich-pipeline.ts";

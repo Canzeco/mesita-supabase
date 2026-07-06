@@ -1,14 +1,18 @@
 // Supabase Edge Function — consumer-web-schedule-project-creation (consumer caller)
 //
-// Enqueues a staggered create for a Google Places `placeId`. Instead of running
-// the (expensive, synchronous) create pipeline inline, it inserts a row into
-// public.scheduled_project_creations; the pg_cron poller picks due rows up and fires
-// the service-gated supabase-cron-run-project-creations EF. exec_at defaults to now() (run
-// ASAP) but the caller may pass an ISO timestamp to defer.
+// COMPAT SHIM (MESITA-127): the staggered creation queue is gone
+// (scheduled_project_creations table + pg_cron poller + the
+// supabase-cron-run-project-creations EF were all dropped). Creation is now
+// immediate for every caller; only enrichment is scheduled (the seeded
+// place_research row drives the cron Enricher pipeline).
 //
-// Gating: a signed-in consumer session (getAuthedUser). No DB write happens from
-// the client — every write goes through this EF (client-DB-access rule); the EF
-// uses the service-role key to insert into the service-role-only queue table.
+// This slug survives ONLY because the deployed consumer app still calls it
+// (half-rename lesson: never delete the old slug until the app flips). It runs
+// the same inline create as consumer-web-create-project and keeps the old
+// response keys (`scheduled_id`, `exec_at`) so the stale client stays happy.
+// `exec_at` in the body is accepted and ignored — there is no deferral anymore.
+//
+// DELETE this EF once the consumer app is verified on consumer-web-create-project.
 //
 // Local:  supabase functions serve consumer-web-schedule-project-creation
 // Deploy: supabase functions deploy consumer-web-schedule-project-creation
@@ -16,8 +20,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
+import { createMinimalPlace } from "../_shared/create-place.ts";
 
-type Body = { placeId?: string; exec_at?: string };
+type Body = { placeId?: string; googlePlaceId?: string; exec_at?: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -30,36 +35,33 @@ Deno.serve(async (req) => {
   // Authenticate the consumer.
   const authRes = await getAuthedUser(req, env);
   if (!authRes.ok) return authRes.response;
-  const createdBy = authRes.user.id;
 
-  // Parse input.
+  // Parse input. The old client sends the Google Place ID under `placeId`.
   const bodyRes = await readJson<Body>(req);
   if (!bodyRes.ok) return bodyRes.response;
-  const placeId = (bodyRes.body.placeId ?? "").toString().trim();
-  if (!placeId) return json({ ok: false, error: "placeId is required" }, 400);
-
-  // exec_at optional — default now() (DB column default). When provided it must
-  // parse as a valid timestamp; an unparseable value is a 400, not a silent now().
-  let execAt: string | undefined;
-  if (bodyRes.body.exec_at != null) {
-    const ms = Date.parse(bodyRes.body.exec_at);
-    if (Number.isNaN(ms)) return json({ ok: false, error: "exec_at must be an ISO timestamp" }, 400);
-    execAt = new Date(ms).toISOString();
-  }
+  const googlePlaceId = (bodyRes.body.placeId ?? bodyRes.body.googlePlaceId ?? "").toString().trim();
+  if (!googlePlaceId) return json({ ok: false, error: "placeId is required" }, 400);
 
   const admin = adminClient(env);
 
-  const insert: Record<string, unknown> = { place_id: placeId, created_by: createdBy };
-  if (execAt) insert.exec_at = execAt;
+  const created = await createMinimalPlace({
+    admin,
+    callerName: "consumer-web-schedule-project-creation",
+    googlePlaceId,
+    dedupeError: "This place is already on Mesita.",
+  });
+  if (!created.ok) return json(created.body, created.status);
 
-  const { data: row, error } = await admin
-    .from("scheduled_project_creations")
-    .insert(insert)
-    .select("id, exec_at")
-    .single();
-  if (error || !row) {
-    return json({ ok: false, error: `schedule_insert: ${error?.message ?? "no row"}` }, 500);
-  }
-
-  return json({ ok: true, scheduled_id: row.id, exec_at: row.exec_at }, 201);
+  // Old response contract: the stale client types `{ scheduled_id, exec_at }`
+  // (it reads neither — the Add flow is fire-and-forget — but keep the keys).
+  return json(
+    {
+      ok: true,
+      scheduled_id: created.place.id,
+      exec_at: new Date().toISOString(),
+      place: created.place,
+      enrichment: created.enrichment,
+    },
+    201,
+  );
 });
