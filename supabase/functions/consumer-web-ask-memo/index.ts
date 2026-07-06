@@ -50,6 +50,12 @@ import {
   GOOGLE_PLACES_TEXT_SEARCH_URL,
   readGooglePlacesKey,
 } from "../_shared/google-places.ts";
+// Local-time primitives shared with the Home recommenders (PR #214). mexicoZone
+// (lng → IANA zone) and openScore (open/unknown/closed → rank weight) used to be
+// duplicated here; import them so the timezone bands + "demote, don't hide"
+// weighting stay in lock-step across memo + swipe + map. daypartLabel /
+// localMoment below are memo's own prompt-facing display and stay local.
+import { mexicoZone, openScore } from "../_shared/local-time.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -152,23 +158,9 @@ function isRelevantPlace(
 // pitched dinner at 5am. We derive the user's LOCAL moment from their lng and
 // inject it as hidden prompt context + use it to demote closed spots.
 //
-// Timezone: coarse Mexico-centric mapping by longitude (the market). Intl
-// handles DST. Falls back to Central (Monterrey/CDMX — most of Mexico, and the
-// safest default when we have no location).
-function mexicoZone(lng: number | null): string {
-  if (lng === null) return "America/Mexico_City";
-  if (lng <= -110) return "America/Tijuana"; // Baja California / far NW (Pacific)
-  if (lng >= -89) return "America/Cancun"; // Quintana Roo (UTC−5, no DST)
-  return "America/Mexico_City"; // Central — Monterrey, CDMX, most of Mexico
-}
-
-// Rank weight for a card's live open state: open first, unknown neutral,
-// closed last. Keeps "demote, don't hide" — closed spots still appear.
-function openScore(openNow: boolean | null | undefined): number {
-  if (openNow === true) return 1;
-  if (openNow === false) return -1;
-  return 0; // unknown (no hours data) — neutral, never penalised
-}
+// mexicoZone (lng → IANA zone) and openScore (open/unknown/closed → rank
+// weight) are imported from ../_shared/local-time.ts so memo, swipe and map
+// share one timezone-band + "demote, don't hide" implementation.
 
 function daypartLabel(hour: number): string {
   if (hour < 5) return "the middle of the night";
