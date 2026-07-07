@@ -121,9 +121,28 @@ serveEnrichStage("contents", async (admin, env, row) => {
 
   // ━━━ S8 — persist the profile (direct UPDATE; this EF IS the DB layer) ━━━
   // Strip identity/timestamps so the DB owns them; keys absent are untouched
-  // (same contract as the retired enricher-agent-write-place-data hop).
-  const { id: _dropId, created_at: _dropCreated, updated_at: _dropUpdated, ...placeUpdate } =
-    place as Record<string, unknown> & { id?: unknown; created_at?: unknown; updated_at?: unknown };
+  // (same contract as the retired enricher-agent-write-place-data hop). Also strip
+  // phone/email: contacts come from Mesita input or the Google spine, and phone is
+  // persisted by the research stage alone (research-only = full re-enrich). The
+  // contents stage runs on every re-enrich mode, so it must NEVER write a contact —
+  // otherwise a lighter analysis/contents-only re-run would re-apply a stale
+  // phone/email from `gathered.place` and clobber a business edit. (The strip also
+  // covers place_research rows seeded before this change, whose gathered still
+  // carries phone/email.)
+  const {
+    id: _dropId,
+    created_at: _dropCreated,
+    updated_at: _dropUpdated,
+    phone: _dropPhone,
+    email: _dropEmail,
+    ...placeUpdate
+  } = place as Record<string, unknown> & {
+    id?: unknown;
+    created_at?: unknown;
+    updated_at?: unknown;
+    phone?: unknown;
+    email?: unknown;
+  };
   const { error: placeErr } = await admin.from("places").update(placeUpdate).eq("id", projectId);
   if (placeErr) {
     // Persist failed — the run is aborted here, so this failed beacon IS the

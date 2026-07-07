@@ -18,8 +18,10 @@
 //       (website CONTENT crawl retired — enrichment no longer reads the site)
 //
 // Output: place_research.gathered (partial place update + grounding + candidate
-// image pools + per-image metadata) → stage='analysis'. No places writes here —
-// persistence happens once, at the contents stage.
+// image pools + per-image metadata) → stage='analysis'. The profile persists once,
+// at the contents stage — the ONE exception is `phone`, written directly to places
+// here (see the Contacts note below): it must land only when research re-runs (a
+// full re-enrich = override), never on a lighter analysis/contents-only re-run.
 //
 // Contract: verify_jwt=true; requireInternalCaller gates the service-role bearer.
 //
@@ -176,15 +178,28 @@ serveEnrichStage("research", async (admin, _env, row) => {
   place.tripadvisor_url = resolvedTripAdvisor;
   place.yelp_url = resolvedYelp;
 
-  // Contacts: phone stays whatever Google gave us (from `...basics`), but only
-  // when present — a null Google phone must NOT clobber a Mesita-entered one, so
-  // drop the key entirely and let the partial UPDATE leave the DB value be. The
-  // enricher never owns email at all, so it never writes it.
-  if (!place.phone) delete place.phone;
+  // ━━━ Contacts — phone is persisted HERE, in the research stage only ━━━
+  // Phone + email come from Mesita input or the Google spine, never a web search.
+  // Only a full re-enrich runs the research stage; the lighter re-enrich modes
+  // (analysis / contents only) reuse the STORED `gathered` payload. So if phone
+  // rode `gathered.place` into the contents stage, every lighter re-run would
+  // re-apply a stale phone and clobber a business edit. Instead phone is written
+  // DIRECTLY to places here — i.e. only when research actually re-runs (full
+  // re-enrich = override) — and stripped from `gathered.place` so the contents
+  // stage never touches it. A null Google phone is never written (it would clobber
+  // a Mesita-entered number). Email is never written by the enricher at all.
+  if (basics.phone) {
+    const { error: phoneErr } = await admin
+      .from("places").update({ phone: basics.phone }).eq("id", projectId);
+    sources.contact_phone = phoneErr
+      ? { ok: false, error: phoneErr.message }
+      : { ok: true, source: "google" };
+  }
+  delete place.phone;
   delete place.email;
 
   const resolvedCount = ["facebook_url", "website_url", "opentable_url", "uber_eats_url"]
-    .filter((k) => !!place[k]).length + (resolvedInstagram ? 1 : 0) + (place.phone ? 1 : 0);
+    .filter((k) => !!place[k]).length + (resolvedInstagram ? 1 : 0) + (basics.phone ? 1 : 0);
 
   const igHandle = instagramHandleFromUrl(resolvedInstagram);
   const fbHandleCandidate = fbSlugCandidate(resolvedFacebook);
