@@ -168,7 +168,12 @@ serveEnrichStage("contents", async (admin, env, row) => {
   const assets = buildMediaAssets(gathered, analysis);
   let imagesSummary: string;
   const imagesMeta: Record<string, unknown> = {};
-  if (assets.length > 0) {
+  if (!cfg.saveImagesToStorage) {
+    // Admin turned Storage mirroring off — photos still render from their
+    // source URLs; we just don't copy binaries into the bucket.
+    imagesSummary = "image storage disabled (admin)";
+    imagesMeta.images = "disabled";
+  } else if (assets.length > 0) {
     const storeRes = await invokeArtificialCaller<{ queued?: number }>(
       env,
       "supabase-cron-enrich-place-contents",

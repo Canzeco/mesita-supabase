@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
   const { data, error } = await admin
     .from("app_settings")
     .select(
-      "auto_verify_ai_call, auto_verify_ai_email, auto_verify_video, atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n, updated_at",
+      "auto_verify_ai_call, auto_verify_ai_email, auto_verify_video, atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n, updated_at",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -62,6 +62,7 @@ Deno.serve(async (req) => {
     atlasAnalyzeGoogleImages: data.atlas_analyze_google_images,
     atlasAnalyzeInstagramImages: data.atlas_analyze_instagram_images,
     atlasSaveTotalImages: data.atlas_save_total_images,
+    atlasSaveImagesToStorage: data.atlas_save_images_to_storage,
     atlasImageAnalysisPrompt: data.atlas_image_analysis_prompt,
     atlasImageSortingPrompt: data.atlas_image_sorting_prompt,
     atlasSynthesisQuality: data.atlas_synthesis_quality,

@@ -12,6 +12,7 @@
 //   analyzeGoogleImages (1–10, ≤ gatherGoogleImages) /
 //     analyzeInstagramImages (1–30, ≤ gatherInstagramPosts)
 //   saveTotalImages (1–10, ≤ analyzeGoogle + analyzeInstagram) → atlas_save_total_images
+//   saveImagesToStorage (boolean) → atlas_save_images_to_storage (S9 Storage-mirror gate)
 //   discover{Website,Instagram,Facebook,Opentable,Ubereats}N (0–10, per-source
 //     Firecrawl Search candidate counts for link discovery)
 //   imageAnalysisPrompt / imageSortingPrompt
@@ -39,6 +40,8 @@ type Body = {
   analyzeGoogleImages?: number;
   analyzeInstagramImages?: number;
   saveTotalImages?: number;
+  // S9 gate — mirror the selected gallery into Supabase Storage (default true).
+  saveImagesToStorage?: boolean;
   imageAnalysisPrompt?: string;
   imageSortingPrompt?: string;
   synthesisQuality?: string;
@@ -121,6 +124,13 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: "saveTotalImages must be an integer 1-10" }, 400);
     }
     patch.atlas_save_total_images = n;
+  }
+
+  if (body.saveImagesToStorage !== undefined) {
+    if (typeof body.saveImagesToStorage !== "boolean") {
+      return json({ ok: false, error: "saveImagesToStorage must be a boolean" }, 400);
+    }
+    patch.atlas_save_images_to_storage = body.saveImagesToStorage;
   }
 
   if (body.analyzeGoogleImages !== undefined) {
@@ -279,7 +289,7 @@ Deno.serve(async (req) => {
     .update(patch)
     .eq("id", 1)
     .select(
-      "atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n, updated_at",
+      "atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n, updated_at",
     )
     .single();
   if (error) {
@@ -298,6 +308,7 @@ Deno.serve(async (req) => {
     atlasAnalyzeGoogleImages: data.atlas_analyze_google_images,
     atlasAnalyzeInstagramImages: data.atlas_analyze_instagram_images,
     atlasSaveTotalImages: data.atlas_save_total_images,
+    atlasSaveImagesToStorage: data.atlas_save_images_to_storage,
     atlasImageAnalysisPrompt: data.atlas_image_analysis_prompt,
     atlasImageSortingPrompt: data.atlas_image_sorting_prompt,
     atlasSynthesisQuality: data.atlas_synthesis_quality,

@@ -43,21 +43,37 @@ export const PHOTO_CEILING = 50;
 export const ENRICH_DESCRIPTION_TARGET_WORDS = 1000;
 export const ENRICH_DESCRIPTION_MAX = ENRICH_DESCRIPTION_TARGET_WORDS * 7;
 
-// Rough per-call cost estimates (USD). Used by the admin cost calculator —
-// approximate, not billing.
+// Per-call cost estimates (USD), from each provider's PUBLISHED price list
+// (verified 2026-07-07). MIRRORS the admin cost calculator's rate card
+// (mesita-web-admin `atlas-config/cost-model.ts`). Documentation only — no EF
+// reads this; approximate, not billing. Keep the two in sync.
+//
+// Sources: Google Maps Platform pricing list (Places API New, first tier) ·
+// Apify Store actor pages (pay-per-event) · Firecrawl pricing · Perplexity
+// Agent API pricing · OpenAI API pricing.
 export const COST = {
-  compass: 0.05, // Apify Google Maps (reviews + images)
-  instagram: 0.02, // Apify IG profile scraper
+  // Google — Places API (New). The S1 field mask requests reviews +
+  // editorial/generative/review summaries → billed Enterprise+Atmosphere
+  // ($25/1k), NOT Pro ($17/1k).
+  googleDetails: 0.025, // Place Details, Enterprise+Atmosphere SKU, $25/1k
+  googlePhoto: 0.007, // Place Photo (New) media fetch, $7/1k, per photo (≤10/place)
+  googleTimezone: 0.005, // Time Zone API, $5/1k
+  // Apify compass/crawler-google-places: $1.50/1k places + $0.20/place details +
+  // reviews $0.50/100 (maxReviews:100). ~0.30 typical, ~0.65 at 100 reviews.
+  compass: 0.3,
+  instagramProfile: 0.0026, // Apify instagram-profile-scraper, $2.60/1k results
+  instagramPost: 0.0027, // Apify instagram-post-scraper, $2.70/1k, per post (depth)
   // Identity verification of the IG candidate: the LLM judge plus, worst case,
   // a Perplexity fallback + a second IG scrape. Bundled into the IG reservation.
-  instagramVerify: 0.04,
-  facebook: 0.02, // Apify FB pages scraper
-  firecrawl: 0.01, // Firecrawl Search (S4 per-source channel candidate gather)
-  perplexity: 0.01, // Perplexity Agent (pro-search) validate+fill
-  synthesisEconomy: 0.005, // gpt-4o-mini synthesis
-  synthesisStandard: 0.03, // gpt-4o synthesis
-  visionPerImage: 0.002, // gpt-4o-mini vision, one image (detail:low)
-  sort: 0.003, // gpt-4o-mini text sort
+  instagramVerify: 0.01,
+  facebook: 0.01, // Apify facebook-pages-scraper, $10/1k pages, one page
+  firecrawlSearch: 0.001, // Firecrawl Search, 2 credits/10 results (~$0.0008/credit)
+  perplexity: 0.01, // Perplexity Agent (pro-search): web search $0.005 + sonar tokens
+  synthesisEconomy: 0.002, // gpt-4o-mini synthesis ($0.15/$0.60 per 1M in/out)
+  synthesisStandard: 0.028, // gpt-4o synthesis ($2.50/$10 per 1M in/out)
+  visionPerImage: 0.001, // gpt-4o-mini vision, one image (detail:low)
+  visionPerImageStandard: 0.008, // gpt-4o vision, one image
+  sort: 0.001, // gpt-4o-mini text sort / short judge
 } as const;
 
 // One photo candidate + which source it came from (drives the per-source
@@ -97,6 +113,9 @@ export type EnrichConfig = {
   };
   // SAVE cap — final count persisted, SOURCE-INDEPENDENT, after analyze + sort.
   saveTotalImages: number;
+  // S9 gate — mirror the selected gallery into Supabase Storage. When false the
+  // pipeline skips the upload and photos render from their source URLs only.
+  saveImagesToStorage: boolean;
   visionEnabled: boolean;
   // ANALYZE caps — how many gathered images per source go to vision.
   analyzeGoogleImages: number;
@@ -118,7 +137,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
   const { data: cfg } = await admin
     .from("app_settings")
     .select(
-      "atlas_synthesis_quality, atlas_vision_quality, atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n",
+      "atlas_synthesis_quality, atlas_vision_quality, atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -140,6 +159,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
       uber_eats_url: num(cfg?.atlas_discover_ubereats_n, 2),
     },
     saveTotalImages: num(cfg?.atlas_save_total_images, 20),
+    saveImagesToStorage: (cfg?.atlas_save_images_to_storage as boolean) ?? true,
     visionEnabled: (cfg?.atlas_image_vision_enabled as boolean) ?? true,
     analyzeGoogleImages: num(cfg?.atlas_analyze_google_images, 10),
     analyzeInstagramImages: num(cfg?.atlas_analyze_instagram_images, 10),
