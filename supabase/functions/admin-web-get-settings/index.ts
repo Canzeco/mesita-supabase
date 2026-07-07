@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
   const { data, error } = await admin
     .from("app_settings")
     .select(
-      "auto_verify_ai_call, auto_verify_ai_email, auto_verify_video, atlas_website_crawl_max_pages, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, updated_at",
+      "auto_verify_ai_call, auto_verify_ai_email, auto_verify_video, atlas_gather_google_images, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, updated_at",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -55,13 +55,10 @@ Deno.serve(async (req) => {
     autoVerifyAiCall: data.auto_verify_ai_call,
     autoVerifyAiEmail: data.auto_verify_ai_email,
     autoVerifyVideo: data.auto_verify_video,
-    atlasWebsiteCrawlMaxPages: data.atlas_website_crawl_max_pages,
     atlasGatherGoogleImages: data.atlas_gather_google_images,
-    atlasGatherWebsiteImages: data.atlas_gather_website_images,
     atlasGatherInstagramPosts: data.atlas_gather_instagram_posts,
     atlasImageVisionEnabled: data.atlas_image_vision_enabled,
     atlasAnalyzeGoogleImages: data.atlas_analyze_google_images,
-    atlasAnalyzeWebsiteImages: data.atlas_analyze_website_images,
     atlasAnalyzeInstagramImages: data.atlas_analyze_instagram_images,
     atlasSaveTotalImages: data.atlas_save_total_images,
     atlasImageAnalysisPrompt: data.atlas_image_analysis_prompt,

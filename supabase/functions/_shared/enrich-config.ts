@@ -52,7 +52,7 @@ export const COST = {
   // a Perplexity fallback + a second IG scrape. Bundled into the IG reservation.
   instagramVerify: 0.04,
   facebook: 0.02, // Apify FB pages scraper
-  firecrawl: 0.01, // Firecrawl scrape
+  firecrawl: 0.01, // Firecrawl scrape (S3 channel-discovery footer only)
   perplexity: 0.01, // Perplexity Agent (pro-search) validate+fill
   synthesisEconomy: 0.005, // gpt-4o-mini synthesis
   synthesisStandard: 0.03, // gpt-4o synthesis
@@ -81,15 +81,12 @@ export type EnrichConfig = {
   visionQuality: string;
   // GATHER caps — how many to PULL per source before anything else.
   gatherGoogleImages: number;
-  gatherWebsiteImages: number;
   gatherInstagramPosts: number;
-  websiteCrawlMaxPages: number;
   // SAVE cap — final count persisted, SOURCE-INDEPENDENT, after analyze + sort.
   saveTotalImages: number;
   visionEnabled: boolean;
   // ANALYZE caps — how many gathered images per source go to vision.
   analyzeGoogleImages: number;
-  analyzeWebsiteImages: number;
   analyzeInstagramImages: number;
   imageAnalysisPrompt: string;
   imageSortingPrompt: string;
@@ -108,7 +105,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
   const { data: cfg } = await admin
     .from("app_settings")
     .select(
-      "atlas_synthesis_quality, atlas_vision_quality, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_website_crawl_max_pages",
+      "atlas_synthesis_quality, atlas_vision_quality, atlas_gather_google_images, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -120,13 +117,10 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
     synthesisQuality: (cfg?.atlas_synthesis_quality as string | undefined) ?? "economy",
     visionQuality: (cfg?.atlas_vision_quality as string | undefined) ?? "economy",
     gatherGoogleImages: num(cfg?.atlas_gather_google_images, 10),
-    gatherWebsiteImages: num(cfg?.atlas_gather_website_images, 10),
     gatherInstagramPosts: num(cfg?.atlas_gather_instagram_posts, 10),
-    websiteCrawlMaxPages: Math.max(1, num(cfg?.atlas_website_crawl_max_pages, 5)),
     saveTotalImages: num(cfg?.atlas_save_total_images, 20),
     visionEnabled: (cfg?.atlas_image_vision_enabled as boolean) ?? true,
     analyzeGoogleImages: num(cfg?.atlas_analyze_google_images, 10),
-    analyzeWebsiteImages: num(cfg?.atlas_analyze_website_images, 10),
     analyzeInstagramImages: num(cfg?.atlas_analyze_instagram_images, 10),
     imageAnalysisPrompt:
       (cfg?.atlas_image_analysis_prompt as string | undefined)?.trim() || DEFAULT_ANALYSIS_PROMPT,

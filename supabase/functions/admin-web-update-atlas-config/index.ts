@@ -7,8 +7,8 @@
 // optional; only the keys present in the body are written, so the UI can
 // save one control at a time:
 //
-//   gatherGoogleImages / gatherWebsiteImages (≤10), gatherInstagramPosts (≤30)
-//   analyzeGoogleImages / analyzeWebsiteImages / analyzeInstagramImages (≤10)
+//   gatherGoogleImages (≤10), gatherInstagramPosts (≤30)
+//   analyzeGoogleImages (≤10) / analyzeInstagramImages (≤20)
 //   saveTotalImages (≤20)      → atlas_save_total_images (source-independent)
 //   imageAnalysisPrompt / imageSortingPrompt
 //
@@ -24,16 +24,12 @@ import {
 } from "../_shared/auth.ts";
 
 type Body = {
-  // Data depth
-  websiteCrawlMaxPages?: number;
   // Image funnel — GATHER (pull per source, ≤10)
   gatherGoogleImages?: number;
-  gatherWebsiteImages?: number;
   gatherInstagramPosts?: number;
   // Image funnel — ANALYZE (vision per source, ≤10) + final SAVE (≤20, all sources)
   imageVisionEnabled?: boolean;
   analyzeGoogleImages?: number;
-  analyzeWebsiteImages?: number;
   analyzeInstagramImages?: number;
   saveTotalImages?: number;
   imageAnalysisPrompt?: string;
@@ -82,32 +78,12 @@ Deno.serve(async (req) => {
     patch.atlas_gather_google_images = n;
   }
 
-  if (body.gatherWebsiteImages !== undefined) {
-    const n = intInRange(body.gatherWebsiteImages, 0, 10);
-    if (n === null) {
-      return json({ ok: false, error: "gatherWebsiteImages must be an integer 0-10" }, 400);
-    }
-    patch.atlas_gather_website_images = n;
-  }
-
   if (body.gatherInstagramPosts !== undefined) {
     const n = intInRange(body.gatherInstagramPosts, 0, 30);
     if (n === null) {
       return json({ ok: false, error: "gatherInstagramPosts must be an integer 0-30" }, 400);
     }
     patch.atlas_gather_instagram_posts = n;
-  }
-
-  // ── Data depth ────────────────────────────────────────────────────────
-  if (body.websiteCrawlMaxPages !== undefined) {
-    const n = intInRange(body.websiteCrawlMaxPages, 1, 20);
-    if (n === null) {
-      return json(
-        { ok: false, error: "websiteCrawlMaxPages must be an integer 1-20" },
-        400,
-      );
-    }
-    patch.atlas_website_crawl_max_pages = n;
   }
 
   // ── Analysis ──────────────────────────────────────────────────────────
@@ -132,14 +108,6 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: "analyzeGoogleImages must be an integer 0-10" }, 400);
     }
     patch.atlas_analyze_google_images = n;
-  }
-
-  if (body.analyzeWebsiteImages !== undefined) {
-    const n = intInRange(body.analyzeWebsiteImages, 0, 10);
-    if (n === null) {
-      return json({ ok: false, error: "analyzeWebsiteImages must be an integer 0-10" }, 400);
-    }
-    patch.atlas_analyze_website_images = n;
   }
 
   if (body.imageAnalysisPrompt !== undefined) {
@@ -211,7 +179,7 @@ Deno.serve(async (req) => {
     .update(patch)
     .eq("id", 1)
     .select(
-      "atlas_website_crawl_max_pages, atlas_gather_google_images, atlas_gather_website_images, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_website_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, updated_at",
+      "atlas_gather_google_images, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, updated_at",
     )
     .single();
   if (error) {
@@ -223,13 +191,10 @@ Deno.serve(async (req) => {
 
   return json({
     ok: true,
-    atlasWebsiteCrawlMaxPages: data.atlas_website_crawl_max_pages,
     atlasGatherGoogleImages: data.atlas_gather_google_images,
-    atlasGatherWebsiteImages: data.atlas_gather_website_images,
     atlasGatherInstagramPosts: data.atlas_gather_instagram_posts,
     atlasImageVisionEnabled: data.atlas_image_vision_enabled,
     atlasAnalyzeGoogleImages: data.atlas_analyze_google_images,
-    atlasAnalyzeWebsiteImages: data.atlas_analyze_website_images,
     atlasAnalyzeInstagramImages: data.atlas_analyze_instagram_images,
     atlasSaveTotalImages: data.atlas_save_total_images,
     atlasImageAnalysisPrompt: data.atlas_image_analysis_prompt,

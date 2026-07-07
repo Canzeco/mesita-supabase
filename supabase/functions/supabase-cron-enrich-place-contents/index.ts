@@ -4,8 +4,9 @@
 // place_research rows at stage='contents' and fires this EF with { project_id }.
 // It acks 202 immediately and runs the WRITE half in a background task:
 //
-//   S7  synthesis (About/details/menu, grounded ONLY in gathered material) +
-//       category inference + tag inference (closed vocabularies)
+//   S7  synthesis (About/details, grounded ONLY in gathered material — Google
+//       spine + reviews + SERP blurb + IG bio; no website/menu) + category
+//       inference + tag inference (closed vocabularies)
 //   S8  persist the enriched profile onto the places row (direct UPDATE — this
 //       EF is already the DB layer; no HTTP hop) + content_status='ready'
 //   S9  store images via supabase-edgefunc-store-place-images (kept as an EF call
@@ -57,7 +58,7 @@ serveEnrichStage("contents", async (admin, env, row) => {
   const place: Record<string, unknown> = { ...gathered.place };
   const name = (place.name ?? "").toString();
   const category = (place.category ?? null) as string | null;
-  const { igBio, googleReviewsText, siteMarkdown, serpSummary } = gathered.grounding;
+  const { igBio, googleReviewsText, serpSummary } = gathered.grounding;
 
   if (analysis.finalPhotos.length > 0) place.photos = analysis.finalPhotos;
 
@@ -70,7 +71,6 @@ serveEnrichStage("contents", async (admin, env, row) => {
     category,
     igBio,
     googleReviewsText,
-    siteMarkdown,
     serpSummary,
   });
   const sources: Record<string, unknown> = { ...gathered.sources, image_funnel: analysis.diag, synthesis: synthDiag };
@@ -89,9 +89,9 @@ serveEnrichStage("contents", async (admin, env, row) => {
       name,
       address: (place.address ?? null) as string | null,
       editorialSummary: (place.editorial_summary ?? null) as string | null,
-      // Best grounding available, in order: scraped material, then the
-      // About we just synthesized (it exists even when scraping was thin).
-      description: igBio || siteMarkdown.slice(0, 1200) ||
+      // Best grounding available, in order: the IG bio, then the About we just
+      // synthesized (it exists even when the other sources were thin).
+      description: igBio ||
         ((place.description ?? null) as string | null)?.slice(0, 1200) || null,
     }),
     inferPlaceTags(OPENAI_KEY, tagVocabulary, {
