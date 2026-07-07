@@ -140,17 +140,20 @@ export async function gatherInstagram(opts: {
 
   // Post depth (child D / MESITA-201): the profile scrape only embeds the first
   // grid page (~12 posts). When the admin "Instagram depth" knob asks for more,
-  // fetch the verified account's latest DEPTH via the dedicated post scraper
-  // (newest first; we rank that window by likes and keep the top `keepPosts`
-  // below). The embedded posts stay as the fallback so a posts-run failure never
-  // loses the images the profile call already delivered.
+  // fetch the verified account's latest DEPTH via the dedicated post scraper.
+  // The actor returns posts by RECENCY (newest first) — it has no sort-by-likes
+  // option — so we rank that window by likes ourselves and keep the top
+  // `keepPosts` below. `skipPinnedPosts` drops pinned posts, which are usually
+  // logos/announcements/promos rather than representative gallery shots. The
+  // embedded posts stay as the fallback so a posts-run failure never loses the
+  // images the profile call already delivered.
   let posts = Array.isArray(p.latestPosts) ? (p.latestPosts as Record<string, unknown>[]) : [];
   let postsSource = "profile-embedded";
   let postsError: string | null = null;
   if (gatherInstagramDepth > posts.length) {
     const postsRun = await runApifyActor<Record<string, unknown>>(
       APIFY_ACTORS.instagramPosts,
-      { username: [chosen.handle], resultsLimit: gatherInstagramDepth },
+      { username: [chosen.handle], resultsLimit: gatherInstagramDepth, skipPinnedPosts: true },
       apifyKey,
       60000,
     );
