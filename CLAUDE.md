@@ -14,6 +14,7 @@ Where things live: **Linear** (team Mesita, `MESITA-`) = work state · **Notion*
 
 ## This repo — mesita-supabase (DB · RLS · Edge Functions · source of truth)
 
+- **New here? Read [`ARCHITECTURE.md`](./ARCHITECTURE.md)** — the cross-repo system map (audiences, repo topology, EF caller taxonomy, data layer, the Enricher pipeline, agents, billing).
 - Run every `supabase` command from **inside this repo**. All Supabase files live only here — kill stray `supabase/` stubs elsewhere (a stray stub links against a divergent migration ledger).
 - **EF name = the ACL:** `actor-origin-verb-noun`, exactly one caller per endpoint from the closed set. `_shared/` holds shared code (internal naming free-form). Only `supabase-edgefunc-*` endpoints accept the internal caller; the origin propagates via `X-Internal-Caller`.
 - **Mirror + verify:** every cloud change (schema/RLS/EF) mirrors into this repo the same session. After any EF deploy, confirm cloud == repo (`get_edge_function`) — a smoke-test stub once silently clobbered prod.
