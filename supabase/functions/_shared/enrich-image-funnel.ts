@@ -436,7 +436,6 @@ function selectWithDiversity(
 // those into the Google bucket so they're never lost, capped at the Google cap.
 export async function runImageFunnel(opts: {
   googleImages: string[];
-  websiteImages: string[];
   instagramImages: string[];
   existingPhotos: string[];
   gatherGoogleImages: number;
@@ -447,13 +446,12 @@ export async function runImageFunnel(opts: {
   // Per-image describe model (admin "Image model" knob). Sort stays on the
   // cheap VISION_MODEL — matches the cost calculator.
   visionModel?: string;
-  analyze: { google: number; website: number; instagram: number };
+  analyze: { google: number; instagram: number };
   imageAnalysisPrompt: string;
   imageSortingPrompt: string;
 }): Promise<ImageFunnelResult> {
   const {
     googleImages,
-    websiteImages,
     instagramImages,
     existingPhotos,
     gatherGoogleImages,
@@ -477,7 +475,6 @@ export async function runImageFunnel(opts: {
     saved.push({ url, source });
   };
   for (const u of googleBucket) pushImg(u, "google");
-  for (const u of websiteImages) pushImg(u, "website");
   for (const u of instagramImages) pushImg(u, "instagram");
 
   const srcOf = new Map<string, Img["source"]>(saved.map((s) => [s.url, s.source]));
@@ -494,9 +491,11 @@ export async function runImageFunnel(opts: {
   };
 
   if (runVision && openaiKey && saved.length > 1) {
+    // "website" retained in the source union for historical media assets, but
+    // enrichment no longer gathers website images — its analyze cap is always 0.
     const caps: Record<Img["source"], number> = {
       google: analyze.google,
-      website: analyze.website,
+      website: 0,
       instagram: analyze.instagram,
     };
     const used: Record<Img["source"], number> = { google: 0, website: 0, instagram: 0 };

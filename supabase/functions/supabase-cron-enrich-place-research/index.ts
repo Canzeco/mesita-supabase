@@ -12,7 +12,8 @@
 //   S3  channel discovery (website-first Firecrawl + one Perplexity fill) +
 //       phone/email last-resort lookups
 //   S4  parallel gathers: Instagram (Apify + identity judge) ‖ Facebook (Apify)
-//       ‖ Website (Firecrawl crawl + image extraction)
+//       (website CONTENT crawl retired — enrichment no longer reads the site;
+//        S3 still scrapes the footer for social/reservation links)
 //
 // Output: place_research.gathered (partial place update + grounding + candidate
 // image pools + per-image metadata) → stage='analysis'. No places writes here —
@@ -37,7 +38,6 @@ import { gatherGoogleMaps } from "../_shared/enrich-google.ts";
 import { gatherSerpSummary } from "../_shared/enrich-serp.ts";
 import { gatherInstagram, type InstagramResult } from "../_shared/enrich-instagram.ts";
 import { type FacebookResult, gatherFacebook } from "../_shared/enrich-facebook.ts";
-import { gatherWebsite, type WebsiteResult } from "../_shared/enrich-website.ts";
 import {
   advanceResearchStage,
   failResearchRow,
@@ -205,14 +205,16 @@ serveEnrichStage("research", async (admin, _env, row) => {
   const igHandle = instagramHandleFromUrl(resolvedInstagram);
   const fbHandleCandidate = fbSlugCandidate(resolvedFacebook);
 
-  // ━━━ S4 — parallel source gather: IG ‖ FB ‖ Website ━━━
+  // ━━━ S4 — parallel source gather: IG ‖ FB ━━━
+  // Website CONTENT is no longer gathered: enrichment builds description/tags/
+  // category from the Google spine + reviews + the Perplexity SERP blurb (+ IG),
+  // and never scrapes the site body. S3 above still Firecrawl-scrapes the footer
+  // to resolve social/reservation links.
   const runInstagram = !!APIFY_KEY && (!!igHandle || !!fbHandleCandidate || !!PERPLEXITY_KEY);
   const runFacebook = !!APIFY_KEY && !!resolvedFacebook;
-  const runWebsite = !!FIRECRAWL_KEY && !!resolvedWebsite;
 
   let ig: InstagramResult | null = null;
   let fb: FacebookResult | null = null;
-  let web: WebsiteResult | null = null;
   await Promise.all([
     (async () => {
       if (!runInstagram) return;
@@ -230,23 +232,11 @@ serveEnrichStage("research", async (admin, _env, row) => {
       if (!runFacebook) return;
       fb = await gatherFacebook({ apifyKey: APIFY_KEY!, facebookUrl: resolvedFacebook! });
     })(),
-    (async () => {
-      if (!runWebsite) return;
-      web = await gatherWebsite({
-        firecrawlKey: FIRECRAWL_KEY!,
-        openaiKey: OPENAI_KEY,
-        websiteUrl: resolvedWebsite!,
-        websiteCrawlMaxPages: cfg.websiteCrawlMaxPages,
-        gatherWebsiteImages: cfg.gatherWebsiteImages,
-      });
-    })(),
   ]);
   const igR = ig as InstagramResult | null;
   const fbR = fb as FacebookResult | null;
-  const webR = web as WebsiteResult | null;
   if (igR) sources.apify_instagram = igR.diag;
   if (fbR) sources.apify_facebook = fbR.diag;
-  if (webR) sources.firecrawl = webR.diag;
 
   // Numeric source facts + verified IG.
   if (reviews.length > 0) {
@@ -278,7 +268,7 @@ serveEnrichStage("research", async (admin, _env, row) => {
   // function. Summarises everything gathered; granular per-source diag lives
   // in gathered->sources.
   await reportEnrichmentStep(admin, projectId, "S1", "gather", "completed",
-    `Research complete for “${name}” — ${basics.photos.length} Google photo(s), ${reviews.length} review(s), ${resolvedCount} link/contact field(s); Instagram ${igMark}, Facebook ${fbOk ? "✓" : "—"}, website ${webR ? "✓" : "—"}.`,
+    `Research complete for “${name}” — ${basics.photos.length} Google photo(s), ${reviews.length} review(s), ${resolvedCount} link/contact field(s); Instagram ${igMark}, Facebook ${fbOk ? "✓" : "—"}.`,
     {
       photoCount: basics.photos.length,
       reviews: reviews.length,
@@ -287,7 +277,6 @@ serveEnrichStage("research", async (admin, _env, row) => {
       instagram: !!igR?.verifiedInstagramUrl,
       instagram_unverified: igUnverifiedFallback,
       facebook: fbOk,
-      website: !!webR,
     });
 
   // ━━━ hand off to the analysis stage ━━━
@@ -296,17 +285,14 @@ serveEnrichStage("research", async (admin, _env, row) => {
     grounding: {
       igBio: igR?.igBio ?? "",
       googleReviewsText,
-      siteMarkdown: webR?.siteMarkdown ?? "",
       serpSummary,
     },
     images: {
       google: googleImages,
-      website: webR?.websiteImages ?? [],
       instagram: igR?.instagramImages ?? [],
       existingPhotos: basics.photos,
     },
     instagramAssetMeta: mapToObject(igR?.instagramAssetMeta),
-    websiteAssetMeta: mapToObject(webR?.websiteAssetMeta),
     locationLine,
     sources,
   };

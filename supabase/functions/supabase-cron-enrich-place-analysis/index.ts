@@ -44,13 +44,12 @@ serveEnrichStage("analysis", async (admin, _env, row) => {
   const cfg = await loadEnrichConfig(admin);
 
   const maxVisionImages = cfg.visionEnabled
-    ? cfg.analyzeGoogleImages + cfg.analyzeWebsiteImages + cfg.analyzeInstagramImages
+    ? cfg.analyzeGoogleImages + cfg.analyzeInstagramImages
     : 0;
   const runVision = cfg.visionEnabled && !!OPENAI_KEY && maxVisionImages > 0;
 
   const funnel = await runImageFunnel({
     googleImages: gathered.images.google,
-    websiteImages: gathered.images.website,
     instagramImages: gathered.images.instagram,
     existingPhotos: gathered.images.existingPhotos,
     gatherGoogleImages: cfg.gatherGoogleImages,
@@ -61,7 +60,6 @@ serveEnrichStage("analysis", async (admin, _env, row) => {
     visionModel: visionModelFor(cfg.visionQuality),
     analyze: {
       google: cfg.analyzeGoogleImages,
-      website: cfg.analyzeWebsiteImages,
       instagram: cfg.analyzeInstagramImages,
     },
     imageAnalysisPrompt: cfg.imageAnalysisPrompt,

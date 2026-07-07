@@ -56,12 +56,10 @@ export type GatheredPayload = {
   grounding: {
     igBio: string;
     googleReviewsText: string;
-    siteMarkdown: string;
     serpSummary: string | null;
   };
   images: {
     google: string[];
-    website: string[];
     instagram: string[];
     existingPhotos: string[];
   };
@@ -71,7 +69,6 @@ export type GatheredPayload = {
     caption: string | null;
     source_metadata: Record<string, unknown>;
   }>;
-  websiteAssetMeta: Record<string, Record<string, unknown>>;
   locationLine: string;
   sources: Record<string, unknown>;
 };
@@ -232,14 +229,13 @@ export function buildMediaAssets(
 ): MediaAssetPayload[] {
   return analysis.saved.map((img) => {
     const im = gathered.instagramAssetMeta[img.url];
-    const wm = gathered.websiteAssetMeta[img.url];
     return {
       source: img.source,
       source_url: img.url,
       likes_count: im?.likes_count ?? null,
       caption: im?.caption ?? null,
       analysis: analysis.imageAnalysisByUrl[img.url] ?? null,
-      source_metadata: im?.source_metadata ?? wm ?? null,
+      source_metadata: im?.source_metadata ?? null,
     };
   });
 }
