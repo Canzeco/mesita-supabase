@@ -8,9 +8,10 @@
 // save one control at a time:
 //
 //   gatherGoogleImages (1–10)
-//   gatherInstagramDepth (1–30, download) / gatherInstagramPosts (1–30, keep ≤ depth)
+//   gatherInstagramDepth (1–50, download) / gatherInstagramPosts (1–50, keep ≤ depth)
+//   gatherReviews (0–100) → atlas_gather_reviews (Apify Google reviews pulled)
 //   analyzeGoogleImages (1–10, ≤ gatherGoogleImages) /
-//     analyzeInstagramImages (1–30, ≤ gatherInstagramPosts)
+//     analyzeInstagramImages (1–50, ≤ gatherInstagramPosts)
 //   saveTotalImages (1–10, ≤ analyzeGoogle + analyzeInstagram) → atlas_save_total_images
 //   saveImagesToStorage (boolean) → atlas_save_images_to_storage (S9 Storage-mirror gate)
 //   discover{Website,Instagram,Facebook,Opentable,Ubereats}N (0–10, per-source
@@ -34,6 +35,8 @@ type Body = {
   gatherGoogleImages?: number;
   gatherInstagramDepth?: number;
   gatherInstagramPosts?: number;
+  // Google reviews pulled by the Apify Maps scrape (0–100).
+  gatherReviews?: number;
   // Image funnel — ANALYZE (per source: Google ≤ its keep, IG ≤ its keep) +
   // final SAVE (1–10, ≤ analyzed total, all sources).
   imageVisionEnabled?: boolean;
@@ -103,19 +106,27 @@ Deno.serve(async (req) => {
   }
 
   if (body.gatherInstagramDepth !== undefined) {
-    const n = intInRange(body.gatherInstagramDepth, 1, 30);
+    const n = intInRange(body.gatherInstagramDepth, 1, 50);
     if (n === null) {
-      return json({ ok: false, error: "gatherInstagramDepth must be an integer 1-30" }, 400);
+      return json({ ok: false, error: "gatherInstagramDepth must be an integer 1-50" }, 400);
     }
     patch.atlas_gather_instagram_depth = n;
   }
 
   if (body.gatherInstagramPosts !== undefined) {
-    const n = intInRange(body.gatherInstagramPosts, 1, 30);
+    const n = intInRange(body.gatherInstagramPosts, 1, 50);
     if (n === null) {
-      return json({ ok: false, error: "gatherInstagramPosts must be an integer 1-30" }, 400);
+      return json({ ok: false, error: "gatherInstagramPosts must be an integer 1-50" }, 400);
     }
     patch.atlas_gather_instagram_posts = n;
+  }
+
+  if (body.gatherReviews !== undefined) {
+    const n = intInRange(body.gatherReviews, 0, 100);
+    if (n === null) {
+      return json({ ok: false, error: "gatherReviews must be an integer 0-100" }, 400);
+    }
+    patch.atlas_gather_reviews = n;
   }
 
   // ── Analysis ──────────────────────────────────────────────────────────
@@ -164,9 +175,9 @@ Deno.serve(async (req) => {
   }
 
   if (body.analyzeInstagramImages !== undefined) {
-    const n = intInRange(body.analyzeInstagramImages, 1, 30);
+    const n = intInRange(body.analyzeInstagramImages, 1, 50);
     if (n === null) {
-      return json({ ok: false, error: "analyzeInstagramImages must be an integer 1-30" }, 400);
+      return json({ ok: false, error: "analyzeInstagramImages must be an integer 1-50" }, 400);
     }
     patch.atlas_analyze_instagram_images = n;
   }
@@ -314,7 +325,7 @@ Deno.serve(async (req) => {
     .update(patch)
     .eq("id", 1)
     .select(
-      "atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_perplexity_preset, atlas_per_run_cost_cap_usd, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n, updated_at",
+      "atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_gather_reviews, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_perplexity_preset, atlas_per_run_cost_cap_usd, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n, updated_at",
     )
     .single();
   if (error) {
@@ -329,6 +340,7 @@ Deno.serve(async (req) => {
     atlasGatherGoogleImages: data.atlas_gather_google_images,
     atlasGatherInstagramDepth: data.atlas_gather_instagram_depth,
     atlasGatherInstagramPosts: data.atlas_gather_instagram_posts,
+    atlasGatherReviews: data.atlas_gather_reviews,
     atlasImageVisionEnabled: data.atlas_image_vision_enabled,
     atlasAnalyzeGoogleImages: data.atlas_analyze_google_images,
     atlasAnalyzeInstagramImages: data.atlas_analyze_instagram_images,

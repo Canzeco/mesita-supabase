@@ -17,15 +17,17 @@ export async function gatherGoogleMaps(opts: {
   apifyKey: string;
   placeId: string;
   gatherGoogleImages: number;
+  maxReviews?: number;
 }): Promise<GoogleMapsResult> {
   const { apifyKey, placeId, gatherGoogleImages } = opts;
-  // 100 reviews + images is a MINUTES-scale crawl — 120 s cap, not the 45 s
-  // default (the old 60 s cap starved healthy runs).
+  const maxReviews = Math.max(0, opts.maxReviews ?? 100);
+  // Up to 100 reviews + images is a MINUTES-scale crawl — 120 s cap, not the
+  // 45 s default (the old 60 s cap starved healthy runs).
   const run = await runApifyActor<Record<string, unknown>>(
     APIFY_ACTORS.googleMaps,
     {
       placeIds: [placeId],
-      maxReviews: 100,
+      maxReviews,
       maxImages: Math.max(0, gatherGoogleImages),
       language: "es",
       reviewsSort: "newest",
