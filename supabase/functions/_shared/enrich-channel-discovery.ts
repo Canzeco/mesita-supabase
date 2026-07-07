@@ -286,6 +286,7 @@ export async function selectChannels(
     siblings?: Partial<ChannelMap>;
     serpContext?: string;
     website?: string | null;
+    preset?: string;
   } = {},
 ): Promise<{ channels: Partial<ChannelMap> }> {
   const fields = CHANNEL_FIELDS.filter((f) => want.has(f));
@@ -350,6 +351,7 @@ export async function selectChannels(
   const res = await callPerplexityAgent(key, input, schema, {
     instructions: AGENT_Y_INSTRUCTIONS,
     maxSteps: 10,
+    preset: opts.preset,
   });
   if (!res) return { channels: {} };
 
@@ -380,6 +382,7 @@ export async function resolveChannels(opts: {
   category: string | null;
   serpContext?: string;
   discoverCandidates: DiscoverCandidateCounts;
+  perplexityPreset?: string;
   have: {
     instagram: string | null;
     facebook: string | null;
@@ -446,7 +449,7 @@ export async function resolveChannels(opts: {
       { name, locationLine, category },
       missing(),
       pools,
-      { siblings, serpContext, website: out.website_url },
+      { siblings, serpContext, website: out.website_url, preset: opts.perplexityPreset },
     );
     for (const f of CHANNEL_FIELDS) fill(f, sel.channels[f] ?? null, "perplexity");
   } else if (firecrawlKey) {

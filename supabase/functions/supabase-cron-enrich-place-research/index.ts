@@ -123,7 +123,7 @@ serveEnrichStage("research", async (admin, _env, row) => {
   })();
 
   if (PERPLEXITY_KEY) {
-    const serp = await gatherSerpSummary({ perplexityKey: PERPLEXITY_KEY, name, locationLine, category });
+    const serp = await gatherSerpSummary({ perplexityKey: PERPLEXITY_KEY, name, locationLine, category, perplexityPreset: cfg.perplexityPreset });
     serpSummary = serp.summary;
     sources.serp = serp.diag;
   }
@@ -157,6 +157,7 @@ serveEnrichStage("research", async (admin, _env, row) => {
       category,
       serpContext: serpSummary ?? undefined,
       discoverCandidates: cfg.discoverCandidates,
+      perplexityPreset: cfg.perplexityPreset,
       have: {
         instagram: resolvedInstagram,
         facebook: resolvedFacebook,
