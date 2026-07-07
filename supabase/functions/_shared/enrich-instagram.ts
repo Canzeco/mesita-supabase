@@ -13,7 +13,7 @@ import { APIFY_ACTORS, instagramHandleFromUrl, runApifyActor } from "./apify.ts"
 import { numOf, safeParseJson } from "./parse-utils.ts";
 import { domainOf, fbSlugCandidate } from "./channels.ts";
 import { OPENAI_URL, VISION_MODEL } from "./enrich-config.ts";
-import { fillMissingChannels } from "./enrich-channel-discovery.ts";
+import { selectChannels } from "./enrich-channel-discovery.ts";
 
 export type InstagramPlaceCtx = {
   name: string;
@@ -45,6 +45,9 @@ export async function gatherInstagram(opts: {
   place: InstagramPlaceCtx;
   igHandle: string | null;
   fbHandleCandidate: string | null;
+  // DEPTH = posts pulled from the scrape (preselection window); POSTS = kept after
+  // the likes-sort (keep ≤ depth). See enrich-config (child D / MESITA-201).
+  gatherInstagramDepth: number;
   gatherInstagramPosts: number;
 }): Promise<InstagramResult> {
   const {
@@ -54,8 +57,11 @@ export async function gatherInstagram(opts: {
     place,
     igHandle,
     fbHandleCandidate,
+    gatherInstagramDepth,
     gatherInstagramPosts,
   } = opts;
+  // Never keep more than we downloaded.
+  const keepPosts = Math.min(gatherInstagramPosts, gatherInstagramDepth);
   const instagramAssetMeta = new Map<string, InstagramAssetMeta>();
   const tried = new Set<string>();
   // handle → API-level failure ("<status>: <body head>"). When EVERY tried
@@ -94,13 +100,13 @@ export async function gatherInstagram(opts: {
   }
   // 3) Last resort: ask Perplexity for the right account + verify it.
   if (!chosen?.ok && perplexityKey) {
-    const pp = await fillMissingChannels(
+    const pp = await selectChannels(
       perplexityKey,
       { name: place.name, locationLine: place.locationLine, category: place.category },
       new Set(["instagram_url"]),
       {},
     );
-    const alt = await attempt(instagramHandleFromUrl(pp.instagram_url ?? null));
+    const alt = await attempt(instagramHandleFromUrl(pp.channels.instagram_url ?? null));
     chosen = alt?.ok ? alt : (chosen ?? alt);
   }
 
@@ -132,19 +138,19 @@ export async function gatherInstagram(opts: {
   const igFollowers = numOf(p.followersCount);
   const igBio = typeof p.biography === "string" ? p.biography : "";
 
-  // Post depth (MESITA-131): the profile scrape only embeds the first grid
-  // page (~12 posts). When the admin "Instagram posts" knob asks for more,
-  // fetch the verified account's latest N via the dedicated post scraper
-  // (newest first; we rank that window by likes below). The embedded posts
-  // stay as the fallback so a posts-run failure never loses the images the
-  // profile call already delivered.
+  // Post depth (child D / MESITA-201): the profile scrape only embeds the first
+  // grid page (~12 posts). When the admin "Instagram depth" knob asks for more,
+  // fetch the verified account's latest DEPTH via the dedicated post scraper
+  // (newest first; we rank that window by likes and keep the top `keepPosts`
+  // below). The embedded posts stay as the fallback so a posts-run failure never
+  // loses the images the profile call already delivered.
   let posts = Array.isArray(p.latestPosts) ? (p.latestPosts as Record<string, unknown>[]) : [];
   let postsSource = "profile-embedded";
   let postsError: string | null = null;
-  if (gatherInstagramPosts > posts.length) {
+  if (gatherInstagramDepth > posts.length) {
     const postsRun = await runApifyActor<Record<string, unknown>>(
       APIFY_ACTORS.instagramPosts,
-      { username: [chosen.handle], resultsLimit: gatherInstagramPosts },
+      { username: [chosen.handle], resultsLimit: gatherInstagramDepth },
       apifyKey,
       60000,
     );
@@ -168,7 +174,7 @@ export async function gatherInstagram(opts: {
       (po) => typeof po.displayUrl === "string" && (po.displayUrl as string).startsWith("http"),
     )
     .sort((a, b) => (numOf(b.likesCount) ?? 0) - (numOf(a.likesCount) ?? 0))
-    .slice(0, gatherInstagramPosts);
+    .slice(0, keepPosts);
   const instagramImages = orderedPosts.map((po) => po.displayUrl as string);
   for (const po of orderedPosts) {
     const url = po.displayUrl as string;

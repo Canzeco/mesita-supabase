@@ -1,35 +1,34 @@
-// Atlas channel URL discovery — Step S3, WEBSITE-FIRST: a place's own site footer
-// is the highest-precision source of its official channels, so we anchor on the
-// website, classify its outbound links, then make ONE Perplexity Sonar call — P3,
-// the niche gap-filler — to fill only what's still missing. Every URL is host + shape
-// validated before it's trusted. No scoring engine, no multi-pass FP/FN review.
+// Atlas channel URL discovery — Steps S4 (gather) + S5 (select). New model
+// (MESITA-197): NO website-footer scraping. Link discovery gathers candidates
+// with Firecrawl Search — PER SOURCE, count-controlled — then a SINGLE Perplexity
+// Agent Y "Review & Select Links" pass reviews every candidate pool and picks the
+// one official URL per field (or null). Phone + email ride the same Agent Y pass.
 //
-//   Phase 0  SEED      keep anything already supplied (Google/Mesita); freeze it.
-//   Phase 1  ANCHOR    if no website, one Firecrawl search to find it.
-//   Phase 2  FOOTER    scrape the site, classifyLinks() the footer, validate.
-//   Phase 3  FILL      one Perplexity Sonar (sonar-pro) structured judge for fields
-//                      still missing, grounded on Firecrawl candidate URLs + an
-//                      own-account-over-group rule. Benchmarked winner (linklab
-//                      strategy C) over the older Agent fill. (no Perplexity key →
-//                      degraded per-field Firecrawl search)
+//   Phase 0  SEED     keep anything already supplied (Google/Mesita); freeze it.
+//   S4       GATHER   one Firecrawl Search per still-missing source (per-source N
+//                     from config); shape-validate + dedup into a candidate pool.
+//   S5       SELECT   one Perplexity Agent Y pass reviews the pools + web context
+//                     and returns the best URL per field + phone + email.
+//                     Leniency: FALSE POSITIVES > FALSE NEGATIVES — keep a
+//                     plausible official link over dropping a correct one; null
+//                     ONLY when nothing in-hand is even plausibly this place's.
 //
-// Phone + email are NOT URLs; they ride outside the channel set as last-resort
-// Perplexity lookups (discoverPhonePerplexity / discoverEmailPerplexity), used
-// by the orchestrator only when the seed + Google gave nothing.
+// Degraded leg (no Perplexity key): per-field Firecrawl Search, first shape-valid
+// candidate wins (channels only; phone/email need the agent). Every URL — from the
+// agent answer, its citations, or the candidate pool — passes validateFieldUrl
+// (host + shape) before it is trusted.
 
 import {
   canonicaliseUrl,
-  classifyLinks,
   domainOf,
   pickChannel,
   pickFacebook,
   pickInstagram,
   pickWebsite,
 } from "./channels.ts";
-import { firecrawlScrape, firecrawlSearch } from "./firecrawl.ts";
+import { firecrawlSearch } from "./firecrawl.ts";
 import { callPerplexityAgent } from "./perplexity-agent.ts";
-import { callPerplexityChat } from "./perplexity-chat.ts";
-import { dedup, safeParseJson } from "./parse-utils.ts";
+import { dedup } from "./parse-utils.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,12 +43,17 @@ export type ChannelField =
   | "yelp_url";
 
 type ChannelMap = Record<ChannelField, string | null>;
-type ChannelSource = "seed" | "website" | "search" | "perplexity";
+type ChannelSource = "seed" | "search" | "perplexity";
 
-// Channels the discovery pass actively searches for (footer harvest, Perplexity
-// fill, Firecrawl fill all iterate this list). Yelp / TikTok / TripAdvisor are
-// TEMPORARILY disabled — we don't discover them for the moment, so their columns
-// stay null. To re-enable, just add the three "*_url" entries back here; the
+// Per-source Firecrawl candidate counts (child C). Keyed to the active fields.
+export type DiscoverCandidateCounts = Record<
+  "website_url" | "instagram_url" | "facebook_url" | "opentable_url" | "uber_eats_url",
+  number
+>;
+
+// Channels the discovery pass actively searches for. Yelp / TikTok / TripAdvisor
+// are TEMPORARILY disabled — we don't discover them for the moment, so their
+// columns stay null. To re-enable, add the three "*_url" entries back here; the
 // field hints / pickChannel cases / query map below are left in place for that.
 const CHANNEL_FIELDS: ChannelField[] = [
   "website_url",
@@ -59,8 +63,7 @@ const CHANNEL_FIELDS: ChannelField[] = [
   "uber_eats_url",
 ];
 
-// Per-field search term used to gather candidate URLs (Phase 3 grounding + the
-// no-Perplexity degraded leg).
+// Per-field search term used to gather candidate URLs.
 const CHANNEL_SEARCH_TERM: Record<ChannelField, string> = {
   website_url: "official website",
   instagram_url: "instagram",
@@ -72,9 +75,29 @@ const CHANNEL_SEARCH_TERM: Record<ChannelField, string> = {
   yelp_url: "yelp",
 };
 
+// Human-readable field spec for the Agent Y selection prompt.
+const FIELD_SPEC: Record<ChannelField, string> = {
+  website_url: "website_url: the place's own official website (its homepage domain).",
+  instagram_url:
+    "instagram_url: the place's Instagram profile (instagram.com/<handle>). A brand/franchise main account is acceptable.",
+  facebook_url: "facebook_url: the place's official Facebook page.",
+  opentable_url:
+    "opentable_url: the canonical OpenTable restaurant page (opentable.com/r/… or a country domain). A brand page is acceptable.",
+  uber_eats_url:
+    "uber_eats_url: the canonical Uber Eats store page (ubereats.com/.../store/...).",
+  tiktok_url:
+    "tiktok_url: the place's TikTok profile (tiktok.com/@handle), never a single video.",
+  tripadvisor_url:
+    "tripadvisor_url: the place's TripAdvisor detail page (a Restaurant_Review / -d… page, not a city or category list).",
+  yelp_url: "yelp_url: the place's Yelp business page (yelp.com/biz/<slug>).",
+};
+
 export type ResolvedChannels = ChannelMap & {
+  // Phone + email now resolved in the SAME Agent Y pass (child B fold).
+  phone: string | null;
+  email: string | null;
   // Diagnostics only (orchestrator stuffs these into sources.discovery).
-  via: Partial<Record<ChannelField, ChannelSource>>;
+  via: Partial<Record<ChannelField | "phone" | "email", ChannelSource>>;
   provenance: Partial<Record<ChannelField, { source: ChannelSource; url: string }>>;
 };
 
@@ -129,8 +152,8 @@ function pathIncludes(url: string, frag: string): boolean {
 }
 
 // Canonicalise + host-route + shape-gate a candidate for one field. Returns the
-// canonical URL or null. The single gate every candidate (footer, Perplexity
-// answer, citation, degraded search) passes through before it is trusted.
+// canonical URL or null. The single gate every candidate (Agent answer, citation,
+// candidate pool, degraded search) passes through before it is trusted.
 export function validateFieldUrl(field: ChannelField, rawUrl: string): string | null {
   const canon = canonicaliseUrl(rawUrl);
   if (!canon) return null;
@@ -172,7 +195,7 @@ function firstValidFromList(field: ChannelField, urls: string[]): string | null 
   return null;
 }
 
-// Minimal tokeniser for the one place we still name-match: the website anchor.
+// Minimal tokeniser for the one place we still name-match: website ranking.
 function nameTokens(s: string): string[] {
   return s
     .toLowerCase()
@@ -190,10 +213,10 @@ function mainDomainLabel(host: string): string {
 }
 
 // Fraction of a candidate host's main-label letters that the place-name tokens
-// account for. A bare substring match is too loose — "cosmo" is inside the
-// unrelated "cosmoprofbeauty" — so we require the name to COVER a strong majority
-// of the label. Rejects cosmoprofbeauty (0.33) while accepting cosmosanpedro
-// (1.0) or cosmosp (0.71).
+// account for. Used only as a SOFT ranking signal now (footer harvest is gone, so
+// a slightly-wrong website no longer poisons downstream) — we surface the best
+// name-matched website candidate first so Agent Y anchors on it, but never hard-
+// drop on it: FP > FN. "cosmosanpedro" → 1.0, "cosmoprofbeauty" → 0.33.
 function hostNameCoverage(host: string, name: string): number {
   const letters = mainDomainLabel(host).replace(/[^a-z0-9]/g, "");
   const toks = nameTokens(name);
@@ -210,208 +233,164 @@ function hostNameCoverage(host: string, name: string): number {
   return covered / letters.length;
 }
 
-// ── Phase 1 — anchor the official website ────────────────────────────────────
-// One Firecrawl search. Keep a result whose host is strongly name-matched
-// (guards against harvesting a DIFFERENT business's footer); none → no website.
-async function findWebsite(
+// ── S4 — per-source candidate gather (Firecrawl Search) ──────────────────────
+// One Firecrawl Search per still-missing field, count-controlled by the per-source
+// config knob. Shape-validate + dedup into a per-field candidate pool. Website
+// candidates are name-ranked (best coverage first) so Agent Y anchors correctly.
+async function gatherCandidates(
   firecrawlKey: string,
   name: string,
   city: string | null,
-): Promise<string | null> {
+  fields: ChannelField[],
+  counts: DiscoverCandidateCounts,
+): Promise<Partial<Record<ChannelField, string[]>>> {
   const scope = [name, city ?? ""].map((s) => s.trim()).filter(Boolean).join(" ");
-  const runs = await Promise.all([
-    firecrawlSearch(firecrawlKey, `${scope} official website`, 5),
-    firecrawlSearch(firecrawlKey, `${name} website`, 5),
-  ]);
-  const results = dedup(runs.flat());
-  const sites = results
-    .map((u) => pickWebsite([u]))
-    .filter((u): u is string => !!u);
-  if (!sites.length) return null;
-  // Require the candidate host's main label to be strongly EXPLAINED by the place
-  // name. A loose substring match ("cosmo" ⊂ "cosmoprofbeauty") once resolved
-  // "Cosmo San Pedro" to a beauty-supply store. No confident match → return null
-  // (no website) rather than guessing sites[0]: a wrong site poisons footer
-  // harvest + website images downstream.
-  const named = sites.find((u) => hostNameCoverage(domainOf(u) ?? "", name) >= 0.55);
-  return named ?? null;
-}
-
-// ── Phase 2 — harvest the website footer ─────────────────────────────────────
-// Scrape the homepage with onlyMainContent:false (footer links live outside main
-// content), classify the outbound links, shape-validate each wanted hit. Footer
-// links are trusted on host+shape alone — they are the links the place itself
-// points at. Best-effort: null website / scrape failure → {}.
-async function harvestFooter(
-  firecrawlKey: string,
-  website: string,
-  want: Set<ChannelField>,
-): Promise<Partial<ChannelMap>> {
-  const scraped = await firecrawlScrape(firecrawlKey, website, {
-    formats: ["markdown"],
-    onlyMainContent: false,
-    signalTimeoutMs: 15000,
+  const runs = await Promise.all(
+    fields.map((f) => {
+      const n = counts[f as keyof DiscoverCandidateCounts] ?? 5;
+      if (n <= 0) return Promise.resolve<string[]>([]);
+      return firecrawlSearch(firecrawlKey, `${scope} ${CHANNEL_SEARCH_TERM[f]}`, n);
+    }),
+  );
+  const pools: Partial<Record<ChannelField, string[]>> = {};
+  fields.forEach((f, i) => {
+    const valid = dedup(runs[i])
+      .map((u) => validateFieldUrl(f, u))
+      .filter((u): u is string => !!u);
+    if (f === "website_url") {
+      valid.sort((a, b) =>
+        hostNameCoverage(domainOf(b) ?? "", name) - hostNameCoverage(domainOf(a) ?? "", name)
+      );
+    }
+    pools[f] = dedup(valid);
   });
-  const links = dedup(Array.isArray(scraped?.links) ? scraped!.links : []).slice(0, 120);
-  if (!links.length) return {};
-  const classified = classifyLinks(links);
-  const out: Partial<ChannelMap> = {};
-  for (const f of CHANNEL_FIELDS) {
-    if (f === "website_url" || !want.has(f)) continue;
-    const raw = classified[f];
-    if (!raw) continue;
-    const valid = validateFieldUrl(f, raw);
-    if (valid) out[f] = valid;
-  }
-  return out;
+  return pools;
 }
 
-// ── Phase 3 — one Perplexity Sonar call to fill what's still missing ─────────
-// A single sonar-pro structured judge, web-grounded AND fed Firecrawl candidate
-// URLs, picks the official URL for each still-missing field. The schema is built
-// dynamically so it's only asked for the missing fields; already-resolved siblings
-// anchor the prompt. Every returned URL (JSON answer, then cited URLs, then the
-// Firecrawl candidates) is host + shape validated. Benchmarked winner (linklab
-// strategy C) over the older Agent fill. Also reused by S4 (enrich-instagram.ts)
-// to re-find an Instagram handle. Best-effort → {}.
-const FILL_FIELD_SPEC: Record<ChannelField, string> = {
-  website_url: "website_url: the place's official website. null if none.",
-  instagram_url:
-    "instagram_url: the place's Instagram profile (instagram.com/<handle>). A brand/franchise main account is acceptable. null if none.",
-  facebook_url: "facebook_url: the place's official Facebook page. null if none.",
-  opentable_url:
-    "opentable_url: the canonical OpenTable restaurant page (opentable.com/r/… or a country domain). Brand page acceptable. null if not on OpenTable.",
-  uber_eats_url:
-    "uber_eats_url: the canonical Uber Eats store page (ubereats.com/.../store/...). null if not on Uber Eats.",
-  tiktok_url:
-    "tiktok_url: the place's TikTok profile (tiktok.com/@handle), never a single video. null if none.",
-  tripadvisor_url:
-    "tripadvisor_url: the place's TripAdvisor detail page (a Restaurant_Review / -d… page, not a city or category list). null if none.",
-  yelp_url: "yelp_url: the place's Yelp business page (yelp.com/biz/<slug>). null if none.",
-};
+// ── S5 — Agent Y "Review & Select Links" (single Perplexity Agent pass) ──────
 
-function serpGroundingLine(serpContext?: string): string {
-  const s = (serpContext ?? "").trim();
-  if (!s) return "";
-  return `Background on the place (web-grounded, soft context — do not treat as the source of any URL):\n${s.slice(0, 600)}\n\n`;
-}
+const AGENT_Y_INSTRUCTIONS =
+  "You are a meticulous reviewer that resolves a place's OWN official online " +
+  "channels and public contact details. You are given candidate URLs found by " +
+  "search plus web access. For each requested field, review the candidates and " +
+  "the web, then return the single URL that is unmistakably THIS place's own " +
+  "official presence, or null. Output ONLY strict JSON matching the schema. " +
+  "Never fabricate a URL, number, or address.";
 
-export async function fillMissingChannels(
+export async function selectChannels(
   key: string,
   place: { name: string; locationLine: string; category: string | null },
   want: Set<ChannelField>,
-  siblings: Partial<ChannelMap> = {},
-  serpContext?: string,
-  firecrawlKey?: string,
-): Promise<Partial<ChannelMap>> {
+  candidates: Partial<Record<ChannelField, string[]>>,
+  opts: {
+    siblings?: Partial<ChannelMap>;
+    serpContext?: string;
+    wantPhone?: boolean;
+    wantEmail?: boolean;
+    website?: string | null;
+  } = {},
+): Promise<{ channels: Partial<ChannelMap>; phone: string | null; email: string | null }> {
   const fields = CHANNEL_FIELDS.filter((f) => want.has(f));
-  if (!fields.length) return {};
+  const wantPhone = !!opts.wantPhone;
+  const wantEmail = !!opts.wantEmail;
+  if (!fields.length && !wantPhone && !wantEmail) {
+    return { channels: {}, phone: null, email: null };
+  }
 
+  // Schema: every requested channel field + phone/email, each string-or-null.
   const properties: Record<string, { type: string[] }> = {};
   for (const f of fields) properties[f] = { type: ["string", "null"] };
+  if (wantPhone) properties.phone = { type: ["string", "null"] };
+  if (wantEmail) properties.email = { type: ["string", "null"] };
   const schema = { type: "object", properties };
 
-  // Ground the judge on real candidate URLs (one Firecrawl search per missing
-  // field) so it picks from what exists instead of hallucinating. Kept per-field
-  // too, as a validated fallback when the model's own answer is null.
-  const perField: Partial<Record<ChannelField, string[]>> = {};
-  if (firecrawlKey) {
-    const runs = await Promise.all(
-      fields.map((f) => firecrawlSearch(firecrawlKey, `${place.name} ${CHANNEL_SEARCH_TERM[f]}`, 6)),
-    );
-    fields.forEach((f, i) => (perField[f] = dedup(runs[i])));
-  }
-  const candidatePool = dedup(fields.flatMap((f) => perField[f] ?? [])).slice(0, 30);
-  const candidateBlock = candidatePool.length
-    ? `Candidate URLs found by search (prefer one of these when it is correct; ignore unrelated ones):\n${candidatePool.join("\n")}\n\n`
-    : "";
+  const candidateBlock = fields
+    .map((f) => {
+      const pool = (candidates[f] ?? []).slice(0, 10);
+      return pool.length ? `${f} candidates:\n${pool.map((u) => `  - ${u}`).join("\n")}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
 
+  const siblings = opts.siblings ?? {};
   const sibLines = (["website_url", "instagram_url", "facebook_url"] as ChannelField[])
     .filter((f) => siblings[f])
     .map((f) => `- ${f}: ${siblings[f]}`)
     .join("\n");
-  const askLines = fields.map((f) => `- ${FILL_FIELD_SPEC[f]}`).join("\n");
-  // Own-account-over-group rule — the linklab R2 win for Instagram precision.
+
+  const askLines: string[] = fields.map((f) => `- ${FIELD_SPEC[f]}`);
+  if (wantPhone) {
+    askLines.push(
+      "- phone: the place's official public phone number in international format (e.g. +52...).",
+    );
+  }
+  if (wantEmail) {
+    askLines.push("- email: the place's official public contact email (prefer one on its own domain).");
+  }
+
   const igRule = want.has("instagram_url")
-    ? `For instagram_url, prefer the venue's OWN account over a parent brand / group / umbrella ` +
-      `account that spans many locations; if several official accounts exist, prefer the primary ` +
-      `(most-active) one. `
+    ? "For instagram_url, prefer the venue's OWN account over a parent brand / group / " +
+      "umbrella account spanning many locations. If SEVERAL official accounts exist for " +
+      "this same venue (e.g. an older/secondary handle alongside a current one), pick the " +
+      "FLAGSHIP: the account with the MOST FOLLOWERS and most recent activity — never an " +
+      "older, secondary, regional, or lower-follower duplicate. "
     : "";
 
-  const prompt =
-    `Find the official online channels for the place "${place.name}"` +
+  const serpLine = (opts.serpContext ?? "").trim()
+    ? `Background on the place (soft web context — never the source of a URL):\n${
+      opts.serpContext!.trim().slice(0, 600)
+    }\n\n`
+    : "";
+
+  const input =
+    `Review and select the official channels + contact details for the place "${place.name}"` +
     (place.locationLine ? ` in ${place.locationLine}` : "") +
-    (place.category ? ` (category: ${place.category})` : "") + ".\n" +
-    serpGroundingLine(serpContext) +
+    (place.category ? ` (category: ${place.category})` : "") + ".\n\n" +
+    serpLine +
     (sibLines
-      ? `Anchor on these already-known official channels (the missing ones almost always share the same brand handle / are linked from these):\n${sibLines}\n\n`
+      ? `Already-known official channels (the missing ones almost always share the same brand handle / are linked from these — anchor on them):\n${sibLines}\n\n`
       : "") +
-    candidateBlock +
-    `Find the official WEBSITE first and trust the channels the site itself links to. ${igRule}` +
-    `Return strict JSON with ONLY these keys (null any you cannot confirm belongs to THIS place):\n${askLines}\n` +
-    `A franchise / multi-location brand's MAIN account or page is acceptable, but each URL must be ` +
-    `the venue's OWN channel — NEVER a review site, ranking / "best of" list (e.g. World's 50 Best), ` +
-    `guide, directory, aggregator, or a source you merely cited. ` +
-    `Be conservative — prefer null over a guess. Never invent a URL.`;
+    (opts.website ? `Trust the links this official website itself lists: ${opts.website}\n\n` : "") +
+    (candidateBlock ? `Candidate URLs found by search — review each and pick the correct one when present:\n${candidateBlock}\n\n` : "") +
+    `Return strict JSON with ONLY these keys:\n${askLines.join("\n")}\n\n` +
+    // The leniency flip (child B): FALSE POSITIVES > FALSE NEGATIVES.
+    `Selection rule — LEAN TOWARD KEEPING: a plausible official link is better than ` +
+    `dropping a correct one, so return a value whenever a candidate (or the web) ` +
+    `plausibly IS this place's own channel. Return null for a field ONLY when NOTHING ` +
+    `you can find is even plausibly this place's own presence. ${igRule}` +
+    `Each URL must be the venue's OWN channel — NEVER a review site, ranking / "best of" ` +
+    `list, guide, directory, aggregator, a single post/video, or a source you merely cited. ` +
+    `A franchise / multi-location brand's MAIN account or page IS acceptable. ` +
+    `Never invent a URL, number, or address.`;
 
-  const res = await callPerplexityChat(
-    key,
-    [
-      {
-        role: "system",
-        content:
-          "You resolve a place's official channel URLs from web search plus a candidate list. " +
-          "Return ONLY strict JSON with the requested keys. Never invent a URL; prefer null over a wrong guess.",
-      },
-      { role: "user", content: prompt },
-    ],
-    { responseFormat: { type: "json_schema", json_schema: { schema } }, returnRelated: false },
-  );
-  if (!res) return {};
-  const answer = (safeParseJson(res.text) as Record<string, unknown> | null) ?? {};
-  const hitUrls = res.citations;
-  const out: Partial<ChannelMap> = {};
-  for (const f of fields) {
-    const fromAnswer = typeof answer[f] === "string"
-      ? validateFieldUrl(f, answer[f] as string)
-      : null;
-    // The blind citation/candidate fallback only runs for the two benchmarked,
-    // high-precision fields. For facebook / opentable / uber_eats a shape-valid
-    // URL from an unrelated cited source (e.g. a review site's own Facebook) would
-    // pass validation as the wrong entity, so those trust the judge's answer only.
-    const valid = FALLBACK_FIELDS.has(f)
-      ? (fromAnswer ?? firstValidFromList(f, hitUrls) ?? firstValidFromList(f, perField[f] ?? []))
-      : fromAnswer;
-    if (valid) out[f] = valid;
-  }
-  return out;
-}
-
-// Fields where a blind fallback to cited/candidate URLs is safe enough (linklab
-// benchmarked website + instagram precision; the others are answer-only).
-const FALLBACK_FIELDS = new Set<ChannelField>(["website_url", "instagram_url"]);
-
-// ── Degraded leg — Firecrawl per-field search (only when no Perplexity key) ──
-async function firecrawlSearchFill(
-  firecrawlKey: string,
-  name: string,
-  city: string | null,
-  want: Set<ChannelField>,
-): Promise<Partial<ChannelMap>> {
-  const scope = [name, city ?? ""].map((s) => s.trim()).filter(Boolean).join(" ");
-  const fields = CHANNEL_FIELDS.filter((f) => want.has(f));
-  const runs = await Promise.all(
-    fields.map((f) => firecrawlSearch(firecrawlKey, `${scope} ${CHANNEL_SEARCH_TERM[f]}`, 6)),
-  );
-  const out: Partial<ChannelMap> = {};
-  fields.forEach((f, i) => {
-    const valid = firstValidFromList(f, dedup(runs[i]));
-    if (valid) out[f] = valid;
+  const res = await callPerplexityAgent(key, input, schema, {
+    instructions: AGENT_Y_INSTRUCTIONS,
+    maxSteps: 10,
   });
-  return out;
+  if (!res) return { channels: {}, phone: null, email: null };
+
+  const answer = res.answer;
+  const hitUrls = res.hitUrls;
+  const channels: Partial<ChannelMap> = {};
+  for (const f of fields) {
+    const fromAnswer = typeof answer[f] === "string" ? validateFieldUrl(f, answer[f] as string) : null;
+    // FP > FN fallback: if the agent's own pick fails validation, fall back to a
+    // cited URL, then to the best candidate we gathered — keeping a plausible link
+    // beats dropping the field. All still shape-validated for the field.
+    const valid = fromAnswer ??
+      firstValidFromList(f, hitUrls) ??
+      firstValidFromList(f, candidates[f] ?? []);
+    if (valid) channels[f] = valid;
+  }
+
+  return {
+    channels,
+    phone: wantPhone ? normalisePhone(answer.phone) : null,
+    email: wantEmail ? normaliseEmail(answer.email) : null,
+  };
 }
 
-// ── resolveChannels — Step S3 link-discovery entry (P3 is the gap-fill within) ──
+// ── resolveChannels — S4 gather → S5 Agent Y select entry point ──────────────
 export async function resolveChannels(opts: {
   firecrawlKey?: string;
   perplexityKey?: string;
@@ -419,8 +398,8 @@ export async function resolveChannels(opts: {
   city: string | null;
   locationLine: string;
   category: string | null;
-  // P2 SERP summary — soft grounding for the Perplexity fill prompt.
   serpContext?: string;
+  discoverCandidates: DiscoverCandidateCounts;
   have: {
     instagram: string | null;
     facebook: string | null;
@@ -430,9 +409,12 @@ export async function resolveChannels(opts: {
     tiktok?: string | null;
     tripadvisor?: string | null;
     yelp?: string | null;
+    phone?: string | null;
+    email?: string | null;
   };
 }): Promise<ResolvedChannels> {
   const { firecrawlKey, perplexityKey, name, city, locationLine, category, serpContext } = opts;
+  const counts = opts.discoverCandidates;
 
   // Phase 0 — SEED. Anything already supplied is frozen, never re-resolved.
   const out: ChannelMap = {
@@ -445,15 +427,18 @@ export async function resolveChannels(opts: {
     tripadvisor_url: opts.have.tripadvisor ?? null,
     yelp_url: opts.have.yelp ?? null,
   };
+  let phone: string | null = opts.have.phone ?? null;
+  let email: string | null = opts.have.email ?? null;
   const via: ResolvedChannels["via"] = {};
   const provenance: ResolvedChannels["provenance"] = {};
   for (const f of CHANNEL_FIELDS) {
-    const u = out[f];
-    if (u) {
+    if (out[f]) {
       via[f] = "seed";
-      provenance[f] = { source: "seed", url: u };
+      provenance[f] = { source: "seed", url: out[f]! };
     }
   }
+  if (phone) via.phone = "seed";
+  if (email) via.email = "seed";
 
   const missing = (): Set<ChannelField> => new Set(CHANNEL_FIELDS.filter((f) => !out[f]));
   const fill = (field: ChannelField, url: string | null, source: ChannelSource): void => {
@@ -463,59 +448,48 @@ export async function resolveChannels(opts: {
     provenance[field] = { source, url };
   };
 
-  const assemble = (): ResolvedChannels => ({ ...out, via, provenance });
+  const assemble = (): ResolvedChannels => ({ ...out, phone, email, via, provenance });
 
-  // Nothing missing, or no provider keys → return the seed unchanged.
-  if (missing().size === 0 || (!firecrawlKey && !perplexityKey)) return assemble();
+  const wantPhone = !phone;
+  const wantEmail = !email;
+  const nothingToDo = missing().size === 0 && !wantPhone && !wantEmail;
+  if (nothingToDo || (!firecrawlKey && !perplexityKey)) return assemble();
 
-  // Phase 1 — ANCHOR the website (so Phase 2 has a footer to harvest).
-  if (!out.website_url && firecrawlKey) {
-    const site = await findWebsite(firecrawlKey, name, city);
-    if (site) fill("website_url", site, "search");
+  // S4 — GATHER candidate pools (Firecrawl Search, per-source N). Best-effort.
+  let pools: Partial<Record<ChannelField, string[]>> = {};
+  if (firecrawlKey && missing().size > 0) {
+    pools = await gatherCandidates(firecrawlKey, name, city, [...missing()], counts);
   }
 
-  // Phase 2 — HARVEST the footer (highest precision: the place's own links).
-  if (out.website_url && firecrawlKey && missing().size > 0) {
-    const harvested = await harvestFooter(firecrawlKey, out.website_url, missing());
-    for (const f of CHANNEL_FIELDS) {
-      const u = harvested[f];
-      if (u) fill(f, u, "website");
-    }
-  }
-
-  // Phase 3 — FILL the rest with ONE Perplexity call (or degraded Firecrawl).
-  if (missing().size > 0) {
-    if (perplexityKey) {
-      const siblings: Partial<ChannelMap> = {
-        website_url: out.website_url,
-        instagram_url: out.instagram_url,
-        facebook_url: out.facebook_url,
-      };
-      const filled = await fillMissingChannels(
-        perplexityKey,
-        { name, locationLine, category },
-        missing(),
-        siblings,
-        serpContext,
-        firecrawlKey,
-      );
-      for (const f of CHANNEL_FIELDS) {
-        const u = filled[f];
-        if (u) fill(f, u, "perplexity");
-      }
-    } else if (firecrawlKey) {
-      const filled = await firecrawlSearchFill(firecrawlKey, name, city, missing());
-      for (const f of CHANNEL_FIELDS) {
-        const u = filled[f];
-        if (u) fill(f, u, "search");
-      }
-    }
+  // S5 — SELECT with Agent Y (channels + phone + email in one pass). Degraded to
+  // per-field Firecrawl first-hit when no Perplexity key (phone/email need the agent).
+  if (perplexityKey) {
+    const siblings: Partial<ChannelMap> = {
+      website_url: out.website_url,
+      instagram_url: out.instagram_url,
+      facebook_url: out.facebook_url,
+    };
+    const sel = await selectChannels(
+      perplexityKey,
+      { name, locationLine, category },
+      missing(),
+      pools,
+      { siblings, serpContext, wantPhone, wantEmail, website: out.website_url },
+    );
+    for (const f of CHANNEL_FIELDS) fill(f, sel.channels[f] ?? null, "perplexity");
+    if (wantPhone && sel.phone) { phone = sel.phone; via.phone = "perplexity"; }
+    if (wantEmail && sel.email) { email = sel.email; via.email = "perplexity"; }
+  } else if (firecrawlKey) {
+    // Degraded leg (no Perplexity key): no Agent Y to review, so take the first
+    // shape-valid candidate per field from the pools we already gathered above
+    // (reuse — never re-search: Firecrawl is metered budget).
+    for (const f of CHANNEL_FIELDS) fill(f, (pools[f] ?? [])[0] ?? null, "search");
   }
 
   return assemble();
 }
 
-// ── Phone + email last-resort legs (NOT URLs; outside the channel set) ───────
+// ── phone + email normalisers (folded into Agent Y; used by selectChannels) ──
 
 // Normalise a phone candidate to E.164-ish digits (a leading + plus 7–15 digits)
 // or null. Strips spaces/punctuation; assumes the agent returns the country code.
@@ -535,55 +509,4 @@ function normaliseEmail(raw: unknown): string | null {
   const e = raw.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) return null;
   return e;
-}
-
-// Last-resort public phone lookup, used only when the Mesita seed + Google gave
-// nothing. Grounded by the website + P2 SERP summary. null on anything
-// uncertain (a wrong number is worse than a missing one).
-export async function discoverPhonePerplexity(
-  key: string,
-  name: string,
-  locationLine: string,
-  category: string | null,
-  hints: { website?: string | null; serpContext?: string } = {},
-): Promise<string | null> {
-  const prompt =
-    `Find the official public phone number for the place "${name}"` +
-    (locationLine ? ` in ${locationLine}` : "") +
-    (category ? ` (category: ${category})` : "") + ".\n" +
-    serpGroundingLine(hints.serpContext) +
-    (hints.website ? `Its official website is ${hints.website} — trust the number it lists.\n\n` : "") +
-    `Return strict JSON {"phone": "<number in international format, e.g. +52...>"} ` +
-    `or {"phone": null} if you cannot confirm it. Never invent a number.`;
-  const res = await callPerplexityAgent(key, prompt, {
-    type: "object",
-    properties: { phone: { type: ["string", "null"] } },
-  });
-  if (!res) return null;
-  return normalisePhone(res.answer.phone);
-}
-
-// Last-resort public email lookup, same shape as phone. Prefers an address on
-// the site's own domain. null on anything uncertain.
-export async function discoverEmailPerplexity(
-  key: string,
-  name: string,
-  locationLine: string,
-  category: string | null,
-  hints: { website?: string | null; serpContext?: string } = {},
-): Promise<string | null> {
-  const prompt =
-    `Find the official public contact email for the place "${name}"` +
-    (locationLine ? ` in ${locationLine}` : "") +
-    (category ? ` (category: ${category})` : "") + ".\n" +
-    serpGroundingLine(hints.serpContext) +
-    (hints.website ? `Its official website is ${hints.website} — strongly prefer an email on that domain.\n\n` : "") +
-    `Return strict JSON {"email": "<address>"} or {"email": null} if you cannot ` +
-    `confirm it. Never invent an address.`;
-  const res = await callPerplexityAgent(key, prompt, {
-    type: "object",
-    properties: { email: { type: ["string", "null"] } },
-  });
-  if (!res) return null;
-  return normaliseEmail(res.answer.email);
 }
