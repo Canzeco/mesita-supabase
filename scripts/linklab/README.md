@@ -51,3 +51,19 @@ Outputs a leaderboard (per-field accuracy/P/R/F1), the WRONG/FN miss list, a cos
 Website compared at registrable-host level; Instagram at lowercase-handle level. Correctly
 returning `null` for a venue that genuinely has no website counts as correct (TN). A confident-but-
 wrong answer is `WRONG` and counts against both precision and recall.
+
+## Scoring the PRODUCTION pipeline (`eval-prod.ts`)
+
+`run.ts` benchmarks the linklab *reimplemented* strategies. To score the **shipped** discovery
+pipeline instead — S4 Firecrawl-Search gather → S5 Perplexity **Agent Y** select (`resolveChannels`)
+— run `eval-prod.ts`. Use it to iterate the Agent X/Y prompts (MESITA-204) with a scorecard:
+
+```
+deno run --allow-env --allow-net --allow-read --allow-write \
+  scripts/linklab/eval-prod.ts --limit 5 --concurrency 3
+```
+
+It reuses this ground truth + scoring, and breaks out **WRONG (wrong-entity)** vs **FN (killed a
+correct link)** separately so you can tune to the rebuild's FP > FN leniency. ⚠️ **Un-cached** —
+every run spends real Firecrawl + Perplexity budget, so keep `--limit` small (money-gated per
+MESITA-192). Note the ground-truth set is small (n≈50) and famous-venue-optimistic — directional only.
