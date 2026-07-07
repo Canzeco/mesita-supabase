@@ -330,8 +330,10 @@ export async function selectChannels(
 
   const igRule = want.has("instagram_url")
     ? "For instagram_url, prefer the venue's OWN account over a parent brand / group / " +
-      "umbrella account spanning many locations; if several official accounts exist, " +
-      "prefer the primary (most-active) one. "
+      "umbrella account spanning many locations. If SEVERAL official accounts exist for " +
+      "this same venue (e.g. an older/secondary handle alongside a current one), pick the " +
+      "FLAGSHIP: the account with the MOST FOLLOWERS and most recent activity — never an " +
+      "older, secondary, regional, or lower-follower duplicate. "
     : "";
 
   const serpLine = (opts.serpContext ?? "").trim()
