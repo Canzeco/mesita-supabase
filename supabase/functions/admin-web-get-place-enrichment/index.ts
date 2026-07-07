@@ -2,9 +2,12 @@
 //
 // Read-only per-place Enricher inspector for the admin console. Given a
 // project_id, returns:
-//   • media  — one entry per stored image (keyed by public_url, which matches
-//     places.photos[]), carrying SOURCE (google/website/instagram) + the
-//     enricher vision ANALYSIS text, plus caption/likes for Instagram.
+//   • media  — one entry per stored image (keyed by public_url AND source_url,
+//     so it resolves whether places.photos[] holds the mirrored URL or the raw
+//     source URL when mirroring failed), carrying SOURCE (google/website/
+//     instagram), the enricher vision ANALYSIS text, plus the pre-analysis
+//     source metadata: caption/likes for Instagram (+ comments/timestamp/video
+//     flag) and alt/page/dimensions for website images.
 //   • status — enrichment progress for the place: projects.content_status +
 //     the place_research stage/status/error + last_enriched_at (the moment the
 //     pipeline last reached stage='done').
@@ -34,7 +37,12 @@ type MediaRow = {
   caption: string | null;
   likes_count: number | null;
   source_url: string | null;
+  source_metadata: Record<string, unknown> | null;
 };
+
+// What the client sees per photo. `position`/`total` are filled in the browser
+// from the gallery order — the DB stores no rank, the array order IS the rank.
+type MediaMeta = Omit<MediaRow, "public_url">;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -58,7 +66,9 @@ Deno.serve(async (req) => {
   const [mediaRes, projectRes, researchRes] = await Promise.all([
     admin
       .from("place_media_assets")
-      .select("public_url, source, status, analysis_text, caption, likes_count, source_url")
+      .select(
+        "public_url, source, status, analysis_text, caption, likes_count, source_url, source_metadata",
+      )
       .eq("project_id", projectId)
       .order("created_at", { ascending: true }),
     admin
@@ -84,18 +94,22 @@ Deno.serve(async (req) => {
   }
 
   const rows = (mediaRes.data ?? []) as MediaRow[];
-  // Keyed by public_url so the client can look up metadata per gallery photo.
-  const media: Record<string, Omit<MediaRow, "public_url">> = {};
+  // Keyed by BOTH public_url and source_url so the client resolves a gallery
+  // photo whether places.photos[] holds the mirrored URL or (mirror failed) the
+  // raw source URL. public_url wins on collision — it's the canonical stored key.
+  const media: Record<string, MediaMeta> = {};
   for (const r of rows) {
-    if (!r.public_url) continue;
-    media[r.public_url] = {
+    const meta: MediaMeta = {
       source: r.source,
       status: r.status,
       analysis_text: r.analysis_text,
       caption: r.caption,
       likes_count: r.likes_count,
       source_url: r.source_url,
+      source_metadata: r.source_metadata,
     };
+    if (r.source_url && !media[r.source_url]) media[r.source_url] = meta;
+    if (r.public_url) media[r.public_url] = meta;
   }
 
   const research = researchRes.data as
@@ -118,5 +132,5 @@ Deno.serve(async (req) => {
     updated_at: research?.updated_at ?? null,
   };
 
-  return json({ ok: true, media, status, count: Object.keys(media).length });
+  return json({ ok: true, media, status, count: rows.length });
 });
