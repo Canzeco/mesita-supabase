@@ -46,6 +46,8 @@ type Body = {
   imageSortingPrompt?: string;
   synthesisQuality?: string;
   visionQuality?: string;
+  // Perplexity Agent preset for S2/S3 ("search model").
+  perplexityPreset?: string;
   perRunCostCapUsd?: number;
   // Link discovery — per-source Firecrawl Search candidate counts (0–10).
   discoverWebsiteN?: number;
@@ -56,6 +58,12 @@ type Body = {
 };
 
 const QUALITY_VALUES = new Set(["economy", "standard", "high"]);
+const PERPLEXITY_PRESETS = new Set([
+  "fast-search",
+  "pro-search",
+  "deep-research",
+  "advanced-deep-research",
+]);
 
 function intInRange(v: unknown, min: number, max: number): number | null {
   if (typeof v !== "number" || !Number.isInteger(v)) return null;
@@ -189,6 +197,23 @@ Deno.serve(async (req) => {
     patch.atlas_vision_quality = body.visionQuality;
   }
 
+  if (body.perplexityPreset !== undefined) {
+    if (
+      typeof body.perplexityPreset !== "string" ||
+      !PERPLEXITY_PRESETS.has(body.perplexityPreset)
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            "perplexityPreset must be fast-search, pro-search, deep-research, or advanced-deep-research",
+        },
+        400,
+      );
+    }
+    patch.atlas_perplexity_preset = body.perplexityPreset;
+  }
+
   if (body.perRunCostCapUsd !== undefined) {
     if (typeof body.perRunCostCapUsd !== "number" || body.perRunCostCapUsd < 0) {
       return json(
@@ -289,7 +314,7 @@ Deno.serve(async (req) => {
     .update(patch)
     .eq("id", 1)
     .select(
-      "atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n, updated_at",
+      "atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_perplexity_preset, atlas_per_run_cost_cap_usd, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n, updated_at",
     )
     .single();
   if (error) {
@@ -313,6 +338,7 @@ Deno.serve(async (req) => {
     atlasImageSortingPrompt: data.atlas_image_sorting_prompt,
     atlasSynthesisQuality: data.atlas_synthesis_quality,
     atlasVisionQuality: data.atlas_vision_quality,
+    atlasPerplexityPreset: data.atlas_perplexity_preset,
     atlasPerRunCostCapUsd: data.atlas_per_run_cost_cap_usd,
     atlasDiscoverWebsiteN: data.atlas_discover_website_n,
     atlasDiscoverInstagramN: data.atlas_discover_instagram_n,

@@ -6,7 +6,9 @@
 import { safeParseJson } from "./parse-utils.ts";
 
 const PERPLEXITY_AGENT_URL = "https://api.perplexity.ai/v1/agent";
-const PERPLEXITY_AGENT_PRESET = "pro-search";
+// Default preset when the caller doesn't pass one (matches the app_settings
+// default). Callers pass the admin-selected preset via opts.preset.
+const DEFAULT_PRESET = "pro-search";
 
 // Default agent instructions — URL resolution (P3's discovery + phone/email
 // legs). P2 overrides with its own editorial-context instructions.
@@ -20,7 +22,7 @@ export async function callPerplexityAgent(
   key: string,
   input: string,
   schema: unknown,
-  opts: { instructions?: string; maxSteps?: number } = {},
+  opts: { instructions?: string; maxSteps?: number; preset?: string } = {},
 ): Promise<{ answer: Record<string, unknown>; hitUrls: string[] } | null> {
   try {
     const r = await fetch(PERPLEXITY_AGENT_URL, {
@@ -31,7 +33,7 @@ export async function callPerplexityAgent(
       },
       body: JSON.stringify({
         input,
-        preset: PERPLEXITY_AGENT_PRESET,
+        preset: opts.preset ?? DEFAULT_PRESET,
         instructions: opts.instructions ?? DEFAULT_INSTRUCTIONS,
         max_steps: opts.maxSteps ?? 8,
         response_format: { type: "json_schema", json_schema: { schema } },

@@ -95,6 +95,11 @@ export type EnrichConfig = {
   // sort (S6) and utility judges stay on the cheap VISION_MODEL, matching the
   // admin cost calculator's lines.
   visionQuality: string;
+  // Admin "Search model" knob — the Perplexity Agent PRESET used for S2 (SERP
+  // summary) and S3 (channel discovery / link validation). Bundles model + step
+  // budget + search depth; fast-search | pro-search | deep-research |
+  // advanced-deep-research (default pro-search).
+  perplexityPreset: string;
   // GATHER caps — how many to PULL per source before anything else.
   gatherGoogleImages: number;
   // Instagram: DEPTH = posts pulled from the scrape (1–30); POSTS = kept after
@@ -137,7 +142,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
   const { data: cfg } = await admin
     .from("app_settings")
     .select(
-      "atlas_synthesis_quality, atlas_vision_quality, atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n",
+      "atlas_synthesis_quality, atlas_vision_quality, atlas_perplexity_preset, atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -148,6 +153,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
   return {
     synthesisQuality: (cfg?.atlas_synthesis_quality as string | undefined) ?? "economy",
     visionQuality: (cfg?.atlas_vision_quality as string | undefined) ?? "economy",
+    perplexityPreset: (cfg?.atlas_perplexity_preset as string | undefined) ?? "pro-search",
     gatherGoogleImages: num(cfg?.atlas_gather_google_images, 10),
     gatherInstagramDepth: num(cfg?.atlas_gather_instagram_depth, 30),
     gatherInstagramPosts: num(cfg?.atlas_gather_instagram_posts, 10),

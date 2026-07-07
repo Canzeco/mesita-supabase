@@ -34,8 +34,9 @@ export async function gatherSerpSummary(opts: {
   name: string;
   locationLine: string;
   category: string | null;
+  perplexityPreset?: string;
 }): Promise<{ summary: string | null; diag: Record<string, unknown> }> {
-  const { perplexityKey, name, locationLine, category } = opts;
+  const { perplexityKey, name, locationLine, category, perplexityPreset } = opts;
   const prompt =
     `Research the place "${name}"` +
     (locationLine ? ` in ${locationLine}` : "") +
@@ -51,6 +52,7 @@ export async function gatherSerpSummary(opts: {
   const res = await callPerplexityAgent(perplexityKey, prompt, SERP_SCHEMA, {
     instructions: SERP_INSTRUCTIONS,
     maxSteps: 6,
+    preset: perplexityPreset,
   });
   const raw = typeof res?.answer.summary === "string" ? res.answer.summary.trim() : "";
   // Word-cap defensively (prompt asks for <=120, but the agent can drift).
