@@ -248,6 +248,12 @@ export async function fetchAsDataUrl(url: string, signal: AbortSignal): Promise<
   }
 }
 
+// Vision describes every analyzed image CONCURRENTLY. The per-source analyze
+// caps bound the pool (Google ≤10 + Instagram ≤30 = 40 max), so 40 in flight
+// means one round for any real config. Per-image memory stays bounded by the
+// 2 MB streaming cap in fetchAsDataUrl (only cdninstagram/fbcdn URLs inline).
+const VISION_CONCURRENCY = 40;
+
 export async function visionDescribe(
   openaiKey: string,
   urls: string[],
@@ -298,11 +304,11 @@ export async function visionDescribe(
   };
 
   try {
-    // Bound download+describe concurrency: each fetcher-blocked image is buffered
-    // (base64 data: URL) before its describe call, so firing all ~20 at once would
-    // stack peak memory. A small pool keeps transient memory low (defense in depth
-    // alongside the streaming cap in fetchAsDataUrl).
-    const descriptions = await mapPool(urls, 5, describeOne);
+    // Describe all analyzed images at once (pool = VISION_CONCURRENCY). Each
+    // fetcher-blocked image is buffered (base64 data: URL) before its describe
+    // call; the 2 MB streaming cap in fetchAsDataUrl bounds per-image memory, and
+    // the analyze caps bound the count, so a full round stays safe.
+    const descriptions = await mapPool(urls, VISION_CONCURRENCY, describeOne);
     if (descriptions.every((d) => !d)) return null;
     return descriptions;
   } catch {
