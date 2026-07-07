@@ -7,10 +7,11 @@
 // optional; only the keys present in the body are written, so the UI can
 // save one control at a time:
 //
-//   gatherGoogleImages (≤10)
-//   gatherInstagramDepth (1–30, download) / gatherInstagramPosts (≤10, keep ≤ depth)
-//   analyzeGoogleImages (≤10) / analyzeInstagramImages (≤20)
-//   saveTotalImages (≤20)      → atlas_save_total_images (source-independent)
+//   gatherGoogleImages (1–10)
+//   gatherInstagramDepth (1–30, download) / gatherInstagramPosts (1–30, keep ≤ depth)
+//   analyzeGoogleImages (1–10, ≤ gatherGoogleImages) /
+//     analyzeInstagramImages (1–30, ≤ gatherInstagramPosts)
+//   saveTotalImages (1–10, ≤ analyzeGoogle + analyzeInstagram) → atlas_save_total_images
 //   discover{Website,Instagram,Facebook,Opentable,Ubereats}N (0–10, per-source
 //     Firecrawl Search candidate counts for link discovery)
 //   imageAnalysisPrompt / imageSortingPrompt
@@ -27,12 +28,13 @@ import {
 } from "../_shared/auth.ts";
 
 type Body = {
-  // Image funnel — GATHER. Google: single pre-sorted cap (≤10). Instagram: split
-  // into download DEPTH (1–30) + keep-count (≤10, ≤ depth).
+  // Image funnel — GATHER. Google: single pre-sorted cap (1–10). Instagram: split
+  // into download DEPTH (1–30) + keep-count (1–30, ≤ depth).
   gatherGoogleImages?: number;
   gatherInstagramDepth?: number;
   gatherInstagramPosts?: number;
-  // Image funnel — ANALYZE (vision per source, ≤10) + final SAVE (≤20, all sources)
+  // Image funnel — ANALYZE (per source: Google ≤ its keep, IG ≤ its keep) +
+  // final SAVE (1–10, ≤ analyzed total, all sources).
   imageVisionEnabled?: boolean;
   analyzeGoogleImages?: number;
   analyzeInstagramImages?: number;
@@ -82,9 +84,9 @@ Deno.serve(async (req) => {
 
   // ── Gather caps (pull per source) ───────────────────────────────────────
   if (body.gatherGoogleImages !== undefined) {
-    const n = intInRange(body.gatherGoogleImages, 0, 10);
+    const n = intInRange(body.gatherGoogleImages, 1, 10);
     if (n === null) {
-      return json({ ok: false, error: "gatherGoogleImages must be an integer 0-10" }, 400);
+      return json({ ok: false, error: "gatherGoogleImages must be an integer 1-10" }, 400);
     }
     patch.atlas_gather_google_images = n;
   }
@@ -98,9 +100,9 @@ Deno.serve(async (req) => {
   }
 
   if (body.gatherInstagramPosts !== undefined) {
-    const n = intInRange(body.gatherInstagramPosts, 0, 10);
+    const n = intInRange(body.gatherInstagramPosts, 1, 30);
     if (n === null) {
-      return json({ ok: false, error: "gatherInstagramPosts must be an integer 0-10" }, 400);
+      return json({ ok: false, error: "gatherInstagramPosts must be an integer 1-30" }, 400);
     }
     patch.atlas_gather_instagram_posts = n;
   }
@@ -114,17 +116,17 @@ Deno.serve(async (req) => {
   }
 
   if (body.saveTotalImages !== undefined) {
-    const n = intInRange(body.saveTotalImages, 0, 20);
+    const n = intInRange(body.saveTotalImages, 1, 10);
     if (n === null) {
-      return json({ ok: false, error: "saveTotalImages must be an integer 0-20" }, 400);
+      return json({ ok: false, error: "saveTotalImages must be an integer 1-10" }, 400);
     }
     patch.atlas_save_total_images = n;
   }
 
   if (body.analyzeGoogleImages !== undefined) {
-    const n = intInRange(body.analyzeGoogleImages, 0, 10);
+    const n = intInRange(body.analyzeGoogleImages, 1, 10);
     if (n === null) {
-      return json({ ok: false, error: "analyzeGoogleImages must be an integer 0-10" }, 400);
+      return json({ ok: false, error: "analyzeGoogleImages must be an integer 1-10" }, 400);
     }
     patch.atlas_analyze_google_images = n;
   }
@@ -144,9 +146,9 @@ Deno.serve(async (req) => {
   }
 
   if (body.analyzeInstagramImages !== undefined) {
-    const n = intInRange(body.analyzeInstagramImages, 0, 20);
+    const n = intInRange(body.analyzeInstagramImages, 1, 30);
     if (n === null) {
-      return json({ ok: false, error: "analyzeInstagramImages must be an integer 0-20" }, 400);
+      return json({ ok: false, error: "analyzeInstagramImages must be an integer 1-30" }, 400);
     }
     patch.atlas_analyze_instagram_images = n;
   }
@@ -206,13 +208,16 @@ Deno.serve(async (req) => {
     patch[col] = n;
   }
 
-  // ── Image-funnel monotonic lock: collection ≥ analysis ≥ selection (by sum) ──
-  // Authoritative backstop for the admin console's client-side clamp. Partial
-  // updates touch one stage at a time, so merge the patch over the current row
-  // before checking. collection = Google gather + IG keep; analysis = analyze
-  // Google + analyze IG; selection = the source-independent save total.
+  // ── Image-funnel per-source lock ────────────────────────────────────────
+  // Authoritative backstop for the admin console's client-side clamp. Every
+  // downstream count is bounded by its OWN source upstream — not by a shared
+  // sum, which would let one source's slack mask another's overflow (e.g.
+  // analyze 15 IG posts when only 10 were kept). Partial updates touch one
+  // field at a time, so merge the patch over the current row before checking:
+  //   IG keep ≤ IG depth · analyze ≤ keep per source · save ≤ analyzed total.
   const FUNNEL_COLS = [
     "atlas_gather_google_images",
+    "atlas_gather_instagram_depth",
     "atlas_gather_instagram_posts",
     "atlas_analyze_google_images",
     "atlas_analyze_instagram_images",
@@ -222,7 +227,7 @@ Deno.serve(async (req) => {
     const { data: cur } = await admin
       .from("app_settings")
       .select(
-        "atlas_gather_google_images, atlas_gather_instagram_posts, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images",
+        "atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images",
       )
       .eq("id", 1)
       .maybeSingle();
@@ -232,19 +237,34 @@ Deno.serve(async (req) => {
       const v = (cur as Record<string, unknown> | null)?.[c];
       return typeof v === "number" ? v : 0;
     };
-    const collection = eff("atlas_gather_google_images") + eff("atlas_gather_instagram_posts");
-    const analysis = eff("atlas_analyze_google_images") + eff("atlas_analyze_instagram_images");
-    const selection = eff("atlas_save_total_images");
-    if (collection < analysis) {
+    const googleKeep = eff("atlas_gather_google_images");
+    const igDepth = eff("atlas_gather_instagram_depth");
+    const igKeep = eff("atlas_gather_instagram_posts");
+    const googleAnalyze = eff("atlas_analyze_google_images");
+    const igAnalyze = eff("atlas_analyze_instagram_images");
+    const save = eff("atlas_save_total_images");
+    if (igKeep > igDepth) {
       return json({
         ok: false,
-        error: `Image analysis total (${analysis}) can't exceed the collection total (${collection}).`,
+        error: `Instagram keep (${igKeep}) can't exceed the download depth (${igDepth}).`,
       }, 400);
     }
-    if (analysis < selection) {
+    if (googleAnalyze > googleKeep) {
       return json({
         ok: false,
-        error: `Image selection (${selection}) can't exceed the analysis total (${analysis}).`,
+        error: `Google analyze (${googleAnalyze}) can't exceed Google images kept (${googleKeep}).`,
+      }, 400);
+    }
+    if (igAnalyze > igKeep) {
+      return json({
+        ok: false,
+        error: `Instagram analyze (${igAnalyze}) can't exceed Instagram images kept (${igKeep}).`,
+      }, 400);
+    }
+    if (save > googleAnalyze + igAnalyze) {
+      return json({
+        ok: false,
+        error: `Image selection (${save}) can't exceed the analysis total (${googleAnalyze + igAnalyze}).`,
       }, 400);
     }
   }
