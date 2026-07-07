@@ -8,13 +8,17 @@
 //
 //   S1  Google spine re-check (fetchGoogleBasics — hard gate; failure lands
 //       terminal stage='failed' + content_status='failed')
-//   S2  parallel: Apify Google Maps (reviews + images) ‖ Perplexity SERP blurb
+//   S2  Apify Google Maps (reviews + images) fired in the BACKGROUND ‖ Perplexity
+//       SERP blurb (awaited). GMaps depends only on the place id, so it overlaps
+//       S3 + S4 and is collected after the IG/FB scrape — the Apify runs go
+//       concurrently instead of GMaps blocking IG/FB.
 //   S3  channel discovery (channels ONLY): per-source Firecrawl Search gather
 //       (S4) → one Perplexity Agent Y "Review & Select Links" pass (S5). No
 //       website-footer scraping. Phone + email are NOT web-searched — they come
 //       from Mesita input or the Google spine, and enrichment never clobbers a
 //       Mesita-entered contact.
-//   S4  parallel gathers: Instagram (Apify + identity judge) ‖ Facebook (Apify)
+//   S4  parallel gathers: Instagram (Apify + identity judge) ‖ Facebook (Apify),
+//       concurrent with the background GMaps scrape from S2
 //       (website CONTENT crawl retired — enrichment no longer reads the site)
 //
 // Output: place_research.gathered (partial place update + grounding + candidate
@@ -84,15 +88,22 @@ serveEnrichStage("research", async (admin, _env, row) => {
   const locationLine = [basics.address, basics.city].filter(Boolean).join(", ");
   const category = basics.category;
 
-  // ━━━ S2 — parallel: Apify GMaps reviews ‖ Perplexity SERP blurb ━━━
+  // ━━━ S2 — Apify GMaps reviews (background) ‖ Perplexity SERP blurb ━━━
+  // The Google Maps scrape depends only on the place id, NOT on channel
+  // resolution, so fire it now and let it overlap S3 discovery + the S4 IG/FB
+  // scrape — the two Apify runs then execute concurrently instead of GMaps
+  // finishing before IG/FB even starts. It's collected after S4. Reviews are
+  // non-critical, so a GMaps failure is recorded in diag, never fatal. SERP is
+  // awaited here because it feeds S3 discovery context.
   let reviews: Record<string, unknown>[] = [];
   let reviewCount: number | null = null;
   let googleReviewsText = "";
   let googleImages: string[] = [];
   let serpSummary: string | null = null;
-  await Promise.all([
-    (async () => {
-      if (!APIFY_KEY || !basics.google_place_id) return;
+
+  const gmapsGather = (async () => {
+    if (!APIFY_KEY || !basics.google_place_id) return;
+    try {
       const g = await gatherGoogleMaps({
         apifyKey: APIFY_KEY,
         placeId: basics.google_place_id,
@@ -103,14 +114,19 @@ serveEnrichStage("research", async (admin, _env, row) => {
       googleReviewsText = g.googleReviewsText;
       googleImages = g.googleImages;
       sources.apify_google_reviews = g.diag;
-    })(),
-    (async () => {
-      if (!PERPLEXITY_KEY) return;
-      const serp = await gatherSerpSummary({ perplexityKey: PERPLEXITY_KEY, name, locationLine, category });
-      serpSummary = serp.summary;
-      sources.serp = serp.diag;
-    })(),
-  ]);
+    } catch (e) {
+      sources.apify_google_reviews = {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  })();
+
+  if (PERPLEXITY_KEY) {
+    const serp = await gatherSerpSummary({ perplexityKey: PERPLEXITY_KEY, name, locationLine, category });
+    serpSummary = serp.summary;
+    sources.serp = serp.diag;
+  }
 
   // ━━━ S3 — channel discovery (channels ONLY) ━━━
   // Phone + email are NOT discovered here: they come from Mesita input (a
@@ -237,6 +253,9 @@ serveEnrichStage("research", async (admin, _env, row) => {
   const fbR = fb as FacebookResult | null;
   if (igR) sources.apify_instagram = igR.diag;
   if (fbR) sources.apify_facebook = fbR.diag;
+
+  // Collect the background Google Maps scrape — it overlapped S3 + S4.
+  await gmapsGather;
 
   // Numeric source facts + verified IG.
   if (reviews.length > 0) {
