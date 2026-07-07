@@ -9,11 +9,11 @@
 //   S1  Google spine re-check (fetchGoogleBasics — hard gate; failure lands
 //       terminal stage='failed' + content_status='failed')
 //   S2  parallel: Apify Google Maps (reviews + images) ‖ Perplexity SERP blurb
-//   S3  channel discovery (website-first Firecrawl + one Perplexity fill) +
-//       phone/email last-resort lookups
+//   S3  channel discovery: per-source Firecrawl Search gather (S4) → one
+//       Perplexity Agent Y "Review & Select Links" pass (S5) that also folds in
+//       phone + email. No website-footer scraping.
 //   S4  parallel gathers: Instagram (Apify + identity judge) ‖ Facebook (Apify)
-//       (website CONTENT crawl retired — enrichment no longer reads the site;
-//        S3 still scrapes the footer for social/reservation links)
+//       (website CONTENT crawl retired — enrichment no longer reads the site)
 //
 // Output: place_research.gathered (partial place update + grounding + candidate
 // image pools + per-image metadata) → stage='analysis'. No places writes here —
@@ -26,11 +26,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { instagramHandleFromUrl } from "../_shared/apify.ts";
-import {
-  discoverEmailPerplexity,
-  discoverPhonePerplexity,
-  resolveChannels,
-} from "../_shared/enrich-channel-discovery.ts";
+import { resolveChannels } from "../_shared/enrich-channel-discovery.ts";
 import { fbSlugCandidate } from "../_shared/channels.ts";
 import { loadEnrichConfig } from "../_shared/enrich-config.ts";
 import { fetchGoogleBasics } from "../_shared/enrich-google-basics.ts";
@@ -130,6 +126,8 @@ serveEnrichStage("research", async (admin, _env, row) => {
       !resolvedPhone || !resolvedEmail);
 
   if (needsDiscovery) {
+    // S4 gather (Firecrawl Search, per-source N) → S5 Agent Y select. Phone +
+    // email are now resolved in the SAME Agent Y pass (no separate calls).
     const found = await resolveChannels({
       firecrawlKey: FIRECRAWL_KEY,
       perplexityKey: PERPLEXITY_KEY,
@@ -138,6 +136,7 @@ serveEnrichStage("research", async (admin, _env, row) => {
       locationLine,
       category,
       serpContext: serpSummary ?? undefined,
+      discoverCandidates: cfg.discoverCandidates,
       have: {
         instagram: resolvedInstagram,
         facebook: resolvedFacebook,
@@ -147,6 +146,8 @@ serveEnrichStage("research", async (admin, _env, row) => {
         tiktok: resolvedTikTok,
         tripadvisor: resolvedTripAdvisor,
         yelp: resolvedYelp,
+        phone: resolvedPhone,
+        email: resolvedEmail,
       },
     });
     if (!resolvedInstagram && found.instagram_url) resolvedInstagram = found.instagram_url;
@@ -157,34 +158,16 @@ serveEnrichStage("research", async (admin, _env, row) => {
     if (!resolvedTikTok && found.tiktok_url) resolvedTikTok = found.tiktok_url;
     if (!resolvedTripAdvisor && found.tripadvisor_url) resolvedTripAdvisor = found.tripadvisor_url;
     if (!resolvedYelp && found.yelp_url) resolvedYelp = found.yelp_url;
+    if (!resolvedPhone && found.phone) resolvedPhone = found.phone;
+    if (!resolvedEmail && found.email) resolvedEmail = found.email;
 
-    // Phone + email in parallel (each a single Perplexity agent call).
-    let phoneVia: string | null = null;
-    let emailVia: string | null = null;
-    await Promise.all([
-      (async () => {
-        if (resolvedPhone || !PERPLEXITY_KEY) return;
-        const phone = await discoverPhonePerplexity(PERPLEXITY_KEY, name, locationLine, category, {
-          website: resolvedWebsite,
-          serpContext: serpSummary ?? undefined,
-        });
-        if (phone) { resolvedPhone = phone; phoneVia = "perplexity"; }
-      })(),
-      (async () => {
-        if (resolvedEmail || !PERPLEXITY_KEY) return;
-        const email = await discoverEmailPerplexity(PERPLEXITY_KEY, name, locationLine, category, {
-          website: resolvedWebsite,
-          serpContext: serpSummary ?? undefined,
-        });
-        if (email) { resolvedEmail = email; emailVia = "perplexity"; }
-      })(),
-    ]);
     sources.discovery = {
       ok: true, via: found.via, provenance: found.provenance,
       instagram: !!resolvedInstagram, facebook: !!resolvedFacebook, website: !!resolvedWebsite,
       opentable: !!resolvedOpenTable, ubereats: !!resolvedUberEats, tiktok: !!resolvedTikTok,
       tripadvisor: !!resolvedTripAdvisor, yelp: !!resolvedYelp,
-      phone: !!resolvedPhone, phone_via: phoneVia, email: !!resolvedEmail, email_via: emailVia,
+      phone: !!resolvedPhone, phone_via: found.via.phone ?? null,
+      email: !!resolvedEmail, email_via: found.via.email ?? null,
     };
   }
 
@@ -208,8 +191,8 @@ serveEnrichStage("research", async (admin, _env, row) => {
   // ━━━ S4 — parallel source gather: IG ‖ FB ━━━
   // Website CONTENT is no longer gathered: enrichment builds description/tags/
   // category from the Google spine + reviews + the Perplexity SERP blurb (+ IG),
-  // and never scrapes the site body. S3 above still Firecrawl-scrapes the footer
-  // to resolve social/reservation links.
+  // and never scrapes the site body. S3 discovery is Firecrawl SEARCH only (no
+  // footer scrape) → Agent Y selection.
   const runInstagram = !!APIFY_KEY && (!!igHandle || !!fbHandleCandidate || !!PERPLEXITY_KEY);
   const runFacebook = !!APIFY_KEY && !!resolvedFacebook;
 
@@ -225,6 +208,7 @@ serveEnrichStage("research", async (admin, _env, row) => {
         place: { name, locationLine, website: resolvedWebsite, facebook: resolvedFacebook, category },
         igHandle,
         fbHandleCandidate,
+        gatherInstagramDepth: cfg.gatherInstagramDepth,
         gatherInstagramPosts: cfg.gatherInstagramPosts,
       });
     })(),

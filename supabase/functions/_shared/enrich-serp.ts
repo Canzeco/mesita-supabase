@@ -1,9 +1,9 @@
-// Atlas SERP summary — Step S2 · P2 (Perplexity, niche). A fast Perplexity
+// Atlas SERP summary — Step S3, "Agent X" (Perplexity Agent, pro-search). A fast
 // research pass that returns a SHORT web-grounded editorial blurb (vibe,
 // reputation, signature dishes/drinks, notable press) used as SOFT context only —
 // never an authoritative source of facts, ratings, or prices. Its summary grounds
-// P3's discovery prompts AND the final Cognition synthesis. Shares the one
-// Perplexity Agent client (perplexity-agent.ts) with P3.
+// Agent Y's link selection (enrich-channel-discovery.ts) AND the final synthesis.
+// Shares the one Perplexity Agent client (perplexity-agent.ts) with Agent Y.
 
 import { callPerplexityAgent } from "./perplexity-agent.ts";
 
@@ -12,8 +12,19 @@ const SERP_SCHEMA = {
   properties: { summary: { type: ["string", "null"] } },
 } as const;
 
+// Agent X — SERP AI Summary (child G / MESITA-204). This blurb is SOFT grounding
+// consumed twice downstream: it anchors Agent Y's link selection and seeds the
+// final About synthesis. So it must be identity-rich (what/where/why-notable) yet
+// strictly non-authoritative — no facts a later step will persist as truth.
 const SERP_INSTRUCTIONS =
-  "Provide brief, web-grounded editorial context about a place. Output only JSON matching the schema. Never fabricate. Prefer a null summary over guessing.";
+  "You are a research assistant that writes ONE short, web-grounded editorial " +
+  "paragraph about a place, used only as soft background context for later steps. " +
+  "Capture its identity and character — what it is, its vibe/atmosphere, reputation, " +
+  "signature dishes or drinks, and any notable press or recognition. Do NOT state " +
+  "ratings, prices, addresses, phone numbers, hours, or any precise fact a reader " +
+  "could quote as authoritative. Ground every claim in what you actually find on the " +
+  "web; invent nothing. If you cannot find a place matching the given name and " +
+  "location, prefer a null summary over guessing. Output ONLY JSON matching the schema.";
 
 // Web-grounded editorial color for a place. Returns the summary string (or null
 // when the agent had nothing useful / failed) plus a diagnostic for
