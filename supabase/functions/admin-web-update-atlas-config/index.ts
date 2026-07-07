@@ -7,9 +7,12 @@
 // optional; only the keys present in the body are written, so the UI can
 // save one control at a time:
 //
-//   gatherGoogleImages (≤10), gatherInstagramPosts (≤30)
+//   gatherGoogleImages (≤10)
+//   gatherInstagramDepth (1–30, download) / gatherInstagramPosts (≤10, keep ≤ depth)
 //   analyzeGoogleImages (≤10) / analyzeInstagramImages (≤20)
 //   saveTotalImages (≤20)      → atlas_save_total_images (source-independent)
+//   discover{Website,Instagram,Facebook,Opentable,Ubereats}N (0–10, per-source
+//     Firecrawl Search candidate counts for link discovery)
 //   imageAnalysisPrompt / imageSortingPrompt
 //
 // Auth: caller's JWT email must be in public.super_admins.
@@ -24,8 +27,10 @@ import {
 } from "../_shared/auth.ts";
 
 type Body = {
-  // Image funnel — GATHER (pull per source, ≤10)
+  // Image funnel — GATHER. Google: single pre-sorted cap (≤10). Instagram: split
+  // into download DEPTH (1–30) + keep-count (≤10, ≤ depth).
   gatherGoogleImages?: number;
+  gatherInstagramDepth?: number;
   gatherInstagramPosts?: number;
   // Image funnel — ANALYZE (vision per source, ≤10) + final SAVE (≤20, all sources)
   imageVisionEnabled?: boolean;
@@ -37,6 +42,12 @@ type Body = {
   synthesisQuality?: string;
   visionQuality?: string;
   perRunCostCapUsd?: number;
+  // Link discovery — per-source Firecrawl Search candidate counts (0–10).
+  discoverWebsiteN?: number;
+  discoverInstagramN?: number;
+  discoverFacebookN?: number;
+  discoverOpentableN?: number;
+  discoverUbereatsN?: number;
 };
 
 const QUALITY_VALUES = new Set(["economy", "standard", "high"]);
@@ -78,10 +89,18 @@ Deno.serve(async (req) => {
     patch.atlas_gather_google_images = n;
   }
 
-  if (body.gatherInstagramPosts !== undefined) {
-    const n = intInRange(body.gatherInstagramPosts, 0, 30);
+  if (body.gatherInstagramDepth !== undefined) {
+    const n = intInRange(body.gatherInstagramDepth, 1, 30);
     if (n === null) {
-      return json({ ok: false, error: "gatherInstagramPosts must be an integer 0-30" }, 400);
+      return json({ ok: false, error: "gatherInstagramDepth must be an integer 1-30" }, 400);
+    }
+    patch.atlas_gather_instagram_depth = n;
+  }
+
+  if (body.gatherInstagramPosts !== undefined) {
+    const n = intInRange(body.gatherInstagramPosts, 0, 10);
+    if (n === null) {
+      return json({ ok: false, error: "gatherInstagramPosts must be an integer 0-10" }, 400);
     }
     patch.atlas_gather_instagram_posts = n;
   }
@@ -169,6 +188,24 @@ Deno.serve(async (req) => {
     patch.atlas_per_run_cost_cap_usd = Math.round(body.perRunCostCapUsd * 100) / 100;
   }
 
+  // ── Link discovery — per-source Firecrawl Search candidate counts (0–10) ──
+  const discoverKnobs: [keyof Body, string][] = [
+    ["discoverWebsiteN", "atlas_discover_website_n"],
+    ["discoverInstagramN", "atlas_discover_instagram_n"],
+    ["discoverFacebookN", "atlas_discover_facebook_n"],
+    ["discoverOpentableN", "atlas_discover_opentable_n"],
+    ["discoverUbereatsN", "atlas_discover_ubereats_n"],
+  ];
+  for (const [bodyKey, col] of discoverKnobs) {
+    const raw = body[bodyKey];
+    if (raw === undefined) continue;
+    const n = intInRange(raw, 0, 10);
+    if (n === null) {
+      return json({ ok: false, error: `${bodyKey} must be an integer 0-10` }, 400);
+    }
+    patch[col] = n;
+  }
+
   if (Object.keys(patch).length === 0) {
     return json({ ok: false, error: "Nothing to update" }, 400);
   }
@@ -179,7 +216,7 @@ Deno.serve(async (req) => {
     .update(patch)
     .eq("id", 1)
     .select(
-      "atlas_gather_google_images, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, updated_at",
+      "atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_synthesis_quality, atlas_vision_quality, atlas_per_run_cost_cap_usd, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n, updated_at",
     )
     .single();
   if (error) {
@@ -192,6 +229,7 @@ Deno.serve(async (req) => {
   return json({
     ok: true,
     atlasGatherGoogleImages: data.atlas_gather_google_images,
+    atlasGatherInstagramDepth: data.atlas_gather_instagram_depth,
     atlasGatherInstagramPosts: data.atlas_gather_instagram_posts,
     atlasImageVisionEnabled: data.atlas_image_vision_enabled,
     atlasAnalyzeGoogleImages: data.atlas_analyze_google_images,
@@ -202,6 +240,11 @@ Deno.serve(async (req) => {
     atlasSynthesisQuality: data.atlas_synthesis_quality,
     atlasVisionQuality: data.atlas_vision_quality,
     atlasPerRunCostCapUsd: data.atlas_per_run_cost_cap_usd,
+    atlasDiscoverWebsiteN: data.atlas_discover_website_n,
+    atlasDiscoverInstagramN: data.atlas_discover_instagram_n,
+    atlasDiscoverFacebookN: data.atlas_discover_facebook_n,
+    atlasDiscoverOpentableN: data.atlas_discover_opentable_n,
+    atlasDiscoverUbereatsN: data.atlas_discover_ubereats_n,
     updatedAt: data.updated_at,
   });
 });
