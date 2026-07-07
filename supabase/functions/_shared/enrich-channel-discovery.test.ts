@@ -1,5 +1,15 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { validateFieldUrl } from "./enrich-channel-discovery.ts";
+import { resolveChannels, validateFieldUrl } from "./enrich-channel-discovery.ts";
+
+// Zero candidate counts — irrelevant to the no-network paths below (they return
+// before any Firecrawl/Perplexity call), but the field is required.
+const NO_COUNTS = {
+  website_url: 0,
+  instagram_url: 0,
+  facebook_url: 0,
+  opentable_url: 0,
+  uber_eats_url: 0,
+};
 
 // validateFieldUrl is the single host+shape gate every candidate passes through
 // (footer link, Perplexity answer, citation, degraded search) before it's trusted.
@@ -58,4 +68,79 @@ Deno.test("wrong host for the field returns null", () => {
     null,
   );
   assertEquals(validateFieldUrl("tiktok_url", "https://www.instagram.com/pujol"), null);
+});
+
+// ── resolveChannels orchestration (no-network early-return paths) ────────────
+
+const BASE = {
+  name: "Pujol",
+  city: "Mexico City",
+  locationLine: "Mexico City",
+  category: "restaurant",
+  discoverCandidates: NO_COUNTS,
+};
+
+Deno.test("resolveChannels: fully seeded + no provider keys → freezes every field", async () => {
+  const r = await resolveChannels({
+    ...BASE,
+    have: {
+      website: "https://pujol.com.mx",
+      instagram: "https://www.instagram.com/pujolrestaurant",
+      facebook: "https://www.facebook.com/pujolmx",
+      opentable: null,
+      uberEats: null,
+      phone: "+525554500000",
+      email: "hola@pujol.com.mx",
+    },
+  });
+  // Seeded channels are returned verbatim, tagged 'seed'.
+  assertEquals(r.website_url, "https://pujol.com.mx");
+  assertEquals(r.via.website_url, "seed");
+  // Phone + email are now part of the same resolve contract (child B fold).
+  assertEquals(r.phone, "+525554500000");
+  assertEquals(r.email, "hola@pujol.com.mx");
+  assertEquals(r.via.phone, "seed");
+  assertEquals(r.via.email, "seed");
+});
+
+Deno.test("resolveChannels: missing fields but no keys → no fill, no network, missing stays null", async () => {
+  const r = await resolveChannels({
+    ...BASE,
+    // both keys absent → the guard returns the seed unchanged before any call.
+    have: {
+      website: null,
+      instagram: null,
+      facebook: null,
+      opentable: null,
+      uberEats: null,
+      phone: null,
+      email: null,
+    },
+  });
+  assertEquals(r.website_url, null);
+  assertEquals(r.instagram_url, null);
+  assertEquals(r.phone, null);
+  assertEquals(r.email, null);
+  // Nothing was resolved, so no provenance/via was recorded.
+  assertEquals(Object.keys(r.via).length, 0);
+  assertEquals(Object.keys(r.provenance).length, 0);
+});
+
+Deno.test("resolveChannels: a seeded phone is frozen even when a channel is missing (no keys)", async () => {
+  const r = await resolveChannels({
+    ...BASE,
+    have: {
+      website: "https://pujol.com.mx",
+      instagram: null,
+      facebook: null,
+      opentable: null,
+      uberEats: null,
+      phone: "5215554500000",
+      email: null,
+    },
+  });
+  assertEquals(r.phone, "5215554500000");
+  assertEquals(r.via.phone, "seed");
+  assertEquals(r.website_url, "https://pujol.com.mx");
+  assertEquals(r.via.website_url, "seed");
 });
