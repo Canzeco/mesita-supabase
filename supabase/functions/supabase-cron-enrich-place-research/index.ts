@@ -108,6 +108,7 @@ serveEnrichStage("research", async (admin, _env, row) => {
         apifyKey: APIFY_KEY,
         placeId: basics.google_place_id,
         gatherGoogleImages: cfg.gatherGoogleImages,
+        maxReviews: cfg.gatherReviews,
       });
       reviews = g.reviews;
       reviewCount = g.reviewCount;

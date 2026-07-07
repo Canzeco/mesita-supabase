@@ -107,6 +107,9 @@ export type EnrichConfig = {
   // pre-sorted best→worst, so gatherGoogleImages IS the preselection.
   gatherInstagramDepth: number;
   gatherInstagramPosts: number;
+  // How many Google reviews the Apify Maps scrape pulls (0–100), for synthesis
+  // grounding. Was hardcoded 100.
+  gatherReviews: number;
   // Per-source Firecrawl Search candidate counts for link discovery (S4).
   // Keyed by ChannelField-ish source name; 0 disables a source.
   discoverCandidates: {
@@ -142,7 +145,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
   const { data: cfg } = await admin
     .from("app_settings")
     .select(
-      "atlas_synthesis_quality, atlas_vision_quality, atlas_perplexity_preset, atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n",
+      "atlas_synthesis_quality, atlas_vision_quality, atlas_perplexity_preset, atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_gather_reviews, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -157,6 +160,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
     gatherGoogleImages: num(cfg?.atlas_gather_google_images, 10),
     gatherInstagramDepth: num(cfg?.atlas_gather_instagram_depth, 30),
     gatherInstagramPosts: num(cfg?.atlas_gather_instagram_posts, 10),
+    gatherReviews: num(cfg?.atlas_gather_reviews, 100),
     discoverCandidates: {
       website_url: num(cfg?.atlas_discover_website_n, 5),
       instagram_url: num(cfg?.atlas_discover_instagram_n, 5),
