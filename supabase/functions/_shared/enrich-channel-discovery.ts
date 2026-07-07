@@ -2,21 +2,25 @@
 // (MESITA-197): NO website-footer scraping. Link discovery gathers candidates
 // with Firecrawl Search — PER SOURCE, count-controlled — then a SINGLE Perplexity
 // Agent Y "Review & Select Links" pass reviews every candidate pool and picks the
-// one official URL per field (or null). Phone + email ride the same Agent Y pass.
+// one official URL per field (or null).
+//
+// SCOPE — CHANNELS ONLY. This pass resolves the place's OWN online channel URLs.
+// It does NOT discover phone or email: those come from Mesita input (a business
+// editing its own Place) or the Google Places identity spine (fetchGoogleBasics),
+// never from a web search. The enricher must never fabricate a contact detail.
 //
 //   Phase 0  SEED     keep anything already supplied (Google/Mesita); freeze it.
 //   S4       GATHER   one Firecrawl Search per still-missing source (per-source N
 //                     from config); shape-validate + dedup into a candidate pool.
 //   S5       SELECT   one Perplexity Agent Y pass reviews the pools + web context
-//                     and returns the best URL per field + phone + email.
+//                     and returns the best URL per field.
 //                     Leniency: FALSE POSITIVES > FALSE NEGATIVES — keep a
 //                     plausible official link over dropping a correct one; null
 //                     ONLY when nothing in-hand is even plausibly this place's.
 //
 // Degraded leg (no Perplexity key): per-field Firecrawl Search, first shape-valid
-// candidate wins (channels only; phone/email need the agent). Every URL — from the
-// agent answer, its citations, or the candidate pool — passes validateFieldUrl
-// (host + shape) before it is trusted.
+// candidate wins. Every URL — from the agent answer, its citations, or the
+// candidate pool — passes validateFieldUrl (host + shape) before it is trusted.
 
 import {
   canonicaliseUrl,
@@ -93,11 +97,8 @@ const FIELD_SPEC: Record<ChannelField, string> = {
 };
 
 export type ResolvedChannels = ChannelMap & {
-  // Phone + email now resolved in the SAME Agent Y pass (child B fold).
-  phone: string | null;
-  email: string | null;
   // Diagnostics only (orchestrator stuffs these into sources.discovery).
-  via: Partial<Record<ChannelField | "phone" | "email", ChannelSource>>;
+  via: Partial<Record<ChannelField, ChannelSource>>;
   provenance: Partial<Record<ChannelField, { source: ChannelSource; url: string }>>;
 };
 
@@ -271,11 +272,10 @@ async function gatherCandidates(
 
 const AGENT_Y_INSTRUCTIONS =
   "You are a meticulous reviewer that resolves a place's OWN official online " +
-  "channels and public contact details. You are given candidate URLs found by " +
-  "search plus web access. For each requested field, review the candidates and " +
-  "the web, then return the single URL that is unmistakably THIS place's own " +
-  "official presence, or null. Output ONLY strict JSON matching the schema. " +
-  "Never fabricate a URL, number, or address.";
+  "channels. You are given candidate URLs found by search plus web access. For " +
+  "each requested field, review the candidates and the web, then return the single " +
+  "URL that is unmistakably THIS place's own official presence, or null. Output " +
+  "ONLY strict JSON matching the schema. Never fabricate a URL.";
 
 export async function selectChannels(
   key: string,
@@ -285,23 +285,15 @@ export async function selectChannels(
   opts: {
     siblings?: Partial<ChannelMap>;
     serpContext?: string;
-    wantPhone?: boolean;
-    wantEmail?: boolean;
     website?: string | null;
   } = {},
-): Promise<{ channels: Partial<ChannelMap>; phone: string | null; email: string | null }> {
+): Promise<{ channels: Partial<ChannelMap> }> {
   const fields = CHANNEL_FIELDS.filter((f) => want.has(f));
-  const wantPhone = !!opts.wantPhone;
-  const wantEmail = !!opts.wantEmail;
-  if (!fields.length && !wantPhone && !wantEmail) {
-    return { channels: {}, phone: null, email: null };
-  }
+  if (!fields.length) return { channels: {} };
 
-  // Schema: every requested channel field + phone/email, each string-or-null.
+  // Schema: every requested channel field, each string-or-null.
   const properties: Record<string, { type: string[] }> = {};
   for (const f of fields) properties[f] = { type: ["string", "null"] };
-  if (wantPhone) properties.phone = { type: ["string", "null"] };
-  if (wantEmail) properties.email = { type: ["string", "null"] };
   const schema = { type: "object", properties };
 
   const candidateBlock = fields
@@ -319,14 +311,6 @@ export async function selectChannels(
     .join("\n");
 
   const askLines: string[] = fields.map((f) => `- ${FIELD_SPEC[f]}`);
-  if (wantPhone) {
-    askLines.push(
-      "- phone: the place's official public phone number in international format (e.g. +52...).",
-    );
-  }
-  if (wantEmail) {
-    askLines.push("- email: the place's official public contact email (prefer one on its own domain).");
-  }
 
   const igRule = want.has("instagram_url")
     ? "For instagram_url, prefer the venue's OWN account over a parent brand / group / " +
@@ -343,7 +327,7 @@ export async function selectChannels(
     : "";
 
   const input =
-    `Review and select the official channels + contact details for the place "${place.name}"` +
+    `Review and select the official channels for the place "${place.name}"` +
     (place.locationLine ? ` in ${place.locationLine}` : "") +
     (place.category ? ` (category: ${place.category})` : "") + ".\n\n" +
     serpLine +
@@ -361,13 +345,13 @@ export async function selectChannels(
     `Each URL must be the venue's OWN channel — NEVER a review site, ranking / "best of" ` +
     `list, guide, directory, aggregator, a single post/video, or a source you merely cited. ` +
     `A franchise / multi-location brand's MAIN account or page IS acceptable. ` +
-    `Never invent a URL, number, or address.`;
+    `Never invent a URL.`;
 
   const res = await callPerplexityAgent(key, input, schema, {
     instructions: AGENT_Y_INSTRUCTIONS,
     maxSteps: 10,
   });
-  if (!res) return { channels: {}, phone: null, email: null };
+  if (!res) return { channels: {} };
 
   const answer = res.answer;
   const hitUrls = res.hitUrls;
@@ -383,11 +367,7 @@ export async function selectChannels(
     if (valid) channels[f] = valid;
   }
 
-  return {
-    channels,
-    phone: wantPhone ? normalisePhone(answer.phone) : null,
-    email: wantEmail ? normaliseEmail(answer.email) : null,
-  };
+  return { channels };
 }
 
 // ── resolveChannels — S4 gather → S5 Agent Y select entry point ──────────────
@@ -409,8 +389,6 @@ export async function resolveChannels(opts: {
     tiktok?: string | null;
     tripadvisor?: string | null;
     yelp?: string | null;
-    phone?: string | null;
-    email?: string | null;
   };
 }): Promise<ResolvedChannels> {
   const { firecrawlKey, perplexityKey, name, city, locationLine, category, serpContext } = opts;
@@ -427,8 +405,6 @@ export async function resolveChannels(opts: {
     tripadvisor_url: opts.have.tripadvisor ?? null,
     yelp_url: opts.have.yelp ?? null,
   };
-  let phone: string | null = opts.have.phone ?? null;
-  let email: string | null = opts.have.email ?? null;
   const via: ResolvedChannels["via"] = {};
   const provenance: ResolvedChannels["provenance"] = {};
   for (const f of CHANNEL_FIELDS) {
@@ -437,8 +413,6 @@ export async function resolveChannels(opts: {
       provenance[f] = { source: "seed", url: out[f]! };
     }
   }
-  if (phone) via.phone = "seed";
-  if (email) via.email = "seed";
 
   const missing = (): Set<ChannelField> => new Set(CHANNEL_FIELDS.filter((f) => !out[f]));
   const fill = (field: ChannelField, url: string | null, source: ChannelSource): void => {
@@ -448,11 +422,9 @@ export async function resolveChannels(opts: {
     provenance[field] = { source, url };
   };
 
-  const assemble = (): ResolvedChannels => ({ ...out, phone, email, via, provenance });
+  const assemble = (): ResolvedChannels => ({ ...out, via, provenance });
 
-  const wantPhone = !phone;
-  const wantEmail = !email;
-  const nothingToDo = missing().size === 0 && !wantPhone && !wantEmail;
+  const nothingToDo = missing().size === 0;
   if (nothingToDo || (!firecrawlKey && !perplexityKey)) return assemble();
 
   // S4 — GATHER candidate pools (Firecrawl Search, per-source N). Best-effort.
@@ -461,8 +433,8 @@ export async function resolveChannels(opts: {
     pools = await gatherCandidates(firecrawlKey, name, city, [...missing()], counts);
   }
 
-  // S5 — SELECT with Agent Y (channels + phone + email in one pass). Degraded to
-  // per-field Firecrawl first-hit when no Perplexity key (phone/email need the agent).
+  // S5 — SELECT with Agent Y (channels only). Degraded to per-field Firecrawl
+  // first-hit when no Perplexity key.
   if (perplexityKey) {
     const siblings: Partial<ChannelMap> = {
       website_url: out.website_url,
@@ -474,11 +446,9 @@ export async function resolveChannels(opts: {
       { name, locationLine, category },
       missing(),
       pools,
-      { siblings, serpContext, wantPhone, wantEmail, website: out.website_url },
+      { siblings, serpContext, website: out.website_url },
     );
     for (const f of CHANNEL_FIELDS) fill(f, sel.channels[f] ?? null, "perplexity");
-    if (wantPhone && sel.phone) { phone = sel.phone; via.phone = "perplexity"; }
-    if (wantEmail && sel.email) { email = sel.email; via.email = "perplexity"; }
   } else if (firecrawlKey) {
     // Degraded leg (no Perplexity key): no Agent Y to review, so take the first
     // shape-valid candidate per field from the pools we already gathered above
@@ -487,26 +457,4 @@ export async function resolveChannels(opts: {
   }
 
   return assemble();
-}
-
-// ── phone + email normalisers (folded into Agent Y; used by selectChannels) ──
-
-// Normalise a phone candidate to E.164-ish digits (a leading + plus 7–15 digits)
-// or null. Strips spaces/punctuation; assumes the agent returns the country code.
-function normalisePhone(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const hasPlus = trimmed.startsWith("+");
-  const digits = trimmed.replace(/\D/g, "");
-  if (digits.length < 7 || digits.length > 15) return null;
-  return hasPlus ? `+${digits}` : digits;
-}
-
-// Normalise an email candidate to a lowercased, format-valid address or null.
-function normaliseEmail(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const e = raw.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) return null;
-  return e;
 }
