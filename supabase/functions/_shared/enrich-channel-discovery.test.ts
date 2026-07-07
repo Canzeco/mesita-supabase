@@ -89,18 +89,14 @@ Deno.test("resolveChannels: fully seeded + no provider keys → freezes every fi
       facebook: "https://www.facebook.com/pujolmx",
       opentable: null,
       uberEats: null,
-      phone: "+525554500000",
-      email: "hola@pujol.com.mx",
     },
   });
-  // Seeded channels are returned verbatim, tagged 'seed'.
+  // Seeded channels are returned verbatim, tagged 'seed'. (Phone + email are not
+  // part of this contract — they come from Mesita input or the Google spine.)
   assertEquals(r.website_url, "https://pujol.com.mx");
   assertEquals(r.via.website_url, "seed");
-  // Phone + email are now part of the same resolve contract (child B fold).
-  assertEquals(r.phone, "+525554500000");
-  assertEquals(r.email, "hola@pujol.com.mx");
-  assertEquals(r.via.phone, "seed");
-  assertEquals(r.via.email, "seed");
+  assertEquals(r.instagram_url, "https://www.instagram.com/pujolrestaurant");
+  assertEquals(r.via.instagram_url, "seed");
 });
 
 Deno.test("resolveChannels: missing fields but no keys → no fill, no network, missing stays null", async () => {
@@ -113,20 +109,16 @@ Deno.test("resolveChannels: missing fields but no keys → no fill, no network, 
       facebook: null,
       opentable: null,
       uberEats: null,
-      phone: null,
-      email: null,
     },
   });
   assertEquals(r.website_url, null);
   assertEquals(r.instagram_url, null);
-  assertEquals(r.phone, null);
-  assertEquals(r.email, null);
   // Nothing was resolved, so no provenance/via was recorded.
   assertEquals(Object.keys(r.via).length, 0);
   assertEquals(Object.keys(r.provenance).length, 0);
 });
 
-Deno.test("resolveChannels: a seeded phone is frozen even when a channel is missing (no keys)", async () => {
+Deno.test("resolveChannels: a seeded channel is frozen even when a sibling is missing (no keys)", async () => {
   const r = await resolveChannels({
     ...BASE,
     have: {
@@ -135,12 +127,10 @@ Deno.test("resolveChannels: a seeded phone is frozen even when a channel is miss
       facebook: null,
       opentable: null,
       uberEats: null,
-      phone: "5215554500000",
-      email: null,
     },
   });
-  assertEquals(r.phone, "5215554500000");
-  assertEquals(r.via.phone, "seed");
   assertEquals(r.website_url, "https://pujol.com.mx");
   assertEquals(r.via.website_url, "seed");
+  // The missing sibling stays null (no keys → no network fill).
+  assertEquals(r.opentable_url, null);
 });

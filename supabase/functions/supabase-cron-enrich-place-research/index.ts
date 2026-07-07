@@ -9,9 +9,11 @@
 //   S1  Google spine re-check (fetchGoogleBasics — hard gate; failure lands
 //       terminal stage='failed' + content_status='failed')
 //   S2  parallel: Apify Google Maps (reviews + images) ‖ Perplexity SERP blurb
-//   S3  channel discovery: per-source Firecrawl Search gather (S4) → one
-//       Perplexity Agent Y "Review & Select Links" pass (S5) that also folds in
-//       phone + email. No website-footer scraping.
+//   S3  channel discovery (channels ONLY): per-source Firecrawl Search gather
+//       (S4) → one Perplexity Agent Y "Review & Select Links" pass (S5). No
+//       website-footer scraping. Phone + email are NOT web-searched — they come
+//       from Mesita input or the Google spine, and enrichment never clobbers a
+//       Mesita-entered contact.
 //   S4  parallel gathers: Instagram (Apify + identity judge) ‖ Facebook (Apify)
 //       (website CONTENT crawl retired — enrichment no longer reads the site)
 //
@@ -108,7 +110,11 @@ serveEnrichStage("research", async (admin, _env, row) => {
     })(),
   ]);
 
-  // ━━━ S3 — channel discovery + phone/email ━━━
+  // ━━━ S3 — channel discovery (channels ONLY) ━━━
+  // Phone + email are NOT discovered here: they come from Mesita input (a
+  // business editing its own Place) or the Google identity spine, never from a
+  // web search. See enrich-channel-discovery.ts. Below we take care never to
+  // OVERWRITE a Mesita-entered phone/email with a null (partial-update contract).
   let resolvedInstagram = basics.instagram_url;
   let resolvedFacebook = basics.facebook_url;
   let resolvedWebsite = basics.website_url;
@@ -117,17 +123,13 @@ serveEnrichStage("research", async (admin, _env, row) => {
   let resolvedTikTok = basics.tiktok_url;
   let resolvedTripAdvisor = basics.tripadvisor_url;
   let resolvedYelp = basics.yelp_url;
-  let resolvedPhone = basics.phone;
-  let resolvedEmail = basics.email;
 
   const needsDiscovery = (!!FIRECRAWL_KEY || !!PERPLEXITY_KEY) &&
     (!resolvedInstagram || !resolvedFacebook || !resolvedWebsite || !resolvedOpenTable ||
-      !resolvedUberEats || !resolvedTikTok || !resolvedTripAdvisor || !resolvedYelp ||
-      !resolvedPhone || !resolvedEmail);
+      !resolvedUberEats || !resolvedTikTok || !resolvedTripAdvisor || !resolvedYelp);
 
   if (needsDiscovery) {
-    // S4 gather (Firecrawl Search, per-source N) → S5 Agent Y select. Phone +
-    // email are now resolved in the SAME Agent Y pass (no separate calls).
+    // S4 gather (Firecrawl Search, per-source N) → S5 Agent Y select.
     const found = await resolveChannels({
       firecrawlKey: FIRECRAWL_KEY,
       perplexityKey: PERPLEXITY_KEY,
@@ -146,8 +148,6 @@ serveEnrichStage("research", async (admin, _env, row) => {
         tiktok: resolvedTikTok,
         tripadvisor: resolvedTripAdvisor,
         yelp: resolvedYelp,
-        phone: resolvedPhone,
-        email: resolvedEmail,
       },
     });
     if (!resolvedInstagram && found.instagram_url) resolvedInstagram = found.instagram_url;
@@ -158,16 +158,12 @@ serveEnrichStage("research", async (admin, _env, row) => {
     if (!resolvedTikTok && found.tiktok_url) resolvedTikTok = found.tiktok_url;
     if (!resolvedTripAdvisor && found.tripadvisor_url) resolvedTripAdvisor = found.tripadvisor_url;
     if (!resolvedYelp && found.yelp_url) resolvedYelp = found.yelp_url;
-    if (!resolvedPhone && found.phone) resolvedPhone = found.phone;
-    if (!resolvedEmail && found.email) resolvedEmail = found.email;
 
     sources.discovery = {
       ok: true, via: found.via, provenance: found.provenance,
       instagram: !!resolvedInstagram, facebook: !!resolvedFacebook, website: !!resolvedWebsite,
       opentable: !!resolvedOpenTable, ubereats: !!resolvedUberEats, tiktok: !!resolvedTikTok,
       tripadvisor: !!resolvedTripAdvisor, yelp: !!resolvedYelp,
-      phone: !!resolvedPhone, phone_via: found.via.phone ?? null,
-      email: !!resolvedEmail, email_via: found.via.email ?? null,
     };
   }
 
@@ -179,11 +175,16 @@ serveEnrichStage("research", async (admin, _env, row) => {
   place.tiktok_url = resolvedTikTok;
   place.tripadvisor_url = resolvedTripAdvisor;
   place.yelp_url = resolvedYelp;
-  place.phone = resolvedPhone;
-  place.email = resolvedEmail;
 
-  const resolvedCount = ["facebook_url", "website_url", "opentable_url", "uber_eats_url", "phone", "email"]
-    .filter((k) => !!place[k]).length + (resolvedInstagram ? 1 : 0);
+  // Contacts: phone stays whatever Google gave us (from `...basics`), but only
+  // when present — a null Google phone must NOT clobber a Mesita-entered one, so
+  // drop the key entirely and let the partial UPDATE leave the DB value be. The
+  // enricher never owns email at all, so it never writes it.
+  if (!place.phone) delete place.phone;
+  delete place.email;
+
+  const resolvedCount = ["facebook_url", "website_url", "opentable_url", "uber_eats_url"]
+    .filter((k) => !!place[k]).length + (resolvedInstagram ? 1 : 0) + (place.phone ? 1 : 0);
 
   const igHandle = instagramHandleFromUrl(resolvedInstagram);
   const fbHandleCandidate = fbSlugCandidate(resolvedFacebook);
