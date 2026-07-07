@@ -43,15 +43,17 @@ Deno.serve(async (req) => {
   if (!projectId) return json({ ok: false, error: "Missing projectId" }, 400);
 
   // Resolve the identity spine the pipeline re-checks first (fetchGoogleBasics).
-  // Without a google_place_id the research stage can't run, so reject early.
-  const { data: project, error: projErr } = await admin
-    .from("projects")
+  // google_place_id lives on the places base table (places.id == the project id
+  // == the editor's projectId); the projects table has no such column. Without
+  // it the research stage can't run, so reject early.
+  const { data: place, error: placeErr } = await admin
+    .from("places")
     .select("id, google_place_id")
     .eq("id", projectId)
     .maybeSingle();
-  if (projErr) return json({ ok: false, error: `projects: ${projErr.message}` }, 500);
-  if (!project) return json({ ok: false, error: "Place not found" }, 404);
-  const googlePlaceId = (project.google_place_id ?? "").toString().trim();
+  if (placeErr) return json({ ok: false, error: `places: ${placeErr.message}` }, 500);
+  if (!place) return json({ ok: false, error: "Place not found" }, 404);
+  const googlePlaceId = (place.google_place_id ?? "").toString().trim();
   if (!googlePlaceId) {
     return json(
       { ok: false, error: "Place has no Google Place ID — nothing to enrich from." },
