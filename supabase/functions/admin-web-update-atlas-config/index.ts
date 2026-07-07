@@ -206,6 +206,49 @@ Deno.serve(async (req) => {
     patch[col] = n;
   }
 
+  // ── Image-funnel monotonic lock: collection ≥ analysis ≥ selection (by sum) ──
+  // Authoritative backstop for the admin console's client-side clamp. Partial
+  // updates touch one stage at a time, so merge the patch over the current row
+  // before checking. collection = Google gather + IG keep; analysis = analyze
+  // Google + analyze IG; selection = the source-independent save total.
+  const FUNNEL_COLS = [
+    "atlas_gather_google_images",
+    "atlas_gather_instagram_posts",
+    "atlas_analyze_google_images",
+    "atlas_analyze_instagram_images",
+    "atlas_save_total_images",
+  ] as const;
+  if (FUNNEL_COLS.some((c) => c in patch)) {
+    const { data: cur } = await admin
+      .from("app_settings")
+      .select(
+        "atlas_gather_google_images, atlas_gather_instagram_posts, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_save_total_images",
+      )
+      .eq("id", 1)
+      .maybeSingle();
+    const eff = (c: (typeof FUNNEL_COLS)[number]): number => {
+      const p = patch[c];
+      if (typeof p === "number") return p;
+      const v = (cur as Record<string, unknown> | null)?.[c];
+      return typeof v === "number" ? v : 0;
+    };
+    const collection = eff("atlas_gather_google_images") + eff("atlas_gather_instagram_posts");
+    const analysis = eff("atlas_analyze_google_images") + eff("atlas_analyze_instagram_images");
+    const selection = eff("atlas_save_total_images");
+    if (collection < analysis) {
+      return json({
+        ok: false,
+        error: `Image analysis total (${analysis}) can't exceed the collection total (${collection}).`,
+      }, 400);
+    }
+    if (analysis < selection) {
+      return json({
+        ok: false,
+        error: `Image selection (${selection}) can't exceed the analysis total (${analysis}).`,
+      }, 400);
+    }
+  }
+
   if (Object.keys(patch).length === 0) {
     return json({ ok: false, error: "Nothing to update" }, 400);
   }
