@@ -113,6 +113,9 @@ export type EnrichConfig = {
   };
   // SAVE cap — final count persisted, SOURCE-INDEPENDENT, after analyze + sort.
   saveTotalImages: number;
+  // S9 gate — mirror the selected gallery into Supabase Storage. When false the
+  // pipeline skips the upload and photos render from their source URLs only.
+  saveImagesToStorage: boolean;
   visionEnabled: boolean;
   // ANALYZE caps — how many gathered images per source go to vision.
   analyzeGoogleImages: number;
@@ -134,7 +137,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
   const { data: cfg } = await admin
     .from("app_settings")
     .select(
-      "atlas_synthesis_quality, atlas_vision_quality, atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_save_total_images, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n",
+      "atlas_synthesis_quality, atlas_vision_quality, atlas_gather_google_images, atlas_gather_instagram_depth, atlas_gather_instagram_posts, atlas_save_total_images, atlas_save_images_to_storage, atlas_image_vision_enabled, atlas_analyze_google_images, atlas_analyze_instagram_images, atlas_image_analysis_prompt, atlas_image_sorting_prompt, atlas_discover_website_n, atlas_discover_instagram_n, atlas_discover_facebook_n, atlas_discover_opentable_n, atlas_discover_ubereats_n",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -156,6 +159,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
       uber_eats_url: num(cfg?.atlas_discover_ubereats_n, 2),
     },
     saveTotalImages: num(cfg?.atlas_save_total_images, 20),
+    saveImagesToStorage: (cfg?.atlas_save_images_to_storage as boolean) ?? true,
     visionEnabled: (cfg?.atlas_image_vision_enabled as boolean) ?? true,
     analyzeGoogleImages: num(cfg?.atlas_analyze_google_images, 10),
     analyzeInstagramImages: num(cfg?.atlas_analyze_instagram_images, 10),
