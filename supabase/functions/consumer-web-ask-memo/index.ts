@@ -104,6 +104,29 @@ Style:
 - Be TIME-AWARE. A hidden context note tells you the user's local time and daypart. Recommend spots that are open and fit the moment — coffee/breakfast in the early morning, lunch midday, dinner/drinks in the evening, late-night spots after hours. If the user asks for something usually closed right now (a brunch café at 2am, a bar at 7am), say so warmly and offer an open alternative. Never repeat the context note back verbatim.
 - Never invent specific addresses, prices, or phone numbers you aren't sure of; speak generally when unsure.`;
 
+// Memo's system prompt is operator-tunable: the admin console's Memo Config page
+// writes app_settings.memo_instructions (seeded with SYSTEM_PROMPT above). Read
+// the live value, falling back to the in-code default whenever the row is blank
+// or the read fails — a config hiccup must never sink Memo's voice.
+async function readMemoSystemPrompt(admin: SupabaseClient): Promise<string> {
+  try {
+    const { data, error } = await admin
+      .from("app_settings")
+      .select("memo_instructions")
+      .eq("id", 1)
+      .maybeSingle();
+    if (error) {
+      console.error("[ask-memo] memo_instructions read:", error.message);
+      return SYSTEM_PROMPT;
+    }
+    const custom = (data?.memo_instructions ?? "").toString().trim();
+    return custom.length > 0 ? custom : SYSTEM_PROMPT;
+  } catch (e) {
+    console.error("[ask-memo] memo_instructions threw:", (e as Error).message);
+    return SYSTEM_PROMPT;
+  }
+}
+
 // Memo only attaches place cards when the ask is actually place-seeking; pure
 // knowledge/chat turns ("what does al pastor mean", "how do tips work") get a
 // text-only reply. Heuristic, bilingual (ES/EN): explicit place words always
@@ -251,6 +274,12 @@ Deno.serve(async (req) => {
   // or general question gets a text-only reply (no forced cards).
   const placeSeeking = isPlaceSeeking(query);
 
+  // Memo's persona is operator-tunable from the admin console (Memo Config →
+  // app_settings.memo_instructions). Kick the read off now so it overlaps the
+  // Google leg; SYSTEM_PROMPT is the fallback when the row is blank/unreadable,
+  // so Memo never loses its voice.
+  const systemPromptPromise = readMemoSystemPrompt(admin);
+
   // Candidates FIRST (place-seeking only), so Perplexity can write its
   // recommendation ABOUT the exact cards the user sees — prose and rail stay
   // coherent. The Google leg is ~0.5s; worth the small serialization for a
@@ -267,8 +296,10 @@ Deno.serve(async (req) => {
   const onMesita = predictions.filter((p) => p.status !== "not_in_mesita").length;
   const fromGoogle = predictions.length - onMesita;
 
+  const systemPrompt = await systemPromptPromise;
   const perplexity = await answerWithPerplexity(
     perplexityKey,
+    systemPrompt,
     query,
     lat,
     lng,
@@ -296,6 +327,7 @@ Deno.serve(async (req) => {
 
 async function answerWithPerplexity(
   key: string,
+  systemPrompt: string,
   query: string,
   lat: number | null,
   lng: number | null,
@@ -304,7 +336,7 @@ async function answerWithPerplexity(
 ): Promise<{ text: string; related: string[]; citations: string[] } | null> {
   if (!key) return null;
 
-  const messages: PplxMessage[] = [{ role: "system", content: SYSTEM_PROMPT }];
+  const messages: PplxMessage[] = [{ role: "system", content: systemPrompt }];
 
   // Clamp + sanitize prior turns.
   for (const turn of (history ?? []).slice(-MAX_HISTORY)) {
