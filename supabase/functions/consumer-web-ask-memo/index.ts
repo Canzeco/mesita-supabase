@@ -89,19 +89,20 @@ type MemoBody = {
 
 // ── Tuning ─────────────────────────────────────────────────────────────
 
-const MAX_CARDS = 6;
+const MAX_CARDS = 3;
 const MAX_HISTORY = 8;
 const GOOGLE_RADIUS_M = 8000;
 
-const SYSTEM_PROMPT = `You are Memo, Mesita's warm, sharp local concierge for dining, nightlife, cafés, and experiences — with deep taste for Monterrey and Mexico generally, but able to help anywhere.
+const SYSTEM_PROMPT = `You are Memo, the AI of Mesita — a warm, sharp local concierge for dining, nightlife, cafés, and experiences, with deep taste for Monterrey and Mexico generally, but able to help anywhere.
 
 Style:
 - Reply in PLAIN TEXT — the chat renders raw, so NO markdown: no **bold**, no *italics*, no # headings, no backticks, no bullet syntax. Emojis are welcome and encouraged (they render fine).
 - Reply in the SAME language the user wrote in (Spanish or English). Default to a friendly, concise voice.
 - Keep it SHORT: 2–4 sentences, mobile-chat length. Be opinionated and specific, not a bland list.
-- Place cards may appear below your message ONLY when the user is actually looking for places. When they do, give a quick confident take and let the cards carry the details — don't dump a long numbered list. For general questions (definitions, how things work, trivia), just answer conversationally; do NOT refer to cards that won't be there.
-- You can answer ANY question (hours, neighborhoods, what to order, "is X good for a date", trivia), but stay in the helpful-concierge lane.
+- Place cards are OPTIONAL. They only appear when the user is genuinely looking for places, and there may be anywhere from zero to three — never assume there are three, and never pad. For general questions (definitions, how things work, trivia, hours, what to order), just answer conversationally and do NOT refer to cards. When cards do appear, give a quick confident take and let them carry the details — don't dump a long numbered list.
+- You can answer ANY question, but stay in the helpful-concierge lane.
 - Be TIME-AWARE. A hidden context note tells you the user's local time and daypart. Recommend spots that are open and fit the moment — coffee/breakfast in the early morning, lunch midday, dinner/drinks in the evening, late-night spots after hours. If the user asks for something usually closed right now (a brunch café at 2am, a bar at 7am), say so warmly and offer an open alternative. Never repeat the context note back verbatim.
+- You may know a few basics about the user (first name, age, sex, and their location). Use them lightly — greet by first name when it feels natural and tailor suggestions to where and who they are — but never recite their personal details back to them.
 - Never invent specific addresses, prices, or phone numbers you aren't sure of; speak generally when unsure.`;
 
 // Memo's system prompt is operator-tunable: the admin console's Memo Config page
@@ -124,6 +125,52 @@ async function readMemoSystemPrompt(admin: SupabaseClient): Promise<string> {
   } catch (e) {
     console.error("[ask-memo] memo_instructions threw:", (e as Error).message);
     return SYSTEM_PROMPT;
+  }
+}
+
+// Whole years from an ISO birthday (YYYY-MM-DD), or null when absent/implausible.
+function ageFromBirthday(birthday: unknown): number | null {
+  if (typeof birthday !== "string" || birthday.length < 4) return null;
+  const dob = new Date(birthday);
+  if (isNaN(dob.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const m = now.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age -= 1;
+  return age >= 13 && age <= 120 ? age : null;
+}
+
+// A short profile clause for Memo's hidden context — the signed-in user's first
+// name, age and sex from the consumers profile (keyed by auth user id). Only the
+// parts we actually have are included; returns null when there's nothing useful.
+// Never let a profile miss sink the answer.
+async function readConsumerContext(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<string | null> {
+  try {
+    const { data, error } = await admin
+      .from("consumers")
+      .select("first_name, full_name, sex, birthday")
+      .eq("id", userId)
+      .maybeSingle();
+    if (error || !data) {
+      if (error) console.error("[ask-memo] profile read:", error.message);
+      return null;
+    }
+    const bits: string[] = [];
+    const name = ((data.first_name ?? data.full_name ?? "") as string)
+      .trim()
+      .split(/\s+/)[0];
+    if (name) bits.push(`named ${name}`);
+    const age = ageFromBirthday(data.birthday);
+    if (age) bits.push(`${age} years old`);
+    const sex = (data.sex ?? "").toString().trim().toLowerCase();
+    if (sex) bits.push(sex);
+    return bits.length > 0 ? bits.join(", ") : null;
+  } catch (e) {
+    console.error("[ask-memo] profile threw:", (e as Error).message);
+    return null;
   }
 }
 
@@ -280,6 +327,14 @@ Deno.serve(async (req) => {
   // so Memo never loses its voice.
   const systemPromptPromise = readMemoSystemPrompt(admin);
 
+  // Signed-in users get a personalised concierge: Memo learns their first name,
+  // age and sex from the consumers profile so it can greet by name and tailor
+  // suggestions. Read concurrently; signed-out (or a miss) just means no profile
+  // context — location still flows from the client either way.
+  const profileCtxPromise = user
+    ? readConsumerContext(admin, user.id)
+    : Promise.resolve<string | null>(null);
+
   // Candidates FIRST (place-seeking only), so Perplexity can write its
   // recommendation ABOUT the exact cards the user sees — prose and rail stay
   // coherent. The Google leg is ~0.5s; worth the small serialization for a
@@ -296,13 +351,17 @@ Deno.serve(async (req) => {
   const onMesita = predictions.filter((p) => p.status !== "not_in_mesita").length;
   const fromGoogle = predictions.length - onMesita;
 
-  const systemPrompt = await systemPromptPromise;
+  const [systemPrompt, profileCtx] = await Promise.all([
+    systemPromptPromise,
+    profileCtxPromise,
+  ]);
   const perplexity = await answerWithPerplexity(
     perplexityKey,
     systemPrompt,
     query,
     lat,
     lng,
+    profileCtx,
     body.history,
     predictions,
   );
@@ -331,6 +390,7 @@ async function answerWithPerplexity(
   query: string,
   lat: number | null,
   lng: number | null,
+  profileCtx: string | null,
   history: MemoBody["history"],
   candidates: Prediction[],
 ): Promise<{ text: string; related: string[]; citations: string[] } | null> {
@@ -351,6 +411,7 @@ async function answerWithPerplexity(
   // spots and flag off-hours asks.
   const { clock, daypart } = localMoment(lng);
   const ctxBits: string[] = [];
+  if (profileCtx) ctxBits.push(profileCtx);
   if (lat !== null && lng !== null) {
     ctxBits.push(`near latitude ${lat.toFixed(4)}, longitude ${lng.toFixed(4)}`);
   }
