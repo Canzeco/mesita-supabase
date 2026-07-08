@@ -14,6 +14,15 @@
 // The actual work lives in the public.admin_reset_database() SQL
 // function (security definer, service-role only). This EF just gates and
 // delegates.
+//
+// Storage: nothing is purged here. The reset intentionally preserves both
+// image buckets — `place-images` (current gallery) and `venue-images`
+// (legacy gallery whose public URLs must keep resolving; see migrations
+// 20260705110000 and 0062). The old `atlas` snapshot bucket this EF used
+// to purge was removed for good on 2026-05-31 (migration 0062) and must
+// not return, so there is no bucket left to clear. (The prior purge also
+// listed via `.from("storage.objects")`, which is not a valid PostgREST
+// path and errored on every run — dropped along with the dead bucket.)
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
@@ -27,9 +36,6 @@ import {
 type Body = { confirm?: string };
 
 const CONFIRM_PHRASE = "RESET";
-// Invariant: place-images must survive admin reset (do not delete files).
-// We only clear legacy atlas artifacts here.
-const RESET_BUCKETS = ["atlas"] as const;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -65,54 +71,5 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `reset_failed: ${error.message}` }, 500);
   }
 
-  const storage = await purgeResetBuckets(admin);
-
-  return json({ ok: true, result: data, storage });
+  return json({ ok: true, result: data });
 });
-
-async function purgeResetBuckets(admin: ReturnType<typeof adminClient>) {
-  const summary: Record<string, { found: number; removed: number; errors: string[] }> = {};
-
-  for (const bucket of RESET_BUCKETS) {
-    const errors: string[] = [];
-    let found = 0;
-    let removed = 0;
-    let offset = 0;
-    const pageSize = 500;
-
-    while (true) {
-      const { data, error } = await admin
-        .from("storage.objects")
-        .select("name")
-        .eq("bucket_id", bucket)
-        .range(offset, offset + pageSize - 1);
-      if (error) {
-        errors.push(`list: ${error.message}`);
-        break;
-      }
-      if (!data || data.length === 0) break;
-
-      const names = data
-        .map((r) => (typeof r.name === "string" ? r.name : ""))
-        .filter(Boolean);
-      found += names.length;
-
-      for (let i = 0; i < names.length; i += 100) {
-        const chunk = names.slice(i, i + 100);
-        const { error: removeErr } = await admin.storage.from(bucket).remove(chunk);
-        if (removeErr) {
-          errors.push(`remove: ${removeErr.message}`);
-        } else {
-          removed += chunk.length;
-        }
-      }
-
-      if (data.length < pageSize) break;
-      offset += pageSize;
-    }
-
-    summary[bucket] = { found, removed, errors };
-  }
-
-  return summary;
-}
