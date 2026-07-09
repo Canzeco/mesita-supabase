@@ -22,6 +22,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
 import { createMinimalPlace } from "../_shared/create-place.ts";
+import { consumeConsumerCreateQuota } from "../_shared/create-quota.ts";
 
 type Body = { googlePlaceId?: string; placeId?: string; exec_at?: string };
 
@@ -46,6 +47,16 @@ Deno.serve(async (req) => {
   if (!googlePlaceId) return json({ ok: false, error: "placeId is required" }, 400);
 
   const admin = adminClient(env);
+
+  // Same per-consumer quota as consumer-web-create-place — this alias is an
+  // equal-privilege create path and must not be a bypass.
+  const quota = await consumeConsumerCreateQuota(
+    admin,
+    authRes.user.id,
+    googlePlaceId,
+    "consumer-web-schedule-project-creation",
+  );
+  if (!quota.ok) return quota.response;
 
   const created = await createMinimalPlace({
     admin,

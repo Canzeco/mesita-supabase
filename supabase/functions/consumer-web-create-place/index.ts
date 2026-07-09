@@ -19,6 +19,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
 import { createMinimalPlace } from "../_shared/create-place.ts";
+import { consumeConsumerCreateQuota } from "../_shared/create-quota.ts";
 
 // `googlePlaceId` is the canonical key; legacy `placeId` accepted until every
 // client sends the new key (same contract as business-web-create-project).
@@ -47,6 +48,16 @@ Deno.serve(async (req) => {
   }
 
   const admin = adminClient(env);
+
+  // Per-consumer rolling 24 h quota — every attempt is metered BEFORE any
+  // Google spend (create-quota.ts has the abuse rationale).
+  const quota = await consumeConsumerCreateQuota(
+    admin,
+    authRes.user.id,
+    googlePlaceId,
+    "consumer-web-create-place",
+  );
+  if (!quota.ok) return quota.response;
 
   const created = await createMinimalPlace({
     admin,
