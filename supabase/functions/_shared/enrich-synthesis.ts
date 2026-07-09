@@ -106,10 +106,13 @@ export async function synthesizeProfile(input: {
     `matching the schema. Write "description" as the ` +
     `public About section for the Place page: a rich, inviting, factual ` +
     `narrative of roughly ${ENRICH_DESCRIPTION_TARGET_WORDS} words (max ` +
-    `${ENRICH_DESCRIPTION_MAX} characters). Use short paragraphs. Cover ` +
-    `atmosphere, cuisine, signature dishes or experiences, history or ` +
-    `neighborhood context, and what makes a visit worthwhile — only when ` +
-    `the sources support it. No filler or invented detail. ` +
+    `${ENRICH_DESCRIPTION_MAX} characters). ` +
+    `CRITICAL — paragraphs: "description" MUST be several short paragraphs ` +
+    `separated by a blank line (the two-character sequence \\n\\n). Never ` +
+    `return one unbroken wall of text. Aim for 3–6 paragraphs; each ` +
+    `paragraph is 2–4 sentences on one idea (atmosphere, cuisine, ` +
+    `signature dishes or experiences, history or neighborhood, why visit) ` +
+    `— only when the sources support it. No filler or invented detail. ` +
     `"description" and every other text field MUST be a single JSON string — ` +
     `never an array or nested object. ` +
     `Use null or [] for anything the ` +
@@ -127,7 +130,8 @@ export async function synthesizeProfile(input: {
     JSON.stringify(PROFILE_SCHEMA.properties) +
     " Text fields (zone, city, executive_chef, editorial_summary, description) " +
     "are single JSON strings — never arrays or nested objects. " +
-    "Never invent ratings, reviewer quotes, prices, or a chef's name.";
+    "For description: separate paragraphs with blank lines (\\n\\n); never one " +
+    "continuous block. Never invent ratings, reviewer quotes, prices, or a chef's name.";
 
   try {
     const r = await fetch(OPENAI_URL, {
@@ -185,6 +189,43 @@ export function asProfileText(v: unknown): string | null {
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
+// Ensure the public About is readable paragraphs, not one mambo-jumbo block.
+// - Collapse runs of whitespace inside a paragraph.
+// - Normalize any mix of single/double newlines into blank-line breaks.
+// - If the model still returned one wall of text, split on sentence ends into
+//   ~2–4 sentence paragraphs (skips short blurbs that don't need splitting).
+export function formatAboutParagraphs(raw: string): string {
+  const trimmed = raw.replace(/\r\n/g, "\n").trim();
+  if (!trimmed) return "";
+
+  // Prefer blank-line breaks; if the model only used single newlines, those
+  // become paragraphs too. Collapse soft wraps inside a paragraph last.
+  let paragraphs = trimmed.split(/\n\s*\n+/).map((p) => p.trim()).filter(Boolean);
+  if (paragraphs.length === 1 && /\n/.test(paragraphs[0])) {
+    paragraphs = paragraphs[0].split(/\n+/).map((p) => p.trim()).filter(Boolean);
+  }
+  paragraphs = paragraphs.map((p) =>
+    p.replace(/[ \t]*\n[ \t]*/g, " ").replace(/[ \t]+/g, " ").trim()
+  ).filter(Boolean);
+
+  // Still one block and long enough → sentence-pack into paragraphs.
+  if (paragraphs.length === 1 && paragraphs[0].length > 280) {
+    const sentences = paragraphs[0]
+      .match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g)
+      ?.map((s) => s.trim())
+      .filter(Boolean) ?? [paragraphs[0]];
+    if (sentences.length >= 3) {
+      const packed: string[] = [];
+      for (let i = 0; i < sentences.length; i += 3) {
+        packed.push(sentences.slice(i, i + 3).join(" "));
+      }
+      paragraphs = packed;
+    }
+  }
+
+  return paragraphs.join("\n\n");
+}
+
 // Apply the synthesized profile onto the place update object (mutates it).
 // Only sets a field when synthesis actually produced a usable value.
 export function applyProfileToUpdate(
@@ -206,9 +247,11 @@ export function applyProfileToUpdate(
   const editorial = asProfileText(parsed.editorial_summary);
   if (editorial) update.editorial_summary = editorial;
   // The place's public About — hard cap at ~1000 words. Only overwrite when
-  // synthesis actually produced text.
+  // synthesis actually produced text. Always normalize into blank-line paragraphs.
   const description = asProfileText(parsed.description);
-  if (description) update.description = description.slice(0, ENRICH_DESCRIPTION_MAX);
+  if (description) {
+    update.description = formatAboutParagraphs(description).slice(0, ENRICH_DESCRIPTION_MAX);
+  }
   if (parsed.details && typeof parsed.details === "object" && !Array.isArray(parsed.details)) {
     update.details = parsed.details;
   }
