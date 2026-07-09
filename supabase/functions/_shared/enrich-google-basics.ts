@@ -136,7 +136,10 @@ export type GoogleBasics = {
 };
 
 export type GoogleBasicsResult =
-  | { ok: true; basics: GoogleBasics }
+  // `primaryType` is the raw Google Places (New) primary type (e.g.
+  // "cocktail_bar"). Returned alongside `basics` — NOT inside it — because it's
+  // a sourcing-gate signal (see _shared/sourcing.ts), not a persisted column.
+  | { ok: true; basics: GoogleBasics; primaryType: string | null }
   | { ok: false; code: string; error: string; status: number };
 
 // Fetch + assemble the Google identity spine for a placeId. Mirrors the old
@@ -194,6 +197,7 @@ export async function fetchGoogleBasics(
 
   return {
     ok: true,
+    primaryType: details.primaryType ?? null,
     basics: {
       google_place_id: details.id ?? placeId,
       name: name.slice(0, ENRICH_FIELD_LIMITS.placeName.max),
