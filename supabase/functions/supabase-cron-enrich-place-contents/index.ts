@@ -76,7 +76,8 @@ serveEnrichStage("contents", async (admin, env, row) => {
   const sources: Record<string, unknown> = { ...gathered.sources, image_funnel: analysis.diag, synthesis: synthDiag };
   if (parsed) applyProfileToUpdate(place, parsed);
 
-  // Category + tags read the fresh synthesis output; run them in parallel.
+  // About first (above), then category, then tags — each step feeds the next.
+  // Category + tags both ground primarily on the synthesized About.
   const [categoryList, tagVocabulary] = await Promise.all([
     fetchPlaceCategories(admin),
     fetchPlaceTags(admin),
@@ -84,30 +85,29 @@ serveEnrichStage("contents", async (admin, env, row) => {
   // 'undefined' is the create-path placeholder, not a real category — never
   // offer it to the classifier (thin-signal places would land there).
   const realCategories = categoryList.filter((c) => c.slug !== "undefined");
-  const [inferredCategory, inferredTags] = await Promise.all([
-    inferPlaceCategory(OPENAI_KEY, realCategories, {
-      name,
-      address: (place.address ?? null) as string | null,
-      editorialSummary: (place.editorial_summary ?? null) as string | null,
-      // Best grounding available, in order: the IG bio, then the About we just
-      // synthesized (it exists even when the other sources were thin).
-      description: igBio ||
-        ((place.description ?? null) as string | null)?.slice(0, 1200) || null,
-    }),
-    inferPlaceTags(OPENAI_KEY, tagVocabulary, {
-      name,
-      category,
-      description: (place.description ?? null) as string | null,
-      googleReviewsText,
-      serpSummary,
-    }),
-  ]);
+  const aboutText = ((place.description ?? null) as string | null)?.slice(0, 1500) || null;
+  const inferredCategory = await inferPlaceCategory(OPENAI_KEY, realCategories, {
+    name,
+    address: (place.address ?? null) as string | null,
+    editorialSummary: (place.editorial_summary ?? null) as string | null,
+    // Prefer the About we just synthesized; fall back to IG bio when synthesis
+    // produced nothing (thin harvest).
+    description: aboutText || igBio || null,
+  });
   if (inferredCategory) {
     place.category = inferredCategory;
     place.category_label =
       realCategories.find((c) => c.slug === inferredCategory)?.label ??
       humanizeCategorySlug(inferredCategory) ?? inferredCategory;
   }
+  const categoryForTags = (place.category ?? category) as string | null;
+  const inferredTags = await inferPlaceTags(OPENAI_KEY, tagVocabulary, {
+    name,
+    category: categoryForTags,
+    description: aboutText,
+    googleReviewsText,
+    serpSummary,
+  });
   if (inferredTags.length > 0) place.tags = inferredTags;
   sources.category = { ok: !!inferredCategory, slug: inferredCategory, candidates: realCategories.length };
   sources.tags = { ok: inferredTags.length > 0, count: inferredTags.length, vocabulary: tagVocabulary.length };
