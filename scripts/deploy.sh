@@ -16,7 +16,7 @@ PROJECT_REF="yjalywfzdelacdzccpgb"
 
 # Canonical types live in the mesita monorepo shared package (MESITA-146).
 # Single write target — apps import @mesita/supabase-contract.
-TYPES_TARGET="../mesita/packages/supabase-contract/src/database.types.ts"
+TYPES_TARGET="../mesita-monorepo/packages/supabase-contract/src/database.types.ts"
 
 # LEGACY (one cycle): per-app copies in the old mesita-web-* repos.
 # Keep commented until Vercel Phase 2 flips deploys to the monorepo, then delete.

@@ -57,11 +57,11 @@ if (!workspaceOverride) {
 const REPOS = [
   { label: "workspace-root", dir: workspace },
   { label: "mesita-supabase", dir: join(workspace, "mesita-supabase") },
-  { label: "mesita", dir: join(workspace, "mesita") },
-  { label: "mesita/apps/admin", dir: join(workspace, "mesita", "apps", "admin") },
-  { label: "mesita/apps/business", dir: join(workspace, "mesita", "apps", "business") },
-  { label: "mesita/apps/consumer", dir: join(workspace, "mesita", "apps", "consumer") },
-  { label: "mesita/apps/landing", dir: join(workspace, "mesita", "apps", "landing") },
+  { label: "mesita-monorepo", dir: join(workspace, "mesita-monorepo") },
+  { label: "mesita-monorepo/apps/admin", dir: join(workspace, "mesita-monorepo", "apps", "admin") },
+  { label: "mesita-monorepo/apps/business", dir: join(workspace, "mesita-monorepo", "apps", "business") },
+  { label: "mesita-monorepo/apps/consumer", dir: join(workspace, "mesita-monorepo", "apps", "consumer") },
+  { label: "mesita-monorepo/apps/landing", dir: join(workspace, "mesita-monorepo", "apps", "landing") },
   // ── STANDALONE WEB REPOS — delete this whole group at monorepo cutover (MESITA-341) ──
   { label: "mesita-web-admin", dir: join(workspace, "mesita-web-admin") },
   { label: "mesita-web-business", dir: join(workspace, "mesita-web-business") },
