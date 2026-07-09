@@ -16,8 +16,7 @@
 // root (needed when running against relocated worktrees, e.g. /tmp/worktrees/<ID>).
 //
 // Worktree conflicts on these files: regenerate (run this script), never hand-merge.
-// Adding a repo = one REPOS entry. Monorepo cutover (MESITA-341) = delete the fenced
-// standalone group below.
+// Adding a repo = one REPOS entry.
 
 import { dirname, fromFileUrl, join } from "jsr:@std/path@1";
 
@@ -57,12 +56,7 @@ if (!workspaceOverride) {
 const REPOS = [
   { label: "workspace-root", dir: workspace },
   { label: "mesita-supabase", dir: join(workspace, "mesita-supabase") },
-  { label: "mesita-monorepo", dir: join(workspace, "mesita-monorepo") },
-  { label: "mesita-monorepo/apps/admin", dir: join(workspace, "mesita-monorepo", "apps", "admin") },
-  { label: "mesita-monorepo/apps/business", dir: join(workspace, "mesita-monorepo", "apps", "business") },
-  { label: "mesita-monorepo/apps/consumer", dir: join(workspace, "mesita-monorepo", "apps", "consumer") },
-  { label: "mesita-monorepo/apps/landing", dir: join(workspace, "mesita-monorepo", "apps", "landing") },
-  // ── STANDALONE WEB REPOS — delete this whole group at monorepo cutover (MESITA-341) ──
+  // Standalone web repos — the permanent architecture (monorepo experiment retired 2026-07-09).
   { label: "mesita-web-admin", dir: join(workspace, "mesita-web-admin") },
   { label: "mesita-web-business", dir: join(workspace, "mesita-web-business") },
   { label: "mesita-web-consumer", dir: join(workspace, "mesita-web-consumer") },
