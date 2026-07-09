@@ -2,7 +2,12 @@
 //   deno test supabase/functions/_shared/enrich-synthesis.test.ts
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { applyProfileToUpdate, asProfileText, type ProfileResult } from "./enrich-synthesis.ts";
+import {
+  applyProfileToUpdate,
+  asProfileText,
+  formatAboutParagraphs,
+  type ProfileResult,
+} from "./enrich-synthesis.ts";
 
 Deno.test("asProfileText: trims strings, joins arrays and string-valued objects, drops the rest", () => {
   assertEquals(asProfileText("  hola  "), "hola");
@@ -68,4 +73,45 @@ Deno.test("applyProfileToUpdate: happy path unchanged (trimmed, capped, typed)",
   assertEquals(update.established_year, 2012);
   assertEquals(update.details, { dress_code: "casual" });
   assertEquals(update.popular_times, [{ day: "Fri", range: "8-11pm" }]);
+});
+
+Deno.test("formatAboutParagraphs: keeps blank-line paragraphs, collapses inner whitespace", () => {
+  assertEquals(
+    formatAboutParagraphs("Para uno.\n\n  Para   dos.  "),
+    "Para uno.\n\nPara dos.",
+  );
+  // Single newlines also become paragraph breaks (models often omit the blank line).
+  assertEquals(
+    formatAboutParagraphs("Line one.\nLine two."),
+    "Line one.\n\nLine two.",
+  );
+});
+
+Deno.test("formatAboutParagraphs: splits a long wall of text into sentence packs", () => {
+  const wall =
+    "Alpha is a warm neighborhood spot with wood tables and soft light. " +
+    "The kitchen leans Mexican with a few Japanese touches. " +
+    "Regulars come for the tasting menu and the mezcal list. " +
+    "Weekends fill early so reservations help. " +
+    "The patio is quieter after nine. " +
+    "Staff know the regulars by name.";
+  const out = formatAboutParagraphs(wall);
+  const paras = out.split("\n\n");
+  assertEquals(paras.length >= 2, true);
+  assertEquals(paras.every((p) => p.length > 0), true);
+  assertEquals(out.includes("\n\n"), true);
+});
+
+Deno.test("applyProfileToUpdate: wall-of-text About becomes multi-paragraph", () => {
+  const update: Record<string, unknown> = {};
+  const wall =
+    "Alpha is a warm neighborhood spot with wood tables and soft light. " +
+    "The kitchen leans Mexican with a few Japanese touches. " +
+    "Regulars come for the tasting menu and the mezcal list. " +
+    "Weekends fill early so reservations help. " +
+    "The patio is quieter after nine. " +
+    "Staff know the regulars by name.";
+  applyProfileToUpdate(update, { description: wall } as ProfileResult);
+  assertEquals(typeof update.description, "string");
+  assertEquals((update.description as string).includes("\n\n"), true);
 });
