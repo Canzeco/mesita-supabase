@@ -254,6 +254,21 @@ verify_jwt = true
 [functions.consumer-web-list-pay-notifications]
 verify_jwt = true
 
+# Consumer MCP — personal access tokens + Streamable HTTP MCP endpoint.
+# Mint/list/revoke use the consumer session JWT; consumer-mcp itself uses
+# a mesita_mcp_… bearer (verify_jwt off — custom auth in-handler).
+[functions.consumer-web-create-mcp-token]
+verify_jwt = true
+
+[functions.consumer-web-list-mcp-tokens]
+verify_jwt = true
+
+[functions.consumer-web-revoke-mcp-token]
+verify_jwt = true
+
+[functions.consumer-mcp]
+verify_jwt = false
+
 [functions.consumer-web-mock-story-detect]
 verify_jwt = true
 
