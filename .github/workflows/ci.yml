@@ -36,6 +36,28 @@ jobs:
       - name: Test
         run: deno test --allow-all
 
+  # The agent-instruction files (CLAUDE.md + generated AGENTS.md) must match the
+  # canonical scripts/rules-quickstart.md. Self-scoped: a single-repo CI checkout
+  # has no sibling repos, so only this repo's own pair is verified here —
+  # cross-repo enforcement stays manual until the monorepo cutover (MESITA-341).
+  rules-sync:
+    name: rules quickstart in sync
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.1
+
+      - name: Check
+        run: deno run --allow-read scripts/sync-rules.ts --check --only mesita-supabase
+
   # Full type-check of every edge function against its remote (jsr/npm/https)
   # imports. Non-blocking: it depends on live registries being reachable, so a
   # registry hiccup should not block a merge. The blocking `test` job above

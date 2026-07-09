@@ -1,66 +1,34 @@
-# AGENTS.md — Mesita agent instructions
+<!-- GENERATED — mesita-supabase/scripts/sync-rules.ts mirrors this file from CLAUDE.md. Edit CLAUDE.md (below its END marker) or scripts/rules-quickstart.md — NEVER this file. -->
+<!-- RULES-QUICKSTART:START (generated — do not hand-edit; run: deno run -A mesita-supabase/scripts/sync-rules.ts) -->
+# Mesita — agent quickstart (you're ~90% correct after this)
 
-This repo is part of the **Mesita** multi-repo workspace. Every AI coding agent working
-here — Cursor, Codex, Claude Code, Claude Cowork, subagents, scheduled cloud agents —
-follows the same orchestration protocol: **SWARM v4** (a blackboard system: agents never
-talk to each other; they coordinate through the Linear work ledger and git).
+Stable mirror of the top of the Notion **Rules** page (the master — Notion wins on any conflict). Full page + appendix: https://www.notion.so/Rules-395a9bf37a528081b2c1dacc445bb6c8
 
-## SWARM v4 — orchestration (Linear)
+Same rules, one Linear ledger, on every platform — only your **platform protocol** (isolation, branch naming, connectors) differs. Find yours: Rules appendix §K "Platform protocols".
 
-Work ledger: **Linear**, workspace `canzeco`, team **Mesita**, issue key `MESITA-`.
-Full protocol: https://linear.app/canzeco/document/swarm-protocol-ai-agent-modus-operandi-442de3edc517
+| You're reading | You are |
+| --- | --- |
+| `CLAUDE.md` | Claude Code (local · cloud · subagent) or Claude Cowork |
+| `AGENTS.md` | Cursor, Codex, or any open-standard agent — generated from `CLAUDE.md`; hand edits go there |
 
-- **Pato never opens Linear.** You are the interface; Linear is the database. Never ask
-  him to check or update it — summarize in chat instead.
-- **If it writes to a repo or a cloud service, it has an issue — and every issue lives in
-  a project.** Ad-hoc request → silently create/attach the project, create the issue
-  (title, repo label, footprint = paths you expect to touch), claim it, work it. Pure Q&A
-  needs no issue. Don't narrate the bookkeeping.
-- **Projects = goals, not sessions.** One project = one outcome, named after the outcome,
-  linking its Notion spec. New goal → new project by default, but check existing projects
-  first and attach if the goal continues one. Sessions may span several projects; several
-  sessions may share one. One-off chores → the standing **Ops & maintenance** project.
-  Keep project status current; mark Completed when the outcome ships.
-- **Boot** (before touching any repo): resume your own open claims; scan `needs-human`
-  issues (should be rare), clear any whose blocker has since resolved, and surface a
-  one-line summary to Pato only if any remain.
-- **Pick:** highest-priority unblocked Todo without `needs-human` whose footprint doesn't
-  overlap an active claim. **Claim:** move to In Progress + comment
-  `claimed: <platform>:<session-slug>`; re-read comments — an earlier claim wins, back off.
-- **Lease:** claims with no comment/commit for 4h are stale — take over with a
-  `takeover: <your-id> (stale >4h)` comment. Post progress comments on long tasks.
-- **Code flow:** branch `agent/<ISSUE-ID>-<slug>` off freshly-pulled `main` → small
-  commits, push early → pull `main` back in, resolve, re-test → squash PR with
-  `Closes <ISSUE-ID>` → **merge it yourself** (`gh pr merge --squash --delete-branch`).
-  Don't wait for Pato. Whoever merges second resolves conflicts. Never push `main`.
-- **Cowork flow:** do the work, post the deliverable link/results in a comment, Done.
-- **Fan-out:** ≥3 independent units or >1 repo → split into child issues (blocked-by
-  wiring) and run parallel subagents in isolated git worktrees, one issue each (≤5).
-- **Autonomy (v4 — the point):** default to ACT; the test is **reversibility, not
-  category**. If it can be undone (revert, redeploy, migration-down, flag flip, re-seed,
-  re-run), decide it, log a `decision:` comment, and proceed. **`needs-human` = an agent
-  *physically cannot proceed***, reserved for exactly two cases: **(1) a secret the agent
-  can't enter** (OAuth/connector grants; pasting an API/service-role/Vault key into ElevenLabs,
-  Stripe, or the Supabase dashboard) — do all the prep, leave a ≤1-min paste; **(2) one
-  irreversible external/financial trigger** (real money / live charges, destroying prod
-  data with no recoverable backup, publishing to a public external channel) — do everything
-  up to the trigger. Product/pricing/naming/copy/error-posture **decisions are agent-owned**
-  (best-supported option — shipped code > issue > Notion > memory — + a `decision:` comment,
-  then mention in chat). **Prod deploys run autonomously**; if the harness auto-mode guard
-  blocks one, that's a batched `deploy:` operator handoff (one exact command), NOT a
-  `needs-human` escalation. Every `needs-human` names the exact blocker + the one human
-  action; batch handoffs.
-- **Hierarchy:** Pato live > Linear issue > Notion specs > memory/conventions.
-- Out-of-scope discoveries → new issues, never scope creep.
+- **Alone + small fix?** → branch off fresh main, work, PR, merge it yourself, create the one-line issue at merge time (Ops & maintenance). That's the whole loop.
+- **Other agents live on the repo?** → full SWARM: pick → claim (`claimed: <platform>:<session-slug> · branch:<actual-branch>`) → isolated checkout → merge.
+- **One agent = one isolated checkout = one branch.** Platform-native isolation counts (Desktop/Cursor worktrees, cloud clones). Canonical branch `agent/<ISSUE-ID>-<slug>`; if your platform forces another name (e.g. `cursor/*`), declare it in your claim.
+- **Cowork never opens a live repo checkout** — `cowork`-label issues (docs/research/analysis) in non-repo folders only.
+- **ALWAYS:** reply in English · clients call Edge Functions, never the DB · never push to `main` · mirror every Supabase cloud change into `mesita-supabase` same session · set terminal status same session · no local dev servers (verify via Vercel).
+- **NEVER ask.** Reversible → decide, log a `decision:` comment, ship. Only two `needs-human` cases: a secret you can't enter, or one irreversible money/publish trigger.
+- **When in doubt**, hierarchy wins: Pato's live instruction > the Linear issue > Notion > memory.
 
-## Core rules
+Where things live: **Linear** (team Mesita, `MESITA-`) = work state · **Notion** = knowledge · **GitHub Canzeco** = code.
+<!-- RULES-QUICKSTART:END -->
 
-- Reply in English, even when Pato writes in Spanish.
-- **No local dev servers** (no `pnpm dev` / `next dev`). Verify via Vercel auto-deploy on push.
-- **DB access:** Mesita user clients never call the database directly — every read/write
-  goes through a Supabase Edge Function.
-- **Cloud↔repo sync:** any Supabase cloud change (schema/RLS/Edge Function) must be
-  mirrored into `mesita-supabase` in the same session.
-- Deep project context lives in the Notion **Mesita Main** page (read-only):
-  https://www.notion.so/Mesita-323a9bf37a528060987ee31c750e3dfa
-- (SWARM agents build Mesita; Enricher/Reservationist are product agents inside Mesita.)
+## This repo — mesita-supabase (DB · RLS · Edge Functions · source of truth)
+
+- **New here? Read [`ARCHITECTURE.md`](./ARCHITECTURE.md)** — the cross-repo system map (audiences, repo topology, EF caller taxonomy, data layer, the Enricher pipeline, agents, billing).
+- Run every `supabase` command from **inside this repo**. All Supabase files live only here — kill stray `supabase/` stubs elsewhere (a stray stub links against a divergent migration ledger).
+- **EF name = the ACL:** `actor-origin-verb-noun`, exactly one caller per endpoint from the closed set. `_shared/` holds shared code (internal naming free-form). Only `supabase-edgefunc-*` endpoints accept the internal caller; the origin propagates via `X-Internal-Caller`.
+- **Mirror + verify:** every cloud change (schema/RLS/EF) mirrors into this repo the same session. After any EF deploy, confirm cloud == repo (`get_edge_function`) — a smoke-test stub once silently clobbered prod.
+- **Migrations:** MCP `apply_migration` stamps its own server-side timestamp ≠ the repo filename — reconcile `schema_migrations` after, or the next `db push` re-runs those files. Prod EF deploys + security-sensitive DDL are gated by the harness classifier — attempt a `supabase …` command once cleanly, else hand off a `deploy:` step.
+- **Don't "fix" these:** `projects_view` is intentionally `SECURITY DEFINER` (accepted advisor 0010 exception — flipping to invoker hides non-active places from consumer browse); `rls_enabled_no_policy` tables are the deliberate EF-only lockdown (adding policies OPENS access).
+- Supabase Realtime is for ticket workflows only. After architectural changes, update `admin_reset_database`. The Enricher is a **cron EF pipeline** (`supabase-cron-enrich-place-{research,analysis,contents}`), not an agent — judge it by DB effects, not green beacons.
+- CI: `deno lint · test`. Deno toolchain (no Node build).

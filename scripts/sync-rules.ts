@@ -1,55 +1,108 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write
-// sync-rules.ts — regenerate the marker-delimited quickstart block in every
-// workspace CLAUDE.md from ONE canonical source (scripts/rules-quickstart.md).
+// sync-rules.ts — regenerate BOTH agent-instruction dialects in every workspace repo
+// from ONE canonical source (scripts/rules-quickstart.md).
 //
-// WHY: the quickstart block is mirrored into each repo's CLAUDE.md so agents orient
-// with zero fetches. Hand-syncing N copies drifts (MESITA-149). This makes the block
-// GENERATED, not hand-kept: edit the canonical file once, run this, every copy updates.
+// CONTRACT (one hand-edited file per repo):
+//   CLAUDE.md = generated quickstart block (between the markers below) + hand-written
+//               "## This repo …" tail below the END marker. Edit the tail freely.
+//   AGENTS.md = FULLY GENERATED: a notice line + a byte-exact copy of the final
+//               CLAUDE.md, so Cursor/Codex read the same content. NEVER hand-edit it.
 //
 // SOURCE OF TRUTH: the Notion **Rules** page §0 is the human master. When it changes,
-// update scripts/rules-quickstart.md to match, then run:
-//     deno run --allow-read --allow-write scripts/sync-rules.ts
-// The text BETWEEN the two markers in every CLAUDE.md is generated — NEVER hand-edit it.
-// Edit the per-repo "## This repo …" section below the END marker freely.
+// update scripts/rules-quickstart.md to match, then run (from mesita-supabase):
+//     deno task sync-rules
+// Pass --check to verify without writing (STRICT: drift, skips, or bad markers exit 1).
+// Pass --only <label> to target one repo; --workspace <path> to override the workspace
+// root (needed when running against relocated worktrees, e.g. /tmp/worktrees/<ID>).
 //
-// Pass --check to exit 1 (without writing) if any CLAUDE.md is out of sync — use it in a
-// pre-commit hook. (CI can't enforce cross-repo until the monorepo lands, MESITA-141:
-// in a single-repo CI checkout the sibling repos aren't present, so they're skipped.)
-//
-// Requires the standard local workspace layout: this repo and its siblings all live
-// directly under ~/Desktop/Canzeco/Mesita/.
+// Worktree conflicts on these files: regenerate (run this script), never hand-merge.
+// Adding a repo = one REPOS entry. Monorepo cutover (MESITA-341) = delete the fenced
+// standalone group below.
 
 import { dirname, fromFileUrl, join } from "jsr:@std/path@1";
 
 const START =
   "<!-- RULES-QUICKSTART:START (generated — do not hand-edit; run: deno run -A mesita-supabase/scripts/sync-rules.ts) -->";
 const END = "<!-- RULES-QUICKSTART:END -->";
+const AGENTS_NOTICE =
+  "<!-- GENERATED — mesita-supabase/scripts/sync-rules.ts mirrors this file from CLAUDE.md. Edit CLAUDE.md (below its END marker) or scripts/rules-quickstart.md — NEVER this file. -->";
 
-// scriptDir = mesita-supabase/scripts ; supabaseRoot = mesita-supabase ; workspace = the parent
 const scriptDir = dirname(fromFileUrl(import.meta.url));
-const workspace = dirname(dirname(scriptDir));
+const supabaseRoot = dirname(scriptDir);
 
-// Every CLAUDE.md that mirrors the quickstart: the workspace root + each repo.
-const TARGETS = [
-  { label: "(workspace root)", path: join(workspace, "CLAUDE.md") },
-  { label: "mesita-supabase", path: join(workspace, "mesita-supabase", "CLAUDE.md") },
-  { label: "mesita-web-consumer", path: join(workspace, "mesita-web-consumer", "CLAUDE.md") },
-  { label: "mesita-web-business", path: join(workspace, "mesita-web-business", "CLAUDE.md") },
-  { label: "mesita-web-admin", path: join(workspace, "mesita-web-admin", "CLAUDE.md") },
-  { label: "mesita-web-landing", path: join(workspace, "mesita-web-landing", "CLAUDE.md") },
-  { label: "mesita-n8n", path: join(workspace, "mesita-n8n", "CLAUDE.md") },
+const rawArgs = [...Deno.args];
+const check = rawArgs.includes("--check");
+function flagValue(flag: string): string | undefined {
+  const i = rawArgs.indexOf(flag);
+  return i === -1 ? undefined : rawArgs[i + 1];
+}
+const only = flagValue("--only");
+const workspaceOverride = flagValue("--workspace");
+const workspace = workspaceOverride ?? dirname(supabaseRoot);
+
+// Sanity guard (derived workspace only): the layout must look like the Mesita
+// workspace — a script run from a relocated worktree would otherwise silently
+// mis-derive the workspace and skip everything.
+if (!workspaceOverride) {
+  try {
+    await Deno.stat(join(workspace, "mesita-supabase", "scripts", "rules-quickstart.md"));
+  } catch {
+    console.error(
+      `workspace mis-derived (${workspace}) — run with --workspace <path-to-workspace-root>`,
+    );
+    Deno.exit(1);
+  }
+}
+
+const REPOS = [
+  { label: "workspace-root", dir: workspace },
+  { label: "mesita-supabase", dir: join(workspace, "mesita-supabase") },
+  { label: "mesita", dir: join(workspace, "mesita") },
+  { label: "mesita/apps/admin", dir: join(workspace, "mesita", "apps", "admin") },
+  { label: "mesita/apps/business", dir: join(workspace, "mesita", "apps", "business") },
+  { label: "mesita/apps/consumer", dir: join(workspace, "mesita", "apps", "consumer") },
+  { label: "mesita/apps/landing", dir: join(workspace, "mesita", "apps", "landing") },
+  // ── STANDALONE WEB REPOS — delete this whole group at monorepo cutover (MESITA-341) ──
+  { label: "mesita-web-admin", dir: join(workspace, "mesita-web-admin") },
+  { label: "mesita-web-business", dir: join(workspace, "mesita-web-business") },
+  { label: "mesita-web-consumer", dir: join(workspace, "mesita-web-consumer") },
+  { label: "mesita-web-landing", dir: join(workspace, "mesita-web-landing") },
 ];
+
+const targets = only ? REPOS.filter((r) => r.label === only) : REPOS;
+if (only && targets.length === 0) {
+  console.error(`unknown --only label: ${only}`);
+  Deno.exit(1);
+}
 
 const canonical = (await Deno.readTextFile(join(scriptDir, "rules-quickstart.md"))).trim();
 const block = `${START}\n${canonical}\n${END}`;
 
-const check = Deno.args.includes("--check");
-let updated = 0, drifted = 0, skipped = 0;
+let updated = 0, drifted = 0, skipped = 0, failed = 0;
 
-for (const { label, path } of TARGETS) {
+async function reconcile(path: string, next: string, label: string): Promise<void> {
+  let current: string | null;
+  try {
+    current = await Deno.readTextFile(path);
+  } catch {
+    current = null;
+  }
+  if (current === next) return;
+  drifted++;
+  if (check) {
+    console.error(`OUT OF SYNC: ${label}`);
+    return;
+  }
+  await Deno.writeTextFile(path, next);
+  updated++;
+  console.log(`updated: ${label}`);
+}
+
+for (const { label, dir } of targets) {
+  const claudePath = join(dir, "CLAUDE.md");
   let text: string;
   try {
-    text = await Deno.readTextFile(path);
+    text = await Deno.readTextFile(claudePath);
   } catch {
     console.warn(`skip — no CLAUDE.md: ${label}`);
     skipped++;
@@ -57,25 +110,22 @@ for (const { label, path } of TARGETS) {
   }
   const s = text.indexOf(START);
   const e = text.indexOf(END);
-  if (s === -1 || e === -1) {
-    console.warn(`skip — no markers: ${label}/CLAUDE.md`);
-    skipped++;
+  if (
+    s === -1 || e === -1 || s > e ||
+    text.indexOf(START, s + 1) !== -1 || text.indexOf(END, e + END.length) !== -1
+  ) {
+    console.error(`BAD MARKERS (need exactly one START before one END): ${label}/CLAUDE.md`);
+    failed++;
     continue;
   }
-  const next = text.slice(0, s) + block + text.slice(e + END.length);
-  if (next === text) continue; // already in sync
-  drifted++;
-  if (check) {
-    console.error(`OUT OF SYNC: ${label}/CLAUDE.md`);
-    continue;
-  }
-  await Deno.writeTextFile(path, next);
-  updated++;
-  console.log(`updated: ${label}/CLAUDE.md`);
+  const nextClaude = text.slice(0, s) + block + text.slice(e + END.length);
+  await reconcile(claudePath, nextClaude, `${label}/CLAUDE.md`);
+  await reconcile(join(dir, "AGENTS.md"), `${AGENTS_NOTICE}\n${nextClaude}`, `${label}/AGENTS.md`);
 }
 
-if (check && drifted > 0) {
-  console.error(`\n${drifted} file(s) out of sync — run without --check to fix.`);
+console.log(
+  `\nsync-rules: ${updated} updated, ${drifted} drifted, ${skipped} skipped, ${failed} failed.`,
+);
+if (failed > 0 || (check && (drifted > 0 || skipped > 0))) {
   Deno.exit(1);
 }
-console.log(`\nsync-rules: ${updated} updated, ${drifted} drifted, ${skipped} skipped.`);
