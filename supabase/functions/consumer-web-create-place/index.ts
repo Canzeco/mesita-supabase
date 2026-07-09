@@ -4,9 +4,11 @@
 // Search → Add flow). The place is created IMMEDIATELY — same shared core as
 // the admin and business creates — and only deep enrichment stays async:
 //   1. authenticate the consumer,
-//   2. createMinimalPlace (_shared/create-place.ts): dedupe → Google spine →
-//      save 'generating' row → seed place_research (the supabase-cron-enrich-place-*
-//      poller takes it from there).
+//   2. createMinimalPlace (_shared/create-place.ts): dedupe → rolling-24h
+//      consumer quota (every create burns Google + Enricher budget — see
+//      CONSUMER_PLACE_CREATE_QUOTA) → Google spine → save 'generating' row →
+//      seed place_research (the supabase-cron-enrich-place-* poller takes it
+//      from there).
 //
 // Replaces the queued flow (consumer-web-schedule-project-creation →
 // scheduled_project_creations → cron): the place row must exist the moment the
@@ -18,7 +20,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
-import { createMinimalPlace } from "../_shared/create-place.ts";
+import {
+  CONSUMER_PLACE_CREATE_QUOTA,
+  createMinimalPlace,
+} from "../_shared/create-place.ts";
 
 // `googlePlaceId` is the canonical key; legacy `placeId` accepted until every
 // client sends the new key (same contract as business-web-create-project).
@@ -53,6 +58,9 @@ Deno.serve(async (req) => {
     callerName: "consumer-web-create-place",
     googlePlaceId,
     dedupeError: "This place is already on Mesita.",
+    // Rolling 24h per-consumer bound — every create burns real Google +
+    // Enricher budget, so scripted unlimited adds must not be possible.
+    quota: { userId: authRes.user.id, ...CONSUMER_PLACE_CREATE_QUOTA },
   });
   if (!created.ok) return json(created.body, created.status);
 

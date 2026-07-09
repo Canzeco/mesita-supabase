@@ -21,7 +21,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv } from "../_shared/auth.ts";
-import { createMinimalPlace } from "../_shared/create-place.ts";
+import {
+  CONSUMER_PLACE_CREATE_QUOTA,
+  createMinimalPlace,
+} from "../_shared/create-place.ts";
 
 type Body = { googlePlaceId?: string; placeId?: string; exec_at?: string };
 
@@ -52,6 +55,9 @@ Deno.serve(async (req) => {
     callerName: "consumer-web-schedule-project-creation",
     googlePlaceId,
     dedupeError: "This place is already on Mesita.",
+    // Rolling 24h per-consumer bound — every create burns real Google +
+    // Enricher budget, so scripted unlimited adds must not be possible.
+    quota: { userId: authRes.user.id, ...CONSUMER_PLACE_CREATE_QUOTA },
   });
 
   const nowIso = new Date().toISOString();

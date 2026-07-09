@@ -1,7 +1,8 @@
 // Shared create-place core — the pipeline every create path runs after its
 // caller-specific auth:
 //
-//   early dedupe (google_place_id) → fetchGoogleBasics (identity spine,
+//   early dedupe (google_place_id) → per-user quota (consumer paths) →
+//   fetchGoogleBasics (identity spine,
 //   category='undefined') → savePlaceData (minimal 'generating' rows,
 //   in-process) → seedPlaceResearch (queue the Enricher pipeline).
 //
@@ -22,6 +23,20 @@ const CHANNEL_KEYS = [
 ];
 
 export type CreatedPlace = { id: string; slug: string; name: string; status: string };
+
+// Rolling-window creation quota for the CONSUMER add paths (the live EF and
+// its schedule-project-creation compat alias import this same constant so the
+// bound stays in lockstep). Admin/business creates pass no quota. 10/24h caps
+// a scripted consumer's worst-case spend (a Google Basics call per attempt +
+// ~$0.35+/place Enricher run) while staying far above honest Add usage.
+export const CONSUMER_PLACE_CREATE_QUOTA = { limit: 10, windowHours: 24 };
+
+export type CreateQuota = {
+  // auth.users id of the caller — the ledger key.
+  userId: string;
+  limit: number;
+  windowHours: number;
+};
 
 // The `enrichment` block every create response carries (response-contract
 // compatibility from the days enrichment was synchronous — now always async).
@@ -54,6 +69,10 @@ export async function createMinimalPlace(opts: {
   googlePlaceId: string;
   // Caller-specific copy for the 409 (e.g. the business app adds claim advice).
   dedupeError?: string;
+  // Rolling-window per-user creation quota (consumer paths). Enforced after
+  // the dedupe (a duplicate click never burns quota) and BEFORE
+  // fetchGoogleBasics (an over-quota call spends nothing).
+  quota?: CreateQuota;
 }): Promise<CreatePlaceOutcome> {
   const { admin, callerName, googlePlaceId } = opts;
 
@@ -76,6 +95,51 @@ export async function createMinimalPlace(opts: {
         existing,
       },
     };
+  }
+
+  // ── Per-user creation quota (public.place_creation_attempts ledger).
+  // Attempt row FIRST, then count the window: under parallel scripted
+  // requests every racer sees its own row, so at most `limit` creates can
+  // proceed regardless of concurrency. Attempts (not successes) count — a
+  // failed Google lookup still billed a Basics call. Ledger errors fail
+  // CLOSED: unbounded paid-API spend is worse than a blocked create. ──
+  if (opts.quota) {
+    const { userId, limit, windowHours } = opts.quota;
+    const { error: ledgerError } = await admin
+      .from("place_creation_attempts")
+      .insert({ user_id: userId, google_place_id: googlePlaceId, caller: callerName });
+    if (ledgerError) {
+      return {
+        ok: false,
+        status: 500,
+        body: { ok: false, error: "Could not record the creation attempt. Try again." },
+      };
+    }
+    const since = new Date(Date.now() - windowHours * 3600 * 1000).toISOString();
+    const { count, error: countError } = await admin
+      .from("place_creation_attempts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .gte("created_at", since);
+    if (countError || count == null) {
+      return {
+        ok: false,
+        status: 500,
+        body: { ok: false, error: "Could not check your creation quota. Try again." },
+      };
+    }
+    if (count > limit) {
+      return {
+        ok: false,
+        status: 429,
+        body: {
+          ok: false,
+          code: "creation_quota_exceeded",
+          error:
+            `You've added the maximum of ${limit} new places in the last ${windowHours} hours. Try again later.`,
+        },
+      };
+    }
   }
 
   // ── 1) Minimal seed — Google basics only. fetchGoogleBasics builds the
