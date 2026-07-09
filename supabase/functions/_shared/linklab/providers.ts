@@ -5,6 +5,8 @@
 // iterating on strategy logic doesn't re-bill Firecrawl/Perplexity/Google. The deployed
 // EF leaves it unset and always hits the live APIs.
 
+import { safeParseJson } from "../parse-utils.ts";
+
 export type Keys = {
   firecrawl: string;
   perplexity: string;
@@ -229,27 +231,41 @@ export function perplexitySonar(
   system: string,
   user: string,
   schema: unknown,
-  opts: { model?: string; searchContextSize?: "low" | "medium" | "high" } = {},
+  opts: {
+    model?: string;
+    searchContextSize?: "low" | "medium" | "high";
+    /** MESITA-192: pure-judge variant — no Firecrawl recall; Sonar answers blind. */
+    disableSearch?: boolean;
+  } = {},
 ): Promise<{ answer: Record<string, unknown>; searchResults: SearchHit[] }> {
   return cached("ppx-sonar", { system, user, schema, opts }, async () => {
     meter.perplexitySonar++;
+    const body: Record<string, unknown> = {
+      model: opts.model ?? "sonar-pro",
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: { schema },
+      },
+    };
+    // disable_search pure-judge (strategy F): measure whether dropping Firecrawl
+    // recall and letting sonar-pro answer blind changes precision/recall/cost.
+    if (opts.disableSearch) {
+      body.disable_search = true;
+    } else {
+      body.web_search_options = {
+        search_context_size: opts.searchContextSize ?? "medium",
+      };
+    }
     const d = (await fetchJson(
       "https://api.perplexity.ai/chat/completions",
       {
         method: "POST",
         headers: { Authorization: `Bearer ${keys.perplexity}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: opts.model ?? "sonar-pro",
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-          web_search_options: { search_context_size: opts.searchContextSize ?? "medium" },
-          response_format: {
-            type: "json_schema",
-            json_schema: { schema },
-          },
-        }),
+        body: JSON.stringify(body),
       },
       60000,
     )) as {
@@ -317,20 +333,11 @@ function mapGooglePlace(p: Record<string, unknown>): GooglePlace {
 }
 
 // ---- util -------------------------------------------------------------------
+// Shared with prod Enricher parse-utils (MESITA-192): tolerate fences, prose,
+// trailing commas, and truncated closing braces under concurrent Sonar load.
 export function safeJson(text: string): Record<string, unknown> {
-  if (!text) return {};
-  try {
-    return JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    // tolerate ```json fences / leading prose
-    const m = text.match(/\{[\s\S]*\}/);
-    if (m) {
-      try {
-        return JSON.parse(m[0]) as Record<string, unknown>;
-      } catch {
-        /* fall through */
-      }
-    }
-    return {};
-  }
+  const parsed = safeParseJson(text);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : {};
 }

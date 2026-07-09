@@ -163,12 +163,37 @@ async function main() {
 
   const secs = ((performance.now() - started) / 1000).toFixed(0);
   const resolved = rows.filter((r) => r.placeIdResolved).length;
+  // MESITA-192: rough $ estimate for strategy C (shipped) vs full suite.
+  // Rates are order-of-magnitude list prices — directional, not invoices.
+  const UNIT = {
+    firecrawlSearch: 0.001, // ~$1/1k searches (Firecrawl search)
+    firecrawlScrape: 0.001,
+    perplexitySearch: 0.005,
+    perplexityAgent: 0.03, // pro-search agent dominates
+    perplexitySonar: 0.006, // sonar-pro structured
+    googleText: 0.032, // Places Text Search
+  };
+  const estUsd =
+    meter.firecrawlSearch * UNIT.firecrawlSearch +
+    meter.firecrawlScrape * UNIT.firecrawlScrape +
+    meter.perplexitySearch * UNIT.perplexitySearch +
+    meter.perplexityAgent * UNIT.perplexityAgent +
+    meter.perplexitySonar * UNIT.perplexitySonar +
+    meter.googleText * UNIT.googleText;
+  const perVenue = rows.length ? estUsd / rows.length : 0;
+  // Strategy C alone ≈ 2–3 fc-search + 1 scrape + 1 sonar (+ shared g-text once)
+  const cPerVenueUsd = 3 * UNIT.firecrawlSearch + UNIT.firecrawlScrape + UNIT.perplexitySonar;
+
   console.log("\n================= COST / RUN =================");
   console.log(`  venues: ${rows.length}  (google-resolved ${resolved}/${rows.length})   time ${secs}s`);
   console.log(
     `  calls  fc-search ${meter.firecrawlSearch}  fc-scrape ${meter.firecrawlScrape}  ` +
       `ppx-search ${meter.perplexitySearch}  ppx-agent ${meter.perplexityAgent}  ` +
       `ppx-sonar ${meter.perplexitySonar}  g-text ${meter.googleText}  cache-hits ${meter.cacheHits}`,
+  );
+  console.log(
+    `  est $  suite ~$${estUsd.toFixed(2)}  (~$${perVenue.toFixed(3)}/venue)  |  ` +
+      `strategy C alone ~$${cPerVenueUsd.toFixed(3)}/venue (excl. shared Google resolve)`,
   );
 
   // persist raw results for inspection
