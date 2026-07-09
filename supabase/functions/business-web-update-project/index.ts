@@ -23,6 +23,7 @@ import {
   type PlaceCategory,
 } from "../_shared/categories.ts";
 import { ENRICH_FIELD_LIMITS } from "../_shared/enrich-field-limits.ts";
+import { sanitizePlaceTags } from "../_shared/tags.ts";
 
 const MAX_PHOTOS = ENRICH_FIELD_LIMITS.photos.max;
 const MAX_TAGS = ENRICH_FIELD_LIMITS.tagsPerPlace.max;
@@ -366,6 +367,7 @@ Deno.serve(async (req) => {
     }
     // Lowercase + trim + dedupe in one pass. Empty entries drop out so the
     // form can submit a partially typed list without rejecting the request.
+    // Then strip mutually exclusive catalog pairs (same rules as Enricher).
     const seen = new Set<string>();
     const clean: string[] = [];
     for (const t of body.tags) {
@@ -376,7 +378,7 @@ Deno.serve(async (req) => {
       clean.push(norm);
       if (clean.length >= MAX_TAGS) break;
     }
-    update.tags = clean;
+    update.tags = sanitizePlaceTags(clean).slice(0, MAX_TAGS);
   }
   for (const [arrayField, maxLinks] of [
     ["whatsapp_pr_urls", MAX_PR_WHATSAPP],
