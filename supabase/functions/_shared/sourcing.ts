@@ -13,6 +13,8 @@
 // for every channel: that's how hotels, schools, hospitals, shops, gas stations
 // and transit are kept out without an explicit blocklist.
 
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+
 export type FamilyKey =
   | "restaurants"
   | "bars_nightlife"
@@ -146,6 +148,50 @@ export type EligibilityResult =
 // rating → reviews, returning the first failing gate with consumer-friendly
 // copy. minRating/minReviews of 0 mean "no floor". A null rating/reviewCount
 // fails any non-zero floor (an unrated place hasn't cleared the bar).
+// One broad Table A primary type per family — used to build the Google
+// Autocomplete `includedPrimaryTypes` list (API cap: 5). Picking the
+// broadest type per enabled family keeps the picker aligned with the
+// family allowlist without listing every cuisine variant.
+const FAMILY_AUTOCOMPLETE_TYPE: Record<FamilyKey, string> = {
+  restaurants: "restaurant",
+  bars_nightlife: "bar",
+  cafes_bakeries: "cafe",
+  wellness_spa: "spa",
+  experiences: "tourist_attraction",
+  culture_arts: "museum",
+};
+
+// Up to 5 Google primary types for Autocomplete, derived from the channel's
+// enabled families. Empty when every family is off — callers should skip the
+// Google leg rather than query with no type filter.
+export function autocompleteTypesForPolicy(policy: ChannelPolicy): string[] {
+  return policy.families
+    .slice(0, 5)
+    .map((f) => FAMILY_AUTOCOMPLETE_TYPE[f])
+    .filter(Boolean);
+}
+
+export type SourcingConfigRow = Partial<Record<ChannelKey, unknown>>;
+
+// Read one channel slice from app_settings.sourcing_config, coerced with the
+// launch-policy fallback. Shared by add-paths and search-paths.
+export async function readChannelPolicy(
+  admin: SupabaseClient,
+  channel: ChannelKey,
+): Promise<ChannelPolicy> {
+  try {
+    const { data } = await admin
+      .from("app_settings")
+      .select("sourcing_config")
+      .eq("id", 1)
+      .maybeSingle();
+    const raw = (data?.sourcing_config as SourcingConfigRow | null)?.[channel];
+    return coerceChannelPolicy(raw, channel);
+  } catch {
+    return coerceChannelPolicy(null, channel);
+  }
+}
+
 export function evaluatePlaceForChannel(
   policy: ChannelPolicy,
   signals: PlaceSignals,

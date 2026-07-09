@@ -67,6 +67,7 @@ Deno.serve(async (req) => {
     googlePlaceId,
     dedupeError:
       "This place is already on Mesita. If you manage it, contact support to claim ownership.",
+    sourcingChannel: "business_add",
   });
   if (!created.ok) return json(created.body, created.status);
 

@@ -47,6 +47,7 @@ import {
   GOOGLE_PLACES_TEXT_SEARCH_URL,
   readGooglePlacesKey,
 } from "../_shared/google-places.ts";
+import { evaluatePlaceForChannel, readChannelPolicy, type ChannelPolicy } from "../_shared/sourcing.ts";
 // Local-time primitives shared with the Home recommenders (PR #214). mexicoZone
 // (lng → IANA zone) and openScore (open/unknown/closed → rank weight) used to be
 // duplicated here; import them so the timezone bands + "demote, don't hide"
@@ -189,36 +190,6 @@ function isPlaceSeeking(query: string): boolean {
   return true; // short noun-ish fragments ("sushi san pedro") read as searches
 }
 
-// Keep only Google results in Mesita's universe (F&B · nightlife · experiences /
-// wellness). Drops the department stores, phone shops, etc. that Text Search
-// returns for loose queries. Cuisine subtypes end in _restaurant / _bar.
-const RELEVANT_PLACE_TYPES = new Set([
-  "restaurant", "bar", "cafe", "coffee_shop", "night_club", "bakery",
-  "meal_takeaway", "meal_delivery", "food", "bar_and_grill", "pub", "wine_bar",
-  "brewery", "ice_cream_shop", "dessert_shop", "dessert_restaurant", "tea_house",
-  "fine_dining_restaurant", "tourist_attraction", "spa", "wellness_center",
-  "art_gallery", "museum", "amusement_park", "park", "movie_theater",
-  "bowling_alley", "casino", "banquet_hall", "event_venue",
-  "performing_arts_theater", "concert_hall", "karaoke", "comedy_club",
-  "hookah_bar",
-]);
-
-function isRelevantPlace(
-  primaryType: string | undefined,
-  types: string[] | undefined,
-): boolean {
-  const all = [primaryType, ...(types ?? [])].filter(
-    (t): t is string => !!t,
-  );
-  // No type info at all → don't over-filter. Generic markers
-  // (point_of_interest, establishment) aren't in the set, so they can't
-  // rescue an off-domain result on their own.
-  if (all.length === 0) return true;
-  return all.some(
-    (t) => RELEVANT_PLACE_TYPES.has(t) || /_(restaurant|bar)$/.test(t),
-  );
-}
-
 // ── Local time ("when") ─────────────────────────────────────────────────
 //
 // The "where" (lat/lng) was already fed to Memo; the "when" was missing, so it
@@ -342,7 +313,8 @@ Deno.serve(async (req) => {
   let predictions: Prediction[] = [];
   if (placeSeeking) {
     try {
-      const placeResult = await candidatePlaces(admin, query, lat, lng);
+      const memoPolicy = await readChannelPolicy(admin, "memo_search");
+      const placeResult = await candidatePlaces(admin, query, lat, lng, memoPolicy);
       predictions = placeResult.predictions.slice(0, MAX_CARDS);
     } catch (e) {
       console.error("[ask-memo] places leg:", (e as Error).message);
@@ -465,12 +437,13 @@ async function candidatePlaces(
   query: string,
   lat: number | null,
   lng: number | null,
+  memoPolicy: ChannelPolicy,
 ): Promise<{ predictions: Prediction[] }> {
   const keyRes = readGooglePlacesKey();
 
   let googlePreds: Prediction[] = [];
   if (keyRes.ok) {
-    googlePreds = await googleTextSearch(keyRes.key, query, lat, lng);
+    googlePreds = await googleTextSearch(keyRes.key, query, lat, lng, memoPolicy);
   }
 
   // Cross-reference Google hits against the Mesita catalog by google_place_id
@@ -520,6 +493,7 @@ async function googleTextSearch(
   query: string,
   lat: number | null,
   lng: number | null,
+  memoPolicy: ChannelPolicy,
 ): Promise<Prediction[]> {
   const reqBody: Record<string, unknown> = {
     textQuery: query,
@@ -578,9 +552,13 @@ async function googleTextSearch(
   };
 
   return (d.places ?? [])
-    // Drop off-domain results (department stores, phone shops, …) Text Search
-    // returns for loose queries — keep only Mesita's hospitality universe.
-    .filter((p) => isRelevantPlace(p.primaryType, p.types))
+    .filter((p) =>
+      evaluatePlaceForChannel(memoPolicy, {
+        primaryType: p.primaryType ?? null,
+        rating: p.rating ?? null,
+        reviewCount: p.userRatingCount ?? null,
+      }).eligible
+    )
     .map<Prediction>((p) => ({
       placeId: p.id ?? "",
       mainText: p.displayName?.text ?? "",
