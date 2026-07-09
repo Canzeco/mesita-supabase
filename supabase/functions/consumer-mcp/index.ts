@@ -483,6 +483,23 @@ Deno.serve(async (req) => {
   if (!auth.ok) return auth.response;
   const consumerId = auth.token.consumer_id;
 
+  // decision: Pato — Consumer MCP is Premium-only (MESITA-266).
+  const { data: consumerRow } = await admin
+    .from("consumers")
+    .select("class_key")
+    .eq("id", consumerId)
+    .maybeSingle();
+  if ((consumerRow?.class_key ?? "free") !== "premium") {
+    return json(
+      {
+        ok: false,
+        error: "AI connect is for Mesita Premium members only",
+        code: "mcp_premium_required",
+      },
+      403,
+    );
+  }
+
   let body: JsonRpcReq;
   try {
     body = (await req.json()) as JsonRpcReq;
