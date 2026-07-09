@@ -6,10 +6,11 @@
 // always canonical catalog entries (snake_case slugs) and never free text.
 
 import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { ENRICH_FIELD_LIMITS } from "./enrich-field-limits.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const TAGGER_MODEL = "gpt-4o-mini";
-const MAX_INFERRED_TAGS = 20;
+const MAX_INFERRED_TAGS = ENRICH_FIELD_LIMITS.tagsPerPlace.max;
 
 export type PlaceTag = {
   slug: string;
@@ -138,8 +139,8 @@ export type TagSignals = {
   serpSummary?: string | null;
 };
 
-// Picks up to 20 tag slugs from the closed vocabulary, strongly supported by
-// the place material. Returns [] when there's no OpenAI key, no vocabulary, or
+// Evaluates the full vocabulary and returns the highest-scoring tag slugs strongly supported
+// by the place material. Returns [] when there's no OpenAI key, no vocabulary, or
 // the model errors — tags are additive polish, never worth failing a run over.
 // The vocabulary is passed in (the caller reads it once via fetchPlaceTags).
 export async function inferPlaceTags(
@@ -159,17 +160,20 @@ export async function inferPlaceTags(
   ].filter(Boolean).join("\n");
 
   const systemContent =
-    "You tag a place using ONLY slugs from a fixed vocabulary. Respond with a " +
-    `single JSON object {"tags": ["<slug>", ...]} containing at most ` +
-    `${MAX_INFERRED_TAGS} slugs copied verbatim from the vocabulary. Pick only ` +
-    "slugs strongly supported by the place material. Deduplicate. Never invent a slug. " +
+    "You tag a place using ONLY slugs from a fixed vocabulary. Evaluate the ENTIRE " +
+    "vocabulary; do not stop after the first matching slugs or limit the number of matches. " +
+    "Respond with a single JSON object {\"tags\": [{\"slug\": \"<slug>\", \"score\": 0.0}, ...]}. " +
+    "Include every slug with positive evidence, copied verbatim from the vocabulary, and give " +
+    "each a confidence score from 0 to 1. Return tags best-first by score. Pick only slugs " +
+    "strongly supported by the place material. Deduplicate. Never invent a slug. " +
     "Never combine mutually exclusive tags: reservations_required vs walk_ins_welcome " +
     "vs accepts_reservations (at most one); cash_only vs cards/contactless/meal_vouchers; " +
     "quiet vs lively; casual vs upscale; casual_dress vs formal_dress; " +
     "adults_only vs family_friendly/families/kids_menu/kids_activity/all_ages.";
   const userPrompt =
     `Tag vocabulary (slugs):\n${vocabText}\n\nPlace:\n${placeLines}\n\n` +
-    `Return {"tags": [up to ${MAX_INFERRED_TAGS} slugs from the vocabulary]}.`;
+    `Evaluate every vocabulary slug. Return all supported matches as {"tags": [{"slug": "<slug>", "score": 0.0-1.0}, ...]}, ranked best-first. ` +
+    `We will select the best ${MAX_INFERRED_TAGS} after your full evaluation.`;
 
   try {
     const r = await fetch(OPENAI_URL, {
@@ -194,17 +198,31 @@ export async function inferPlaceTags(
       return [];
     }
     if (!Array.isArray(parsed.tags)) return [];
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const t of parsed.tags) {
-      const slug = typeof t === "string" ? t.trim() : "";
-      if (slug && valid.has(slug) && !seen.has(slug)) {
-        seen.add(slug);
-        out.push(slug);
-        if (out.length >= MAX_INFERRED_TAGS) break;
-      }
+    const candidates: { slug: string; score: number; index: number }[] = [];
+    for (const [index, tag] of parsed.tags.entries()) {
+      // Accept the legacy string shape during rollout; scores rank new responses above it.
+      const slug = typeof tag === "string"
+        ? tag.trim()
+        : typeof tag === "object" && tag !== null && "slug" in tag &&
+            typeof tag.slug === "string" && "score" in tag &&
+            typeof tag.score === "number" && Number.isFinite(tag.score) &&
+            tag.score >= 0 && tag.score <= 1
+          ? tag.slug.trim()
+          : "";
+      const score = typeof tag === "object" && tag !== null && "score" in tag &&
+          typeof tag.score === "number"
+        ? tag.score
+        : 0;
+      if (slug && valid.has(slug)) candidates.push({ slug, score, index });
     }
-    return sanitizePlaceTags(out);
+    candidates.sort((a, b) => b.score - a.score || a.index - b.index);
+    const seen = new Set<string>();
+    const ranked = candidates.flatMap(({ slug }) => {
+      if (seen.has(slug)) return [];
+      seen.add(slug);
+      return [slug];
+    });
+    return sanitizePlaceTags(ranked).slice(0, MAX_INFERRED_TAGS);
   } catch {
     return [];
   }
