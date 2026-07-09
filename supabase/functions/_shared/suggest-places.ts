@@ -42,7 +42,6 @@ import {
   type ChannelPolicy,
   evaluatePlaceForChannel,
   readChannelPolicy,
-  autocompleteTypesForPolicy,
 } from "./sourcing.ts";
 
 export type SuggestPlacesArgs = {
@@ -102,14 +101,23 @@ export async function suggestPlaces(
   const sourcingPolicy = args.sourcingChannel
     ? await readChannelPolicy(admin, args.sourcingChannel)
     : null;
-  const autocompleteTypes = sourcingPolicy
-    ? autocompleteTypesForPolicy(sourcingPolicy)
-    : null;
+  // Sourced search: do NOT pre-filter Google Autocomplete by broad
+  // primary types. Google matches includedPrimaryTypes exactly
+  // (`bar` ≠ `night_club`, `cafe` ≠ `cake_shop`), and the API caps the
+  // list at 5 — so a one-type-per-family map silently drops eligible
+  // places before the rating/review post-filter can run. Family + floors
+  // are enforced after merge via filterPredictionsBySourcing.
+  // Skip the Google leg only when the channel is off or has no families.
+  const googleTypeFilter: GoogleTypeFilter = !sourcingPolicy
+    ? "legacy"
+    : !sourcingPolicy.enabled || sourcingPolicy.families.length === 0
+      ? "skip"
+      : "open";
 
   // Fire Google + Mesita searches in parallel. Either can fail
   // independently; we merge whatever comes back.
   const [googleResult, mesitaResult] = await Promise.allSettled([
-    fetchGooglePredictions(input, sessionToken, apiKey, autocompleteTypes),
+    fetchGooglePredictions(input, sessionToken, apiKey, googleTypeFilter),
     fetchMesitaPredictions(admin, input, callerUserId),
   ]);
 
@@ -183,27 +191,32 @@ export async function suggestPlaces(
 
 // ── Google ────────────────────────────────────────────────────────────
 
+// How to constrain Google Autocomplete primary types for this call:
+// - "legacy": no sourcing channel → static hospitality allowlist
+// - "skip": channel disabled / no families → don't call Google
+// - "open": sourced search → omit includedPrimaryTypes; post-filter enforces policy
+type GoogleTypeFilter = "legacy" | "skip" | "open";
+
 async function fetchGooglePredictions(
   input: string,
   sessionToken: string,
   apiKey: string,
-  includedPrimaryTypes: string[] | null,
+  typeFilter: GoogleTypeFilter,
 ): Promise<{
   predictions: Prediction[];
   errorEnvelope?: Record<string, unknown>;
 }> {
-  // Channel disabled or every family off → skip the Google leg entirely.
-  if (includedPrimaryTypes !== null && includedPrimaryTypes.length === 0) {
+  if (typeFilter === "skip") {
     return { predictions: [] };
   }
 
   const body: Record<string, unknown> = { input, sessionToken };
-  if (includedPrimaryTypes !== null) {
-    body.includedPrimaryTypes = includedPrimaryTypes;
-  } else {
+  if (typeFilter === "legacy") {
     // Legacy path (no sourcing channel): broad static hospitality filter.
     body.includedPrimaryTypes = ["restaurant", "bar", "cafe", "night_club", "bakery"];
   }
+  // "open": omit includedPrimaryTypes so night_club / cake_shop / bakery /
+  // museum / etc. can surface; filterPredictionsBySourcing drops the rest.
 
   const r = await fetch(GOOGLE_PLACES_AUTOCOMPLETE_URL, {
     method: "POST",
