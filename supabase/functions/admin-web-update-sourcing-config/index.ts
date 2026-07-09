@@ -21,9 +21,11 @@ import {
 
 // Keep these in lock-step with the admin catalog (Sourcing Config catalog.ts).
 const CHANNELS = new Set([
-  "admin_add",
   "admin_search",
+  "admin_add",
+  "business_search",
   "business_add",
+  "consumer_search",
   "consumer_add",
   "memo_search",
 ]);
