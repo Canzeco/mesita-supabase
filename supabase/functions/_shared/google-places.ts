@@ -130,3 +130,33 @@ export async function googleErrorFromResponse(r: Response): Promise<Error> {
 export function escapeIlike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
+
+// Minimal Place Details fetch for sourcing search gates — primaryType +
+// rating + review count only. Autocomplete doesn't return these, so search
+// paths batch-fetch them for Google-only ("not_in_mesita") predictions.
+export async function fetchPlaceSignals(
+  placeId: string,
+  apiKey: string,
+): Promise<{ primaryType: string | null; rating: number | null; reviewCount: number | null } | null> {
+  try {
+    const r = await fetch(`${GOOGLE_PLACES_DETAILS_BASE}/${encodeURIComponent(placeId)}`, {
+      headers: {
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "primaryType,rating,userRatingCount",
+      },
+    });
+    if (!r.ok) return null;
+    const d = (await r.json()) as {
+      primaryType?: string;
+      rating?: number;
+      userRatingCount?: number;
+    };
+    return {
+      primaryType: d.primaryType ?? null,
+      rating: typeof d.rating === "number" ? d.rating : null,
+      reviewCount: typeof d.userRatingCount === "number" ? d.userRatingCount : null,
+    };
+  } catch {
+    return null;
+  }
+}

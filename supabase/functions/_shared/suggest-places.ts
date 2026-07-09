@@ -32,11 +32,18 @@ import { adminClient, type EFEnv } from "./auth.ts";
 import {
   classifyGoogleError,
   escapeIlike,
+  fetchPlaceSignals,
   friendlyGoogleError,
   GOOGLE_PLACES_AUTOCOMPLETE_URL,
-  MESITA_PRIMARY_TYPES,
   readGooglePlacesKey,
 } from "./google-places.ts";
+import {
+  type ChannelKey,
+  type ChannelPolicy,
+  evaluatePlaceForChannel,
+  readChannelPolicy,
+  autocompleteTypesForPolicy,
+} from "./sourcing.ts";
 
 export type SuggestPlacesArgs = {
   input?: string;
@@ -45,6 +52,10 @@ export type SuggestPlacesArgs = {
   // null, we can't flag verified_partner_self — only _other for any
   // owned row.
   callerUserId?: string | null;
+  // When set, Google-only ("not_in_mesita") predictions are filtered against
+  // app_settings.sourcing_config[sourcingChannel]. On-Mesita rows always
+  // pass — they're already onboarded.
+  sourcingChannel?: ChannelKey;
 };
 
 type PredictionStatus =
@@ -88,10 +99,17 @@ export async function suggestPlaces(
 
   const admin = adminClient(env);
 
+  const sourcingPolicy = args.sourcingChannel
+    ? await readChannelPolicy(admin, args.sourcingChannel)
+    : null;
+  const autocompleteTypes = sourcingPolicy
+    ? autocompleteTypesForPolicy(sourcingPolicy)
+    : null;
+
   // Fire Google + Mesita searches in parallel. Either can fail
   // independently; we merge whatever comes back.
   const [googleResult, mesitaResult] = await Promise.allSettled([
-    fetchGooglePredictions(input, sessionToken, apiKey),
+    fetchGooglePredictions(input, sessionToken, apiKey, autocompleteTypes),
     fetchMesitaPredictions(admin, input, callerUserId),
   ]);
 
@@ -156,7 +174,11 @@ export async function suggestPlaces(
     return aIn === bIn ? 0 : aIn ? -1 : 1;
   });
 
-  return json({ ok: true, predictions, caller: callerName });
+  const filtered = sourcingPolicy
+    ? await filterPredictionsBySourcing(predictions, sourcingPolicy, apiKey)
+    : predictions;
+
+  return json({ ok: true, predictions: filtered, caller: callerName });
 }
 
 // ── Google ────────────────────────────────────────────────────────────
@@ -165,21 +187,31 @@ async function fetchGooglePredictions(
   input: string,
   sessionToken: string,
   apiKey: string,
+  includedPrimaryTypes: string[] | null,
 ): Promise<{
   predictions: Prediction[];
   errorEnvelope?: Record<string, unknown>;
 }> {
+  // Channel disabled or every family off → skip the Google leg entirely.
+  if (includedPrimaryTypes !== null && includedPrimaryTypes.length === 0) {
+    return { predictions: [] };
+  }
+
+  const body: Record<string, unknown> = { input, sessionToken };
+  if (includedPrimaryTypes !== null) {
+    body.includedPrimaryTypes = includedPrimaryTypes;
+  } else {
+    // Legacy path (no sourcing channel): broad static hospitality filter.
+    body.includedPrimaryTypes = ["restaurant", "bar", "cafe", "night_club", "bakery"];
+  }
+
   const r = await fetch(GOOGLE_PLACES_AUTOCOMPLETE_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
     },
-    body: JSON.stringify({
-      input,
-      sessionToken,
-      includedPrimaryTypes: MESITA_PRIMARY_TYPES,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!r.ok) {
@@ -328,4 +360,35 @@ async function statusesForPlaces(
     );
   }
   return out;
+}
+
+// Apply the sourcing channel policy to Google-only predictions. On-Mesita
+// rows always pass — they're already onboarded. For not_in_mesita rows,
+// batch-fetch primaryType + rating + reviewCount (Autocomplete omits them)
+// and drop any that fail evaluatePlaceForChannel.
+async function filterPredictionsBySourcing(
+  predictions: Prediction[],
+  policy: ChannelPolicy,
+  apiKey: string,
+): Promise<Prediction[]> {
+  const googleOnly = predictions.filter((p) => p.status === "not_in_mesita");
+  if (googleOnly.length === 0) return predictions;
+
+  const signalsByPlaceId = new Map<
+    string,
+    { primaryType: string | null; rating: number | null; reviewCount: number | null }
+  >();
+  await Promise.all(
+    googleOnly.map(async (p) => {
+      const sig = await fetchPlaceSignals(p.placeId, apiKey);
+      if (sig) signalsByPlaceId.set(p.placeId, sig);
+    }),
+  );
+
+  return predictions.filter((p) => {
+    if (p.status !== "not_in_mesita") return true;
+    const sig = signalsByPlaceId.get(p.placeId);
+    if (!sig) return false;
+    return evaluatePlaceForChannel(policy, sig).eligible;
+  });
 }

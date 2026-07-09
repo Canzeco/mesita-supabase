@@ -53,5 +53,6 @@ Deno.serve(async (req) => {
     input: body.input,
     sessionToken: body.sessionToken,
     callerUserId,
+    sourcingChannel: "consumer_search",
   });
 });

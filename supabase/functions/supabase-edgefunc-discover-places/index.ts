@@ -35,6 +35,11 @@ import {
   googleErrorFromResponse,
   readGooglePlacesKey,
 } from "../_shared/google-places.ts";
+import {
+  evaluatePlaceForChannel,
+  readChannelPolicy,
+  type ChannelPolicy,
+} from "../_shared/sourcing.ts";
 
 const PAGE_SIZE = 20;
 const MAX_PAGES = 3;
@@ -71,6 +76,7 @@ type PlaceLite = {
   // have no rating yet).
   rating: number | null;
   userRatingCount: number | null;
+  primaryType: string | null;
   // Mesita-side enrichment, populated after the Google round-trip by
   // looking each Place ID up against public.places.google_place_id.
   // Defaults to (false, null, null); the top-level mesitaLookupError
@@ -107,6 +113,8 @@ Deno.serve(async (req) => {
 
   const admin = adminClient(env);
 
+  const adminSearchPolicy = await readChannelPolicy(admin, "admin_search");
+
   const bodyRes = await readJson<RequestBody>(req);
   if (!bodyRes.ok) return bodyRes.response;
   const body = bodyRes.body;
@@ -134,9 +142,17 @@ Deno.serve(async (req) => {
     Math.max(1, body.maxResultsPerQuery ?? MAX_RESULTS_PER_QUERY),
   );
 
-  // Quality filters — clamp to sane ranges; 0 disables each one.
-  const minRating = clamp(Number(body.minRating ?? 0), 0, 5);
-  const minUserRatingCount = Math.max(0, Math.floor(Number(body.minUserRatingCount ?? 0)));
+  // Quality filters — request body overrides win; otherwise fall back to the
+  // admin_search channel policy from app_settings.sourcing_config.
+  const minRating = clamp(
+    Number(body.minRating ?? adminSearchPolicy.minRating ?? 0),
+    0,
+    5,
+  );
+  const minUserRatingCount = Math.max(
+    0,
+    Math.floor(Number(body.minUserRatingCount ?? adminSearchPolicy.minReviews ?? 0)),
+  );
 
   // --- Run queries with bounded concurrency ---
   const results = new Array<QueryResult>(queries.length);
@@ -149,7 +165,7 @@ Deno.serve(async (req) => {
       try {
         const fetched = await searchTextWithPagination(q, regionCode, maxResults, apiKey);
         const places = fetched.filter((p) =>
-          passesQualityFilter(p, minRating, minUserRatingCount),
+          passesSourcingFilter(p, adminSearchPolicy, minRating, minUserRatingCount),
         );
         results[i] = {
           query: q,
@@ -249,25 +265,25 @@ Deno.serve(async (req) => {
   });
 });
 
-// A place passes when it clears BOTH active filters. When a filter is off
-// (0) it never rejects. When a filter is on but the place is missing that
-// signal (null rating / null review count), it's rejected — an unrated
-// place can't be shown to clear a rating floor, and the operator asked to
-// see only places above the bar.
-function passesQualityFilter(
+// A place passes when it clears the admin_search channel policy (family +
+// rating/review floors). Request-body floors are merged with the policy
+// floors — the stricter of each pair wins.
+function passesSourcingFilter(
   p: PlaceLite,
+  policy: ChannelPolicy,
   minRating: number,
   minUserRatingCount: number,
 ): boolean {
-  if (minRating > 0) {
-    if (p.rating === null || p.rating < minRating) return false;
-  }
-  if (minUserRatingCount > 0) {
-    if (p.userRatingCount === null || p.userRatingCount < minUserRatingCount) {
-      return false;
-    }
-  }
-  return true;
+  const effectivePolicy: ChannelPolicy = {
+    ...policy,
+    minRating: Math.max(policy.minRating, minRating),
+    minReviews: Math.max(policy.minReviews, minUserRatingCount),
+  };
+  return evaluatePlaceForChannel(effectivePolicy, {
+    primaryType: p.primaryType,
+    rating: p.rating,
+    reviewCount: p.userRatingCount,
+  }).eligible;
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -300,7 +316,7 @@ async function searchTextWithPagination(
         "Content-Type": "application/json",
         "X-Goog-Api-Key": apiKey,
         "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,nextPageToken",
+          "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.primaryType,nextPageToken",
       },
       body: JSON.stringify(body),
     });
@@ -317,6 +333,7 @@ async function searchTextWithPagination(
         location?: { latitude?: number; longitude?: number };
         rating?: number;
         userRatingCount?: number;
+        primaryType?: string;
       }>;
       nextPageToken?: string;
     };
@@ -332,6 +349,7 @@ async function searchTextWithPagination(
         rating: typeof p.rating === "number" ? p.rating : null,
         userRatingCount:
           typeof p.userRatingCount === "number" ? p.userRatingCount : null,
+        primaryType: typeof p.primaryType === "string" ? p.primaryType : null,
         existsInMesita: false,
         createdAt: null,
         updatedAt: null,

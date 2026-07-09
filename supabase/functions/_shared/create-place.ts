@@ -16,8 +16,8 @@ import { fetchGoogleBasics } from "./enrich-google-basics.ts";
 import { savePlaceData } from "./save-place.ts";
 import {
   type ChannelKey,
-  coerceChannelPolicy,
   evaluatePlaceForChannel,
+  readChannelPolicy,
 } from "./sourcing.ts";
 
 const CHANNEL_KEYS = [
@@ -116,15 +116,7 @@ export async function createMinimalPlace(opts: {
   // creation quota upstream. Config-read failure falls back to the launch
   // policy (coerceChannelPolicy default) rather than failing open. ──
   if (opts.sourcingChannel) {
-    const { data: settings } = await admin
-      .from("app_settings")
-      .select("sourcing_config")
-      .eq("id", 1)
-      .maybeSingle();
-    const policy = coerceChannelPolicy(
-      (settings?.sourcing_config as Record<string, unknown> | null)?.[opts.sourcingChannel],
-      opts.sourcingChannel,
-    );
+    const policy = await readChannelPolicy(admin, opts.sourcingChannel);
     const verdict = evaluatePlaceForChannel(policy, {
       primaryType: basicsRes.primaryType,
       rating: basicsRes.basics.google_stars_overall,

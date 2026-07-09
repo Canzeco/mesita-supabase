@@ -44,5 +44,6 @@ Deno.serve(async (req) => {
     input: body.input,
     sessionToken: body.sessionToken,
     callerUserId,
+    sourcingChannel: "business_search",
   });
 });

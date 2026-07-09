@@ -43,5 +43,6 @@ Deno.serve(async (req) => {
     sessionToken: body.sessionToken,
     // Admin surface — no self/other split; claimed rows show as _other.
     callerUserId: null,
+    sourcingChannel: "admin_search",
   });
 });
