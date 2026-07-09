@@ -1,0 +1,6 @@
+# Claude Code: auto-copy these gitignored paths into every new worktree (MESITA-338).
+# Syntax = gitignore. Without this, `supabase` CLI / local secrets are missing in worktrees.
+supabase/.temp/
+.env
+.env.*
+!.env.twilio.local.example
