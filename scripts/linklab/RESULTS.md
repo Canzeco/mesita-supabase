@@ -52,15 +52,31 @@ The distinction between the top two strategies is a **precision/recall temperame
   account. Lifted **C 89.5 → 92.4** (IG 84 → 90); D held.
 - **Round 3** (full 50): C 92.4, D 92.2, E 91.5.
 
-## Next lever (not yet applied)
+## Round 4+ (MESITA-192 — code landed, live re-score money-gated)
 
-C's remaining Instagram misses are mostly **false negatives** where the correct handle *was* in the
-candidate list but the judge declined it (Hueso, Misión 19, Corazón de Tierra). A lighter null-bias —
-or trusting a `[site]`-tagged footer handle outright — would convert those FN→TP and push C toward ~96
-without hurting precision. That's the natural Round-4 experiment.
+Shipped in code (no live re-bill in this PR):
+
+1. **IG retrieval recall** — strategy C (+ prod `gatherCandidates`) adds a second
+   `"${name}" site:instagram.com` Firecrawl query so punctuated / city-suffixed
+   handles enter the candidate pool (footer-trust alone was a no-op when the handle
+   was never retrieved).
+2. **Sonar malformed-JSON resilience** — shared `safeParseJson` now tolerates trailing
+   commas + truncated closing braces; linklab `safeJson` uses it.
+3. **Strategy F** — pure Sonar judge with `disable_search` (benchmark-only; `--only F`).
+4. **$ estimate line** — `run.ts` prints suite + per-venue $ and a strategy-C-alone
+   estimate (~$0.01/venue excl. shared Google resolve).
+
+Still money-gated (needs Pato go-ahead to burn Firecrawl/Perplexity/Apify):
+
+- Restaurant-domain prod E2E on a few real MX restaurants
+- Full 50-venue re-score of C vs F (and FB/OpenTable/UberEats accuracy)
+- Bigger / long-tail ground truth for statistical significance
 
 ## Cost of the full 50-venue run
 
 `fc-search 82 · fc-scrape 39 · ppx-search 160 · ppx-agent 120 · ppx-sonar 120 · g-text 40` (14 min,
 concurrency 4). The 120 `pro-search` Agent calls (A/B/D) dominate cost; C/E avoid them entirely.
 Disk cache made Rounds 2–3 reuse all search/scrape calls, re-billing only changed LLM prompts.
+
+**Strategy C alone (shipped):** ~$0.009–0.012 / venue at list rates (2–3 Firecrawl searches +
+1 scrape + 1 sonar-pro), plus one shared Google Places Text Search when resolving context.

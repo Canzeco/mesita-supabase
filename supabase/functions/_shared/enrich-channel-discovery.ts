@@ -246,11 +246,26 @@ async function gatherCandidates(
   counts: DiscoverCandidateCounts,
 ): Promise<Partial<Record<ChannelField, string[]>>> {
   const scope = [name, city ?? ""].map((s) => s.trim()).filter(Boolean).join(" ");
+  // MESITA-192: IG retrieval-recall — a second site:instagram.com query so
+  // punctuated / city-suffixed handles enter the candidate pool (footer-trust
+  // alone cannot recover handles that were never retrieved).
   const runs = await Promise.all(
-    fields.map((f) => {
+    fields.map(async (f) => {
       const n = counts[f as keyof DiscoverCandidateCounts] ?? 5;
-      if (n <= 0) return Promise.resolve<string[]>([]);
-      return firecrawlSearch(firecrawlKey, `${scope} ${CHANNEL_SEARCH_TERM[f]}`, n);
+      if (n <= 0) return [] as string[];
+      const primary = await firecrawlSearch(
+        firecrawlKey,
+        `${scope} ${CHANNEL_SEARCH_TERM[f]}`,
+        n,
+      );
+      if (f !== "instagram_url") return primary;
+      const altN = Math.min(n, 6);
+      const alt = await firecrawlSearch(
+        firecrawlKey,
+        `"${name}" site:instagram.com`,
+        altN,
+      );
+      return dedup([...primary, ...alt]);
     }),
   );
   const pools: Partial<Record<ChannelField, string[]>> = {};

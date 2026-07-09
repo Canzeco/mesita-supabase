@@ -15,15 +15,18 @@ ground-truth set and rank by mean F1 of the two fields.
 - `scripts/linklab/ground_truth.json` — verified 50-venue truth set
 - `supabase/functions/staff-web-benchmark-link-strategies/` — EF wrapper over the same engine
 
-## The 5 strategies
+## The strategies
 
 | id | name | retrieval | reasoner | tests |
 |----|------|-----------|----------|-------|
 | A | Incumbent (control) | Firecrawl search + footer scrape | Perplexity Agent fill | current prod pipeline; baseline |
 | B | Pure Agent one-shot | agent-internal browse | Perplexity Agent (`pro-search`) | can the agent alone win? |
-| C | FC recall → Sonar judge | Firecrawl search + footer | sonar-pro JSON-schema | cheap retrieval + cheap structured judge |
+| C | FC recall → Sonar judge | Firecrawl search (+ IG `site:` alt) + footer | sonar-pro JSON-schema | cheap retrieval + cheap structured judge (**shipped**) |
 | D | PPX-search → Agent validate | Perplexity `/search` | Perplexity Agent | retrieval-provider swap |
 | E | Dual fusion + cross-val judge | Firecrawl + PPX-search + footer | sonar-pro cross-validating | kitchen sink |
+| F | Pure Sonar judge (`disable_search`) | none (blind) | sonar-pro + `disable_search` | MESITA-192 pure-judge cost/quality variant |
+
+Strategy **C** is production. Run F alone with `--only F` (money-gated; burns Sonar budget).
 
 All strategies skip searching for the website when Google already provides one (like Mesita input),
 per the "don't search what you already know" rule.

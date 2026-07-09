@@ -207,8 +207,12 @@ const stratC: Strategy = {
   id: "C",
   name: "FC recall -> Sonar judge",
   run: async (ctx, keys) => {
-    const [igHits, siteHits] = await Promise.all([
+    // MESITA-192 IG retrieval: dual query variants so punctuated / city-suffixed
+    // handles enter the candidate pool (Round-4 footer-trust was a no-op when the
+    // handle wasn't retrieved at all).
+    const [igHits, igHitsAlt, siteHits] = await Promise.all([
       firecrawlSearch(keys, `${ctx.name} ${ctx.city} instagram`, 8),
+      firecrawlSearch(keys, `"${ctx.name}" site:instagram.com`, 6),
       firecrawlSearch(keys, `${ctx.name} ${ctx.city} official website`, 6),
     ]);
     const seedSite = ctx.seedWebsite ? `https://${normWebsiteHost(ctx.seedWebsite)}` : null;
@@ -218,6 +222,7 @@ const stratC: Strategy = {
       ...(seedSite ? [seedSite] : []),
       ...footerIg,
       ...igHits.map((h) => h.url),
+      ...igHitsAlt.map((h) => h.url),
       ...siteHits.map((h) => h.url),
     ]);
     const { answer } = await perplexitySonar(
@@ -309,6 +314,34 @@ const stratE: Strategy = {
   },
 };
 
+// =============================================================================
+// STRATEGY F — Pure Sonar judge (disable_search) — MESITA-192 deferred variant
+// =============================================================================
+// Measures whether dropping Firecrawl recall and letting sonar-pro answer blind
+// changes precision/recall/cost vs C. Not production — benchmark-only.
+const stratF: Strategy = {
+  id: "F",
+  name: "Pure Sonar judge (disable_search)",
+  run: async (ctx, keys) => {
+    const seedSite = ctx.seedWebsite ? `https://${normWebsiteHost(ctx.seedWebsite)}` : null;
+    const { answer } = await perplexitySonar(
+      keys,
+      `You find a venue's official website + Instagram from your own knowledge/search. ` +
+        `Return strict JSON. Prefer null over a guess. Prefer the venue's OWN account over a ` +
+        `parent brand / group account.`,
+      `${contextLine(ctx)}\n` +
+        (seedSite ? `Known official website (from Google): ${seedSite}.\n` : "") +
+        `Return {"website_url": <official own-domain website or null>, ` +
+        `"instagram_url": <official instagram profile URL or null>}.`,
+      LINK_SCHEMA,
+      { disableSearch: true },
+    );
+    const out = validatePair(answer);
+    if (!out.website && seedSite) out.website = seedSite;
+    return out;
+  },
+};
+
 // Round 4 (precision-safe FN recovery): if the judge declined an Instagram but the venue's OWN
 // site links one, trust that footer handle. Only fills a null — never overrides a judge pick — so
 // it cannot introduce a wrong answer over a correct one; footer = the site linking its own account.
@@ -339,7 +372,7 @@ function dedupeUrls(urls: string[]): string[] {
   return out;
 }
 
-export const STRATEGIES: Strategy[] = [stratA, stratB, stratC, stratD, stratE];
+export const STRATEGIES: Strategy[] = [stratA, stratB, stratC, stratD, stratE, stratF];
 
 export async function runAllStrategies(
   ctx: VenueContext,
