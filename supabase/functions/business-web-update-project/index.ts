@@ -38,7 +38,9 @@ type UpdateBody = {
   name?: string | null;
   category?: string | null;
   vibe?: string | null;
-  price_level?: number | null;
+  // NOTE: `price_level` is deliberately NOT editable here. It is inferred
+  // from Google Places during Enrich-Research and must not be overridden
+  // by admin, business, or any client.
   // ISO 4217 code. Mesita defaults every place to MXN; the business
   // can switch to USD/EUR/etc. only when we extend coverage outside
   // Mexico. Kept as text so the EF doesn't hard-code an enum.
@@ -188,7 +190,19 @@ Deno.serve(async (req) => {
     update.category_label = resolved.label;
   }
   if ("vibe" in body) update.vibe = optString(body.vibe, 80);
-  if ("price_level" in body) update.price_level = body.price_level == null ? null : clampInt(body.price_level, 1, 4);
+  if ("price_level" in body) {
+    // Price is enrich-only (Google Places). Reject so stale clients learn
+    // the contract — same posture as `plan` via billing.
+    return json(
+      {
+        ok: false,
+        code: "price_via_enrich",
+        error:
+          "price_level is set by Enrich-Research from Google Places and cannot be updated manually.",
+      },
+      400,
+    );
+  }
   // currency: ISO 4217 uppercase code, 3 chars. Reject anything else
   // — accidental empty strings or longer strings would corrupt every
   // monetary render downstream.
@@ -521,12 +535,6 @@ function optString(v: unknown, maxLen: number): string | null {
   const trimmed = v.trim();
   if (!trimmed) return null;
   return trimmed.slice(0, maxLen);
-}
-
-function clampInt(n: unknown, lo: number, hi: number): number | null {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return null;
-  return Math.max(lo, Math.min(hi, Math.trunc(v)));
 }
 
 // "invalid" is the only failure sentinel so the caller can return a single
