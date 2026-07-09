@@ -64,6 +64,10 @@ Deno.serve(async (req) => {
     callerName: "consumer-web-create-place",
     googlePlaceId,
     dedupeError: "This place is already on Mesita.",
+    // Consumer adds are quality-gated (family + Google rating/review floors)
+    // via app_settings.sourcing_config.consumer_add — keeps junk, personal
+    // listings and non-venue Google types (hotels, shops, clinics) out.
+    sourcingChannel: "consumer_add",
   });
   if (!created.ok) return json(created.body, created.status);
 

@@ -63,6 +63,9 @@ Deno.serve(async (req) => {
     callerName: "consumer-web-schedule-project-creation",
     googlePlaceId,
     dedupeError: "This place is already on Mesita.",
+    // Same consumer_add quality gate as consumer-web-create-place — this alias
+    // is an equal-privilege consumer path and must not be a bypass.
+    sourcingChannel: "consumer_add",
   });
 
   const nowIso = new Date().toISOString();

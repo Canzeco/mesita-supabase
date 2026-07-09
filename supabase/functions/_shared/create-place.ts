@@ -14,6 +14,11 @@ import { type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { seedPlaceResearch } from "./enrich-pipeline.ts";
 import { fetchGoogleBasics } from "./enrich-google-basics.ts";
 import { savePlaceData } from "./save-place.ts";
+import {
+  type ChannelKey,
+  coerceChannelPolicy,
+  evaluatePlaceForChannel,
+} from "./sourcing.ts";
 
 const CHANNEL_KEYS = [
   "website_url", "instagram_url", "facebook_url", "tiktok_url", "x_url", "threads_url",
@@ -54,6 +59,12 @@ export async function createMinimalPlace(opts: {
   googlePlaceId: string;
   // Caller-specific copy for the 409 (e.g. the business app adds claim advice).
   dedupeError?: string;
+  // Sourcing gate: when set, the place is evaluated against
+  // app_settings.sourcing_config[sourcingChannel] (family + rating + review
+  // floors) after the Google fetch and rejected (422) if ineligible. Consumer
+  // adds pass "consumer_add"; admin/business callers pass nothing (unquota'd,
+  // ungated — trusted operators / venue owners).
+  sourcingChannel?: ChannelKey;
 }): Promise<CreatePlaceOutcome> {
   const { admin, callerName, googlePlaceId } = opts;
 
@@ -98,6 +109,36 @@ export async function createMinimalPlace(opts: {
       body: { ok: false, code: basicsRes.code, error: basicsRes.error },
     };
   }
+  // ── Sourcing gate (quality). Evaluated here — after the Google fetch, before
+  // any persist/enrichment — because family/rating/review signals only exist
+  // once Google answers. One Basics call is spent on a rejected place; that's
+  // unavoidable (we need the data to judge) and bounded by the per-consumer
+  // creation quota upstream. Config-read failure falls back to the launch
+  // policy (coerceChannelPolicy default) rather than failing open. ──
+  if (opts.sourcingChannel) {
+    const { data: settings } = await admin
+      .from("app_settings")
+      .select("sourcing_config")
+      .eq("id", 1)
+      .maybeSingle();
+    const policy = coerceChannelPolicy(
+      (settings?.sourcing_config as Record<string, unknown> | null)?.[opts.sourcingChannel],
+      opts.sourcingChannel,
+    );
+    const verdict = evaluatePlaceForChannel(policy, {
+      primaryType: basicsRes.primaryType,
+      rating: basicsRes.basics.google_stars_overall,
+      reviewCount: basicsRes.basics.google_review_count,
+    });
+    if (!verdict.eligible) {
+      return {
+        ok: false,
+        status: 422,
+        body: { ok: false, code: verdict.code, error: verdict.reason },
+      };
+    }
+  }
+
   // category 'undefined' until the Enricher resolves it; the category-label
   // trigger fills category_label from the 'undefined' catalog row.
   const place: Record<string, unknown> = {
