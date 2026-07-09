@@ -109,7 +109,9 @@ const DEFAULT_POLICY: Record<ChannelKey, ChannelPolicy> = {
   admin_add: { enabled: true, families: [...ALL_FAMILY_KEYS], minRating: 0, minReviews: 0 },
   business_search: { enabled: true, families: [...ALL_FAMILY_KEYS], minRating: 0, minReviews: 0 },
   business_add: { enabled: true, families: [...ALL_FAMILY_KEYS], minRating: 0, minReviews: 0 },
-  consumer_search: { enabled: true, families: [...ALL_FAMILY_KEYS], minRating: 3.5, minReviews: 50 },
+  // Live admin default for consumer Search is 1★ / 50 reviews (floors are
+  // authored in app_settings.sourcing_config; this is the read-fail fallback).
+  consumer_search: { enabled: true, families: [...ALL_FAMILY_KEYS], minRating: 1, minReviews: 50 },
   consumer_add: { enabled: true, families: [...ALL_FAMILY_KEYS], minRating: 3.5, minReviews: 100 },
   memo_search: { enabled: true, families: [...ALL_FAMILY_KEYS], minRating: 4.0, minReviews: 50 },
 };
@@ -148,28 +150,12 @@ export type EligibilityResult =
 // rating → reviews, returning the first failing gate with consumer-friendly
 // copy. minRating/minReviews of 0 mean "no floor". A null rating/reviewCount
 // fails any non-zero floor (an unrated place hasn't cleared the bar).
-// One broad Table A primary type per family — used to build the Google
-// Autocomplete `includedPrimaryTypes` list (API cap: 5). Picking the
-// broadest type per enabled family keeps the picker aligned with the
-// family allowlist without listing every cuisine variant.
-const FAMILY_AUTOCOMPLETE_TYPE: Record<FamilyKey, string> = {
-  restaurants: "restaurant",
-  bars_nightlife: "bar",
-  cafes_bakeries: "cafe",
-  wellness_spa: "spa",
-  experiences: "tourist_attraction",
-  culture_arts: "museum",
-};
-
-// Up to 5 Google primary types for Autocomplete, derived from the channel's
-// enabled families. Empty when every family is off — callers should skip the
-// Google leg rather than query with no type filter.
-export function autocompleteTypesForPolicy(policy: ChannelPolicy): string[] {
-  return policy.families
-    .slice(0, 5)
-    .map((f) => FAMILY_AUTOCOMPLETE_TYPE[f])
-    .filter(Boolean);
-}
+//
+// Note: Google Autocomplete is intentionally NOT pre-filtered by a
+// one-type-per-family map. Broad types (`bar`, `cafe`) do not match exact
+// primaryTypes (`night_club`, `cake_shop`), and the API caps the list at 5 —
+// so suggest-places omits includedPrimaryTypes on sourced search and relies
+// on evaluatePlaceForChannel after merge.
 
 export type SourcingConfigRow = Partial<Record<ChannelKey, unknown>>;
 
