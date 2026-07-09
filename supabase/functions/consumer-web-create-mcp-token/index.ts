@@ -38,8 +38,29 @@ Deno.serve(async (req) => {
       ? body.label.trim().slice(0, 80)
       : "AI client";
 
-  // Cap active tokens per consumer so a buggy client can't mint forever.
   const admin = adminClient(envRes.env);
+
+  // decision: Pato — Consumer MCP is Premium-only (MESITA-266).
+  const { data: consumerRow, error: consumerErr } = await admin
+    .from("consumers")
+    .select("class_key")
+    .eq("id", consumerId)
+    .maybeSingle();
+  if (consumerErr) {
+    return json({ ok: false, error: `consumer_read: ${consumerErr.message}` }, 500);
+  }
+  if ((consumerRow?.class_key ?? "free") !== "premium") {
+    return json(
+      {
+        ok: false,
+        error: "AI connect is for Mesita Premium members only",
+        code: "mcp_premium_required",
+      },
+      403,
+    );
+  }
+
+  // Cap active tokens per consumer so a buggy client can't mint forever.
   const { count, error: countErr } = await admin
     .from("consumer_mcp_tokens")
     .select("id", { count: "exact", head: true })
