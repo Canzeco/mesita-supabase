@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Apply pending migrations to the linked Supabase project and
-# regenerate TypeScript types for every web repo that consumes them.
+# regenerate TypeScript types into @mesita/supabase-contract (mesita monorepo).
 #
 # Run from the mesita-supabase repo root:
 #   ./scripts/deploy.sh
@@ -14,13 +14,17 @@ set -euo pipefail
 
 PROJECT_REF="yjalywfzdelacdzccpgb"
 
-# Web repos sitting next to this one that import database.types.ts.
-# Add new consumer repos here as they appear.
-WEB_REPOS=(
-  "../mesita-web-business"
-  "../mesita-web-consumer"
-  "../mesita-web-admin"
-)
+# Canonical types live in the mesita monorepo shared package (MESITA-146).
+# Single write target — apps import @mesita/supabase-contract.
+TYPES_TARGET="../mesita/packages/supabase-contract/src/database.types.ts"
+
+# LEGACY (one cycle): per-app copies in the old mesita-web-* repos.
+# Keep commented until Vercel Phase 2 flips deploys to the monorepo, then delete.
+# WEB_REPOS=(
+#   "../mesita-web-business"
+#   "../mesita-web-consumer"
+#   "../mesita-web-admin"
+# )
 
 cd "$(dirname "$0")/.."
 
@@ -45,15 +49,23 @@ if ! supabase db push --include-all; then
 fi
 fi
 
-for repo in "${WEB_REPOS[@]}"; do
-  target="$repo/src/lib/supabase/database.types.ts"
-  if [ -d "$repo" ] && [ -f "$target" ]; then
-    echo "▶ Regenerating $target"
-    supabase gen types typescript --linked > "$target" 2>/dev/null
-  else
-    echo "⚠ Skipping $repo (path or types file not found)"
-  fi
-done
+if [ -d "$(dirname "$TYPES_TARGET")" ]; then
+  echo "▶ Regenerating $TYPES_TARGET"
+  supabase gen types typescript --linked > "$TYPES_TARGET" 2>/dev/null
+else
+  echo "⚠ Skipping types write (monorepo package path not found: $TYPES_TARGET)"
+fi
+
+# LEGACY loop (commented — one cycle):
+# for repo in "${WEB_REPOS[@]}"; do
+#   target="$repo/src/lib/supabase/database.types.ts"
+#   if [ -d "$repo" ] && [ -f "$target" ]; then
+#     echo "▶ Regenerating $target"
+#     supabase gen types typescript --linked > "$target" 2>/dev/null
+#   else
+#     echo "⚠ Skipping $repo (path or types file not found)"
+#   fi
+# done
 
 echo ""
 echo "OK Deploy complete."
