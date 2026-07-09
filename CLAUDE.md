@@ -3,7 +3,7 @@
 
 Stable mirror of the top of the Notion **Rules** page (the master — Notion wins on any conflict). Full page + appendix: https://www.notion.so/Rules-395a9bf37a528081b2c1dacc445bb6c8
 
-Same rules, one Linear ledger, on every platform — only your **platform protocol** (isolation, branch naming, connectors) differs. Find yours: **Rules — Development §K**. What Mesita IS (product, schema, design): **Rules — Architecture** (Pato owns it; mirror shipped architecture changes there same session).
+Same rules, one Linear ledger, on every platform — only your **platform protocol** (isolation, branch naming, connectors) differs. Find yours: **Development Rules §K**. What Mesita IS (product, schema, design): **Product Rules** (Pato owns it; mirror shipped architecture changes there same session).
 
 | You're reading | You are |
 | --- | --- |
