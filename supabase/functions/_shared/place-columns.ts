@@ -79,6 +79,9 @@ const COLUMNS: readonly string[] = [
   "google_business_url",
   "whatsapp_pr_urls",
   "instagram_pr_urls",
+  // Reservationist booking target + multi-contact list (MESITA-377).
+  "reservation_endpoint",
+  "reservation_contacts",
   // Read-only signal columns — populated by enrichment, never by the
   // business. Shown on the Place page's Signals section and on consumer
   // surfaces that compare places.
