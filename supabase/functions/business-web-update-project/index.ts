@@ -84,6 +84,9 @@ type UpdateBody = {
   google_maps_url?: string | null;
   // Plain contact (not URL-shaped)
   email?: string | null;
+  // Reservationist booking target (any POS / booking URL) + multi-contacts.
+  reservation_endpoint?: string | null;
+  reservation_contacts?: ReservationContact[] | null;
   // Place-redesign editable surface (Business-E=YES on the Components spec).
   description?: string | null;
   menu_pdf_url?: string | null;
@@ -114,6 +117,17 @@ type DayKey =
   | "saturday"
   | "sunday";
 type PlaceHours = Partial<Record<DayKey, HoursRange[]>>;
+
+/** One person the reservationist can call/message when booking. */
+type ReservationContact = {
+  name: string;
+  role?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  notes?: string | null;
+};
+
+const MAX_RESERVATION_CONTACTS = 8;
 
 const DAY_KEYS: DayKey[] = [
   "monday",
@@ -441,6 +455,46 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Custom POS / booking endpoint — any https URL (or deep link). Empty clears.
+  if ("reservation_endpoint" in body) {
+    const raw = body.reservation_endpoint;
+    if (raw == null || (typeof raw === "string" && raw.trim() === "")) {
+      update.reservation_endpoint = null;
+    } else if (typeof raw !== "string") {
+      return json({ ok: false, error: "reservation_endpoint must be a string" }, 400);
+    } else {
+      const trimmed = raw.trim().slice(0, 500);
+      // Allow https://… and common deep-link schemes the reservationist may dial.
+      if (!isReservationEndpoint(trimmed)) {
+        return json(
+          {
+            ok: false,
+            error:
+              "reservation_endpoint must be an https:// URL or a tel:/mailto:/sms: deep link",
+          },
+          400,
+        );
+      }
+      update.reservation_endpoint = trimmed;
+    }
+  }
+
+  // Multi-contact list for the reservationist. Empty array clears.
+  if ("reservation_contacts" in body) {
+    const cleaned = sanitiseReservationContacts(body.reservation_contacts);
+    if (cleaned === "invalid") {
+      return json(
+        {
+          ok: false,
+          error:
+            "reservation_contacts must be an array of {name, role?, phone?, email?, notes?} (max 8)",
+        },
+        400,
+      );
+    }
+    update.reservation_contacts = cleaned;
+  }
+
   if (Object.keys(update).length === 0) {
     return json({ ok: false, error: "No editable fields provided" }, 400);
   }
@@ -573,5 +627,56 @@ function isUrl(v: unknown): v is string {
   } catch {
     return false;
   }
+}
+
+/** POS / booking endpoint: https URL or a phone/email deep link. */
+function isReservationEndpoint(v: string): boolean {
+  try {
+    const u = new URL(v);
+    return (
+      u.protocol === "https:" ||
+      u.protocol === "tel:" ||
+      u.protocol === "mailto:" ||
+      u.protocol === "sms:"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function sanitiseReservationContacts(
+  v: unknown,
+): ReservationContact[] | "invalid" {
+  if (v == null) return [];
+  if (!Array.isArray(v)) return "invalid";
+  if (v.length > MAX_RESERVATION_CONTACTS) return "invalid";
+  const out: ReservationContact[] = [];
+  for (const raw of v) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "invalid";
+    const row = raw as Record<string, unknown>;
+    const name = typeof row.name === "string" ? row.name.trim().slice(0, 80) : "";
+    if (!name) return "invalid";
+    const role =
+      typeof row.role === "string" && row.role.trim()
+        ? row.role.trim().slice(0, 60)
+        : null;
+    const phone =
+      typeof row.phone === "string" && row.phone.trim()
+        ? row.phone.trim().slice(0, 40)
+        : null;
+    let email: string | null = null;
+    if (typeof row.email === "string" && row.email.trim()) {
+      const e = row.email.trim().toLowerCase().slice(0, 254);
+      if (!isEmailish(e)) return "invalid";
+      email = e;
+    }
+    const notes =
+      typeof row.notes === "string" && row.notes.trim()
+        ? row.notes.trim().slice(0, 200)
+        : null;
+    if (!phone && !email) return "invalid";
+    out.push({ name, role, phone, email, notes });
+  }
+  return out;
 }
 
