@@ -50,6 +50,8 @@ type UpdateBody = {
   // NOTE: `plan` is deliberately NOT editable here. Plan changes are billing
   // and go through business-web-change-subscription (Stripe), so a client can't
   // grant itself Pro/Ultra with a plain profile update.
+  // NOTE: `address` is native (Google/Enricher-sourced) and deliberately NOT
+  // editable here — kept in the type only so stale clients get the reject.
   address?: string | null;
   closes_at?: string | null;
   hours?: PlaceHours | null;
@@ -253,7 +255,20 @@ Deno.serve(async (req) => {
       400,
     );
   }
-  if ("address" in body) update.address = optString(body.address, 300);
+  if ("address" in body) {
+    // Address is native — seeded from Google Places and refined by the
+    // Enricher, which writes public.places directly. Reject so stale clients
+    // learn the contract — same posture as `price_level` and `plan`.
+    return json(
+      {
+        ok: false,
+        code: "address_via_enrich",
+        error:
+          "address is set from Google Places / the Enricher and cannot be updated manually.",
+      },
+      400,
+    );
+  }
   if ("closes_at" in body) {
     const raw = optString(body.closes_at, 5);
     if (raw != null && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(raw)) {
