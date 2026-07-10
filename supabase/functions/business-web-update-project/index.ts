@@ -289,7 +289,22 @@ Deno.serve(async (req) => {
     }
     update.hours = cleaned;
   }
-  if ("phone" in body) update.phone = optString(body.phone, 40);
+  if ("phone" in body) {
+    const raw = optString(body.phone, 40);
+    // Phones ALWAYS carry a country code (E.164-style prefix). Null/empty
+    // still clears; anything else must start with "+".
+    if (raw != null && !/^\+[0-9]/.test(raw)) {
+      return json(
+        {
+          ok: false,
+          code: "phone_needs_country_code",
+          error: "phone must include a country code, e.g. +52 81 8378 2164.",
+        },
+        400,
+      );
+    }
+    update.phone = raw;
+  }
   if ("pitch" in body) update.pitch = optString(body.pitch, 200);
   if ("story" in body) update.story = optString(body.story, 1500);
   // Four per-tier promo rates. Each is nullable (null clears the offer) or

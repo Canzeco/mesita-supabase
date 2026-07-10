@@ -212,7 +212,7 @@ export async function fetchGoogleBasics(
       timezone,
       closes_at: closesAt,
       hours,
-      phone: details.nationalPhoneNumber ?? details.internationalPhoneNumber ?? null,
+      phone: internationalPhone(details, country),
       pitch: details.editorialSummary?.text ?? null,
       story: details.generativeSummary?.overview?.text ?? null,
       photos,
@@ -338,6 +338,28 @@ function findAddressComponent(
     if (found?.longText) return found.longText;
   }
   return null;
+}
+
+// Phone must ALWAYS carry the country code. Prefer Google's international
+// format outright; a bare national number is only salvaged when we know the
+// place's country calling code (Mesita is Mexico-only today) — otherwise we
+// store no phone rather than one the Reservationist can't dial cross-border.
+const COUNTRY_CALLING_CODES: Record<string, string> = {
+  "México": "+52",
+  "Mexico": "+52",
+};
+
+function internationalPhone(
+  details: Pick<GoogleDetails, "internationalPhoneNumber" | "nationalPhoneNumber">,
+  country: string | null,
+): string | null {
+  const intl = details.internationalPhoneNumber?.trim();
+  if (intl) return intl.startsWith("+") ? intl : `+${intl}`;
+  const national = details.nationalPhoneNumber?.trim();
+  if (!national) return null;
+  if (national.startsWith("+")) return national;
+  const code = country ? COUNTRY_CALLING_CODES[country] : undefined;
+  return code ? `${code} ${national}` : null;
 }
 
 function priceLevelFromGoogle(p?: string): number | null {
