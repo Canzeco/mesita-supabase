@@ -5,6 +5,7 @@
 // the DB is the single source of truth; callers never pass overrides.
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { ENRICH_FIELD_LIMITS } from "./enrich-field-limits.ts";
 
 export const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
@@ -107,8 +108,8 @@ export type EnrichConfig = {
   // pre-sorted best→worst, so gatherGoogleImages IS the preselection.
   gatherInstagramDepth: number;
   gatherInstagramPosts: number;
-  // How many Google reviews the Apify Maps scrape pulls (0–100), for synthesis
-  // grounding. Was hardcoded 100.
+  // How many Google reviews the Apify Maps scrape pulls (0–googleReviews.max),
+  // for synthesis grounding. Hard ceiling = ENRICH_FIELD_LIMITS.googleReviews.
   gatherReviews: number;
   // Per-source Firecrawl Search candidate counts for link discovery (S4).
   // Keyed by ChannelField-ish source name; 0 disables a source.
@@ -160,7 +161,7 @@ export async function loadEnrichConfig(admin: SupabaseClient): Promise<EnrichCon
     gatherGoogleImages: num(cfg?.atlas_gather_google_images, 10),
     gatherInstagramDepth: num(cfg?.atlas_gather_instagram_depth, 30),
     gatherInstagramPosts: num(cfg?.atlas_gather_instagram_posts, 10),
-    gatherReviews: num(cfg?.atlas_gather_reviews, 100),
+    gatherReviews: num(cfg?.atlas_gather_reviews, ENRICH_FIELD_LIMITS.googleReviews.max),
     discoverCandidates: {
       website_url: num(cfg?.atlas_discover_website_n, 5),
       instagram_url: num(cfg?.atlas_discover_instagram_n, 5),

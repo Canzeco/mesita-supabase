@@ -28,6 +28,9 @@ import {
   readEFEnv,
   requireSuperAdmin,
 } from "../_shared/auth.ts";
+import { ENRICH_FIELD_LIMITS } from "../_shared/enrich-field-limits.ts";
+
+const GOOGLE_REVIEWS_MAX = ENRICH_FIELD_LIMITS.googleReviews.max;
 
 type Body = {
   // Image funnel — GATHER. Google: single pre-sorted cap (1–10). Instagram: split
@@ -122,9 +125,12 @@ Deno.serve(async (req) => {
   }
 
   if (body.gatherReviews !== undefined) {
-    const n = intInRange(body.gatherReviews, 0, 100);
+    const n = intInRange(body.gatherReviews, 0, GOOGLE_REVIEWS_MAX);
     if (n === null) {
-      return json({ ok: false, error: "gatherReviews must be an integer 0-100" }, 400);
+      return json(
+        { ok: false, error: `gatherReviews must be an integer 0-${GOOGLE_REVIEWS_MAX}` },
+        400,
+      );
     }
     patch.atlas_gather_reviews = n;
   }
