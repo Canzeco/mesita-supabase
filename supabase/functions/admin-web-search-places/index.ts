@@ -45,7 +45,11 @@ Deno.serve(async (req) => {
       ? Math.min(Math.max(bodyRes.body.limit, 1), 50)
       : 25;
 
-  const cols = "id, slug, name, category, category_label, status, address, photos";
+  // Catalog table columns need zone / Google reviews / enrichment / listing.
+  // All of these already live on projects_view — no join required.
+  // Keep as a single string literal so supabase-js can type the select.
+  const cols =
+    "id, slug, name, category, category_label, status, address, photos, zone, google_stars_overall, google_review_count, content_status, listing_type";
   let rows;
 
   if (q.length === 0) {
@@ -82,16 +86,30 @@ Deno.serve(async (req) => {
   }
 
   // Trim photos to the first thumbnail to keep the payload small.
-  const places = (rows ?? []).map((v) => ({
-    id: v.id,
-    slug: v.slug,
-    name: v.name,
-    category: v.category,
-    category_label: v.category_label,
-    status: v.status,
-    address: v.address,
-    photo: Array.isArray(v.photos) && v.photos.length > 0 ? v.photos[0] : null,
-  }));
+  // enriched / verified are derived for the Manage Single Unit catalog table.
+  const places = (rows ?? []).map((v) => {
+    const contentStatus = (v.content_status as string | null) ?? null;
+    const listingType = (v.listing_type as string | null) ?? null;
+    return {
+      id: v.id,
+      slug: v.slug,
+      name: v.name,
+      category: v.category,
+      category_label: v.category_label,
+      status: v.status,
+      address: v.address,
+      zone: (v.zone as string | null) ?? null,
+      google_stars_overall:
+        typeof v.google_stars_overall === "number" ? v.google_stars_overall : null,
+      google_review_count:
+        typeof v.google_review_count === "number" ? v.google_review_count : null,
+      content_status: contentStatus,
+      listing_type: listingType,
+      enriched: contentStatus === "ready",
+      verified: listingType === "partner",
+      photo: Array.isArray(v.photos) && v.photos.length > 0 ? v.photos[0] : null,
+    };
+  });
 
   return json({ ok: true, places });
 });
