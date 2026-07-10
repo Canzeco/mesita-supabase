@@ -8,6 +8,13 @@ export const ENRICH_FIELD_LIMITS = {
   tagCatalogSize: { max: 100, note: "Controlled tags in place_tags" },
   tagSlugLength: { max: 40, note: "Per-tag slug length cap" },
   photos: { max: 10, note: "places.photos array (hero + gallery)" },
+  // Hard Apify scrape ceiling (EF wall-clock + cost). Live gather count is
+  // app_settings.atlas_gather_reviews (0–100) on Enricher Config; this is the
+  // profile-spec max the pipeline may never exceed.
+  googleReviews: {
+    max: 100,
+    note: "places.google_reviews — Apify scrape cap (Places API ~5; Mesita EF/cost safety bound)",
+  },
   prWhatsappNumbers: {
     max: 3,
     note: "places.whatsapp_pr_urls — concierge PR WhatsApp (wa.me URLs)",

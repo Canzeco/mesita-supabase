@@ -1,9 +1,13 @@
 // Atlas source — Apify Google Maps: ALL reviews (Places caps at ~5) + place
-// PHOTOS in one run. Spine step (S1). Reviews capped at 100 for the EF wall-clock
-// (a safety bound, not a product cap); images capped at the Google gather cap.
+// PHOTOS in one run. Spine step (S1). Reviews capped at
+// ENRICH_FIELD_LIMITS.googleReviews.max for the EF wall-clock (a safety bound,
+// not a product cap); images capped at the Google gather cap.
 
 import { APIFY_ACTORS, runApifyActor } from "./apify.ts";
+import { ENRICH_FIELD_LIMITS } from "./enrich-field-limits.ts";
 import { numOf } from "./parse-utils.ts";
+
+const GOOGLE_REVIEWS_MAX = ENRICH_FIELD_LIMITS.googleReviews.max;
 
 export type GoogleMapsResult = {
   reviews: Record<string, unknown>[];
@@ -20,9 +24,12 @@ export async function gatherGoogleMaps(opts: {
   maxReviews?: number;
 }): Promise<GoogleMapsResult> {
   const { apifyKey, placeId, gatherGoogleImages } = opts;
-  const maxReviews = Math.max(0, opts.maxReviews ?? 100);
-  // Up to 100 reviews + images is a MINUTES-scale crawl — 120 s cap, not the
-  // 45 s default (the old 60 s cap starved healthy runs).
+  const maxReviews = Math.min(
+    GOOGLE_REVIEWS_MAX,
+    Math.max(0, opts.maxReviews ?? GOOGLE_REVIEWS_MAX),
+  );
+  // Up to GOOGLE_REVIEWS_MAX reviews + images is a MINUTES-scale crawl — 120 s
+  // cap, not the 45 s default (the old 60 s cap starved healthy runs).
   const run = await runApifyActor<Record<string, unknown>>(
     APIFY_ACTORS.googleMaps,
     {
@@ -40,7 +47,7 @@ export async function gatherGoogleMaps(opts: {
   const raw = Array.isArray(p?.reviews) ? (p!.reviews as Record<string, unknown>[]) : [];
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
   const reviews = raw
-    .slice(0, 100)
+    .slice(0, GOOGLE_REVIEWS_MAX)
     .map((r) => ({
       author: str(r.name) ?? str(r.reviewerName),
       rating: numOf(r.stars) ?? numOf(r.rating) ?? numOf(r.starRating),
