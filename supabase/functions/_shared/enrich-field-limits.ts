@@ -15,12 +15,4 @@ export const ENRICH_FIELD_LIMITS = {
     max: 100,
     note: "places.google_reviews — Apify scrape cap (Places API ~5; Mesita EF/cost safety bound)",
   },
-  prWhatsappNumbers: {
-    max: 3,
-    note: "places.whatsapp_pr_urls — concierge PR WhatsApp (wa.me URLs)",
-  },
-  prInstagramAccounts: {
-    max: 3,
-    note: "places.instagram_pr_urls — PR / events Instagram accounts",
-  },
 } as const;
