@@ -64,7 +64,6 @@ const COLUMNS: readonly string[] = [
   // read and write, so they stay in the projection.
   "website_url",
   "instagram_url",
-  "tiktok_url",
   "facebook_url",
   "whatsapp_url",
   "opentable_url",

@@ -116,7 +116,6 @@ export type GoogleBasics = {
   website_url: string | null;
   instagram_url: string | null;
   facebook_url: string | null;
-  tiktok_url: string | null;
   x_url: string | null;
   threads_url: string | null;
   reddit_url: string | null;
@@ -219,7 +218,6 @@ export async function fetchGoogleBasics(
       website_url: channels.website_url,
       instagram_url: channels.instagram_url,
       facebook_url: channels.facebook_url,
-      tiktok_url: channels.tiktok_url,
       x_url: channels.x_url,
       threads_url: channels.threads_url,
       reddit_url: channels.reddit_url,

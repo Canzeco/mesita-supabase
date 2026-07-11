@@ -14,11 +14,6 @@ const NO_COUNTS = {
 // validateFieldUrl is the single host+shape gate every candidate passes through
 // (footer link, Perplexity answer, citation, degraded search) before it's trusted.
 
-Deno.test("tiktok: accepts /@handle profile, rejects a single video", () => {
-  assert(validateFieldUrl("tiktok_url", "https://www.tiktok.com/@pujol"));
-  assertEquals(validateFieldUrl("tiktok_url", "https://www.tiktok.com/@pujol/video/123"), null);
-});
-
 Deno.test("tripadvisor: accepts detail (-d…) page, rejects a city list", () => {
   assert(
     validateFieldUrl(
@@ -67,7 +62,7 @@ Deno.test("wrong host for the field returns null", () => {
     validateFieldUrl("yelp_url", "https://www.tripadvisor.com/Restaurant_Review-d1234567-Reviews-Pujol.html"),
     null,
   );
-  assertEquals(validateFieldUrl("tiktok_url", "https://www.instagram.com/pujol"), null);
+  assertEquals(validateFieldUrl("tripadvisor_url", "https://www.instagram.com/pujol"), null);
 });
 
 // ── resolveChannels orchestration (no-network early-return paths) ────────────

@@ -21,7 +21,7 @@ import {
 } from "./sourcing.ts";
 
 const CHANNEL_KEYS = [
-  "website_url", "instagram_url", "facebook_url", "tiktok_url", "x_url", "threads_url",
+  "website_url", "instagram_url", "facebook_url", "x_url", "threads_url",
   "reddit_url", "whatsapp_url", "opentable_url", "resy_url", "uber_eats_url",
   "didi_food_url", "tripadvisor_url", "yelp_url", "google_maps_url",
 ];

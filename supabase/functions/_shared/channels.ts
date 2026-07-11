@@ -10,7 +10,6 @@ export type ChannelKey =
   | "website_url"
   | "instagram_url"
   | "facebook_url"
-  | "tiktok_url"
   | "x_url"
   | "threads_url"
   | "reddit_url"
@@ -33,7 +32,6 @@ export function matchChannel(host: string): ChannelKey | null {
   if (h === "instagram.com" || h.endsWith(".instagram.com")) return "instagram_url";
   if (h === "facebook.com" || h.endsWith(".facebook.com")) return "facebook_url";
   if (h === "fb.com" || h.endsWith(".fb.com")) return "facebook_url";
-  if (h === "tiktok.com" || h.endsWith(".tiktok.com")) return "tiktok_url";
   if (h === "twitter.com" || h.endsWith(".twitter.com")) return "x_url";
   if (h === "x.com" || h.endsWith(".x.com")) return "x_url";
   if (h === "threads.net" || h.endsWith(".threads.net")) return "threads_url";
@@ -55,6 +53,14 @@ export function matchChannel(host: string): ChannelKey | null {
     return "google_maps_url";
   if (h === "maps.app.goo.gl" || h === "goo.gl") return "google_maps_url";
   return null;
+}
+
+// Social hosts we still RECOGNISE but no longer track as a channel (TikTok
+// retired product-wide). matchChannel returns null for them, and classifyLinks
+// absorbs them here so a TikTok link can never leak into website_url.
+function isRetiredSocialHost(host: string): boolean {
+  const h = host.replace(/^www\./, "").toLowerCase();
+  return h === "tiktok.com" || h.endsWith(".tiktok.com");
 }
 
 // Trim tracking junk + trailing slashes so two near-identical links from the
@@ -95,7 +101,7 @@ export function classifyLinks(input: (string | null | undefined)[]): Channels {
     const channel = matchChannel(host);
     if (channel) {
       (buckets[channel] ??= []).push(url);
-    } else {
+    } else if (!isRetiredSocialHost(host)) {
       websiteCandidates.push(url);
     }
   }
@@ -113,7 +119,6 @@ export function classifyLinks(input: (string | null | undefined)[]): Channels {
     website_url: pickShortest(websiteCandidates),
     instagram_url: pickShortest(buckets.instagram_url),
     facebook_url: pickShortest(buckets.facebook_url),
-    tiktok_url: pickShortest(buckets.tiktok_url),
     x_url: pickShortest(buckets.x_url),
     threads_url: pickShortest(buckets.threads_url),
     reddit_url: pickShortest(buckets.reddit_url),
