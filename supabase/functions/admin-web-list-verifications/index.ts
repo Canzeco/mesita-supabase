@@ -13,6 +13,10 @@
 // code hasn't been entered yet stay invisible — they're not the
 // admin's concern.
 //
+// Per-place mode: pass projectId to get ONE place's verification history
+// instead (newest first, method gate skipped — the inspector wants the
+// full trail). Used by Manage Single Unit's Ownership box.
+//
 // Auth: caller's JWT email must be in public.super_admins.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -28,6 +32,8 @@ type Body = {
   // Filter by status. Omit / undefined / null = all.
   status?: "pending" | "approved" | "rejected" | null;
   limit?: number;
+  // Per-place inspector: only this project's rows, no method gate.
+  projectId?: string | null;
 };
 
 Deno.serve(async (req) => {
@@ -58,12 +64,20 @@ Deno.serve(async (req) => {
   if (body.status) {
     query = query.eq("status", body.status);
   }
-  // Method gate: video always shows; ai_call only shows once the
-  // operator has confirmed the OTP (codeVerifiedAt stamped by
-  // business-web-verify-phone-otp when auto_verify_ai_call was off).
-  query = query.or(
-    "method.eq.video,and(method.eq.ai_call,payload->>codeVerifiedAt.not.is.null)",
-  );
+  const projectId =
+    typeof body.projectId === "string" && body.projectId.trim()
+      ? body.projectId.trim()
+      : null;
+  if (projectId) {
+    query = query.eq("project_id", projectId);
+  } else {
+    // Method gate (queue surface only): video always shows; ai_call only
+    // shows once the operator has confirmed the OTP (codeVerifiedAt stamped
+    // by business-web-verify-phone-otp when auto_verify_ai_call was off).
+    query = query.or(
+      "method.eq.video,and(method.eq.ai_call,payload->>codeVerifiedAt.not.is.null)",
+    );
+  }
 
   const { data, error } = await query;
   if (error) {
