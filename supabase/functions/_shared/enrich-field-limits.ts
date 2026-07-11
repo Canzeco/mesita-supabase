@@ -4,8 +4,11 @@
 export const ENRICH_FIELD_LIMITS = {
   placeName: { max: 80, note: "Business Place editor" },
   description: { max: 2000, note: "About / description (business-web-update-project)" },
-  tagsPerPlace: { max: 20, note: "Up to 20 tags per place (places.tags)" },
-  tagCatalogSize: { max: 100, note: "Controlled tags in place_tags" },
+  tagsPerPlace: {
+    max: 20,
+    note: "Enricher always writes exactly 20 tags; business editor allows up to 20 (places.tags)",
+  },
+  tagCatalogSize: { max: 200, note: "Controlled tags in place_tags (Atlas taxonomy)" },
   tagSlugLength: { max: 40, note: "Per-tag slug length cap" },
   photos: { max: 10, note: "places.photos array (hero + gallery)" },
   // Hard Apify scrape ceiling (EF wall-clock + cost). Live gather count is
