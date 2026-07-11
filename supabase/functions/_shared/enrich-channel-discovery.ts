@@ -42,7 +42,6 @@ export type ChannelField =
   | "facebook_url"
   | "opentable_url"
   | "uber_eats_url"
-  | "tiktok_url"
   | "tripadvisor_url"
   | "yelp_url";
 
@@ -55,10 +54,11 @@ export type DiscoverCandidateCounts = Record<
   number
 >;
 
-// Channels the discovery pass actively searches for. Yelp / TikTok / TripAdvisor
-// are TEMPORARILY disabled — we don't discover them for the moment, so their
-// columns stay null. To re-enable, add the three "*_url" entries back here; the
+// Channels the discovery pass actively searches for. Yelp / TripAdvisor are
+// TEMPORARILY disabled — we don't discover them for the moment, so their
+// columns stay null. To re-enable, add the two "*_url" entries back here; the
 // field hints / pickChannel cases / query map below are left in place for that.
+// (TikTok is RETIRED product-wide — not disabled, removed.)
 const CHANNEL_FIELDS: ChannelField[] = [
   "website_url",
   "instagram_url",
@@ -74,7 +74,6 @@ const CHANNEL_SEARCH_TERM: Record<ChannelField, string> = {
   facebook_url: "facebook",
   opentable_url: "opentable",
   uber_eats_url: "uber eats",
-  tiktok_url: "tiktok",
   tripadvisor_url: "tripadvisor",
   yelp_url: "yelp",
 };
@@ -89,8 +88,6 @@ const FIELD_SPEC: Record<ChannelField, string> = {
     "opentable_url: the canonical OpenTable restaurant page (opentable.com/r/… or a country domain). A brand page is acceptable.",
   uber_eats_url:
     "uber_eats_url: the canonical Uber Eats store page (ubereats.com/.../store/...).",
-  tiktok_url:
-    "tiktok_url: the place's TikTok profile (tiktok.com/@handle), never a single video.",
   tripadvisor_url:
     "tripadvisor_url: the place's TripAdvisor detail page (a Restaurant_Review / -d… page, not a city or category list).",
   yelp_url: "yelp_url: the place's Yelp business page (yelp.com/biz/<slug>).",
@@ -110,12 +107,6 @@ function urlPathSegments(url: string): string[] {
   } catch {
     return [];
   }
-}
-
-// A TikTok profile URL is exactly /@handle (reject /video/, /tag/, /discover…).
-function isTikTokProfile(url: string): boolean {
-  const segs = urlPathSegments(url);
-  return segs.length === 1 && segs[0].startsWith("@") && segs[0].length > 1;
 }
 
 // A TripAdvisor DETAIL listing (reject city/category/list pages): a -d<id>
@@ -172,10 +163,6 @@ export function validateFieldUrl(field: ChannelField, rawUrl: string): string | 
     case "uber_eats_url": {
       const hit = pickChannel([canon], "uber_eats_url");
       return hit && pathIncludes(hit, "/store/") ? hit : null;
-    }
-    case "tiktok_url": {
-      const hit = pickChannel([canon], "tiktok_url");
-      return hit && isTikTokProfile(hit) ? hit : null;
     }
     case "tripadvisor_url": {
       const hit = pickChannel([canon], "tripadvisor_url");
@@ -404,7 +391,6 @@ export async function resolveChannels(opts: {
     website: string | null;
     opentable: string | null;
     uberEats: string | null;
-    tiktok?: string | null;
     tripadvisor?: string | null;
     yelp?: string | null;
   };
@@ -419,7 +405,6 @@ export async function resolveChannels(opts: {
     facebook_url: opts.have.facebook,
     opentable_url: opts.have.opentable,
     uber_eats_url: opts.have.uberEats,
-    tiktok_url: opts.have.tiktok ?? null,
     tripadvisor_url: opts.have.tripadvisor ?? null,
     yelp_url: opts.have.yelp ?? null,
   };

@@ -70,7 +70,6 @@ type UpdateBody = {
   // External + social channels
   website_url?: string | null;
   instagram_url?: string | null;
-  tiktok_url?: string | null;
   facebook_url?: string | null;
   whatsapp_url?: string | null;
   opentable_url?: string | null;
@@ -141,7 +140,6 @@ const HHMM_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
 const URL_FIELDS = [
   "website_url",
   "instagram_url",
-  "tiktok_url",
   "facebook_url",
   "whatsapp_url",
   "opentable_url",
