@@ -6,7 +6,8 @@
 //
 //   S7  synthesis (About/details, grounded ONLY in gathered material — Google
 //       spine + reviews + SERP blurb + IG bio; no website/menu) + category
-//       inference + tag inference (closed vocabularies)
+//       inference + tag inference (closed vocabularies) + Selected Reservation
+//       Endpoint (phone / WhatsApp / Instagram → products.reservations)
 //   S8  persist the enriched profile onto the places row (direct UPDATE — this
 //       EF is already the DB layer; no HTTP hop) + content_status='ready'
 //   S9  store images via supabase-edgefunc-store-place-images (kept as an EF call
@@ -27,6 +28,11 @@ import { applyProfileToUpdate, synthesisModelFor, synthesizeProfile } from "../_
 import { loadEnrichConfig } from "../_shared/enrich-config.ts";
 import { fetchPlaceCategories, inferPlaceCategory } from "../_shared/categories.ts";
 import { fetchPlaceTags, inferPlaceTags } from "../_shared/tags.ts";
+import {
+  hasReservationTarget,
+  mergeProductsReservations,
+  selectReservationEndpoint,
+} from "../_shared/enrich-reservation-endpoint.ts";
 import { humanizeCategorySlug } from "../_shared/parse-utils.ts";
 import {
   advanceResearchStage,
@@ -111,6 +117,46 @@ serveEnrichStage("contents", async (admin, env, row) => {
   if (inferredTags.length > 0) place.tags = inferredTags;
   sources.category = { ok: !!inferredCategory, slug: inferredCategory, candidates: realCategories.length };
   sources.tags = { ok: inferredTags.length > 0, count: inferredTags.length, vocabulary: tagVocabulary.length };
+
+  // Selected Reservation Endpoint (Notion Enrich-Analysis S4) — seed
+  // products.reservations { channel, value } for the Reservationist. Phone is
+  // stripped from gathered.place (research-only write), and whatsapp_url is not
+  // discovered by channel search, so read live contacts + products from places.
+  // Skip when an admin already picked a channel so re-enrich doesn't clobber.
+  const { data: liveContacts } = await admin
+    .from("places")
+    .select("phone, whatsapp_url, instagram_url, products")
+    .eq("id", projectId)
+    .maybeSingle();
+  const liveProducts = liveContacts?.products ?? null;
+  let reservationChannel: string | null = null;
+  if (hasReservationTarget(liveProducts)) {
+    const existing = (liveProducts as Record<string, unknown>).reservations as {
+      channel?: string;
+    };
+    reservationChannel = existing.channel ?? null;
+    sources.reservation_endpoint = { ok: true, via: "admin_override", channel: reservationChannel };
+  } else {
+    const candidates = {
+      phone: (liveContacts?.phone as string | null | undefined) ?? null,
+      whatsapp_url: (liveContacts?.whatsapp_url as string | null | undefined) ?? null,
+      // Prefer the just-verified IG from this run; fall back to the live column.
+      instagram_url:
+        ((place.instagram_url as string | null | undefined) ?? null) ||
+        ((liveContacts?.instagram_url as string | null | undefined) ?? null),
+    };
+    const { target, diag: reservationDiag } = await selectReservationEndpoint({
+      openaiKey: OPENAI_KEY,
+      candidates,
+      name,
+      about: aboutText,
+    });
+    sources.reservation_endpoint = reservationDiag;
+    if (target) {
+      place.products = mergeProductsReservations(liveProducts, target);
+      reservationChannel = target.channel;
+    }
+  }
 
   place.enriched_at = new Date().toISOString();
   place.enrichment_sources = sources;
@@ -198,8 +244,14 @@ serveEnrichStage("contents", async (admin, env, row) => {
   // One beacon for the whole contents stage (S7–S9) — one notification per
   // function. Reports synthesis + persist + image outcome in a single line.
   await reportEnrichmentStep(admin, projectId, "S7", "publish", "completed",
-    `Enrichment complete for “${name}” — About ${aboutWritten ? "written" : "MISSING"}, category “${place.category ?? "n/a"}”, ${inferredTags.length} tag(s); ${imagesSummary}.`,
-    { about: aboutWritten, category: place.category ?? null, tags: inferredTags.length, ...imagesMeta });
+    `Enrichment complete for “${name}” — About ${aboutWritten ? "written" : "MISSING"}, category “${place.category ?? "n/a"}”, ${inferredTags.length} tag(s), reservation ${reservationChannel ?? "—"}; ${imagesSummary}.`,
+    {
+      about: aboutWritten,
+      category: place.category ?? null,
+      tags: inferredTags.length,
+      reservation: reservationChannel,
+      ...imagesMeta,
+    });
 
   await advanceResearchStage(admin, projectId, "done");
 });
