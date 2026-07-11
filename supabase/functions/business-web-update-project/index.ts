@@ -24,6 +24,10 @@ import {
 } from "../_shared/categories.ts";
 import { ENRICH_FIELD_LIMITS } from "../_shared/enrich-field-limits.ts";
 import { sanitizePlaceTags } from "../_shared/tags.ts";
+import {
+  refreshSocialFollowers,
+  runFollowersRefreshInBackground,
+} from "../_shared/social-followers.ts";
 
 const MAX_PHOTOS = ENRICH_FIELD_LIMITS.photos.max;
 const MAX_TAGS = ENRICH_FIELD_LIMITS.tagsPerPlace.max;
@@ -156,6 +160,7 @@ type UrlField = (typeof URL_FIELDS)[number];
 
 const EDITABLE_STATUSES = new Set(["active", "paused", "archived"]);
 const OPENAI_KEY = Deno.env.get("OPENAI_KEY");
+const APIFY_KEY = Deno.env.get("APIFY_KEY");
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return corsPreflight();
@@ -510,6 +515,21 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: "No editable fields provided" }, 400);
   }
 
+  // Follower counts follow the account (indirect edit, MESITA-416): a changed
+  // instagram_url/facebook_url triggers an Apify follower refresh after the
+  // response. Snapshot the current URLs first — clients resubmit whole forms,
+  // and an unchanged URL must not burn a paid scrape.
+  type PrevSocial = { instagram_url: string | null; facebook_url: string | null };
+  let prevSocial: PrevSocial | null = null;
+  if (APIFY_KEY && ("instagram_url" in update || "facebook_url" in update)) {
+    const { data: prev } = await admin
+      .from("places")
+      .select("instagram_url, facebook_url")
+      .eq("id", projectId)
+      .maybeSingle();
+    prevSocial = (prev as PrevSocial | null) ?? null;
+  }
+
   let { data: place, error: updateError } = await admin
     .from("projects_view")
     .update(update)
@@ -537,6 +557,24 @@ Deno.serve(async (req) => {
       { ok: false, error: `place_update: ${updateError.message}`, code: updateError.code ?? null },
       400,
     );
+  }
+
+  if (APIFY_KEY) {
+    const igNext = "instagram_url" in update ? (update.instagram_url as string | null) : undefined;
+    const fbNext = "facebook_url" in update ? (update.facebook_url as string | null) : undefined;
+    const igChanged = igNext !== undefined && igNext !== (prevSocial?.instagram_url ?? null);
+    const fbChanged = fbNext !== undefined && fbNext !== (prevSocial?.facebook_url ?? null);
+    if (igChanged || fbChanged) {
+      runFollowersRefreshInBackground(
+        refreshSocialFollowers({
+          admin,
+          apifyKey: APIFY_KEY,
+          placeId: projectId,
+          ...(igChanged ? { instagramUrl: igNext } : {}),
+          ...(fbChanged ? { facebookUrl: fbNext } : {}),
+        }).catch(() => {}),
+      );
+    }
   }
 
   return json({ ok: true, place });
