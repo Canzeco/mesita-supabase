@@ -104,6 +104,7 @@ export type GoogleBasics = {
   lat: number;
   lng: number;
   address: string;
+  zone: string | null;
   city: string | null;
   country: string | null;
   timezone: string | null;
@@ -174,6 +175,15 @@ export async function fetchGoogleBasics(
 
   const city = findAddressComponent(details.addressComponents, ["locality", "administrative_area_level_2"]);
   const country = findAddressComponent(details.addressComponents, ["country"]);
+  // Zone = the neighborhood / colonia. Google carries it as a sublocality or
+  // neighborhood component when it has one (not every place does) — prefer the
+  // colloquial `neighborhood`, then the administrative sublocality tiers. When
+  // Google has none, synthesis fills zone downstream (fill-only-when-empty).
+  const zone = findAddressComponent(details.addressComponents, [
+    "neighborhood",
+    "sublocality_level_1",
+    "sublocality",
+  ]);
 
   const [photosResult, timezoneResult] = await Promise.allSettled([
     fetchGooglePhotos(details.photos ?? [], MAX_PHOTOS, googleKey),
@@ -206,6 +216,7 @@ export async function fetchGoogleBasics(
       lat: details.location.latitude,
       lng: details.location.longitude,
       address,
+      zone,
       city,
       country,
       timezone,
