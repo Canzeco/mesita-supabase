@@ -1,3 +1,5 @@
+> **FROZEN (2026-07-11):** This repository is read-only history. All active work lives in [`Canzeco/mesita-monorepo`](https://github.com/Canzeco/mesita-monorepo) — never a work target. See monorepo packages under `apps/` and `supabase/`.
+
 # mesita-supabase
 
 **Mesita backend** — Supabase (Postgres, Auth, Edge Functions) plus third-party integrations (Twilio, Stripe, ElevenLabs). Web and mobile apps call Edge Functions only; functions own business logic and talk to the database.
