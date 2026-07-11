@@ -112,9 +112,9 @@ const COLUMNS: readonly string[] = [
   "popular_times",
   "enriched_at",
   // Enrichment lifecycle (projects.content_status: queued | generating |
-  // ready | failed). Public-safe — lets consumer surfaces show an
-  // "Enriching…" state on a freshly-added place instead of a misleading
-  // "Updated just now" while the Enricher is still building the profile.
+  // ready | failed). Stays 'generating' for the FULL pipeline
+  // (research → analysis → contents); only contents lands 'ready'.
+  // Public-safe — lets consumer surfaces show "(Enriching)" until done.
   "content_status",
   // Promos page section toggles. Boolean, business-controlled, persisted
   // so the on/off state survives page reloads.
