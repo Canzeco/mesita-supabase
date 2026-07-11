@@ -32,7 +32,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { corsPreflight, json, readJson } from "../_shared/http.ts";
 import { adminClient, getAuthedUser, readEFEnv, requireSuperAdmin } from "../_shared/auth.ts";
-import { advanceResearchStage, seedPlaceResearch } from "../_shared/enrich-pipeline.ts";
+import { advanceResearchStage, markProjectGenerating, seedPlaceResearch } from "../_shared/enrich-pipeline.ts";
 
 // placeId is the MESITA-26 alias for the place-row id (== project_id here).
 type ReenrichMode = "full" | "analysis" | "contents";
@@ -120,6 +120,9 @@ Deno.serve(async (req) => {
 
   // advanceResearchStage reseeds (stage + status='pending' + attempts=0) without
   // touching gathered/analysis — the poller re-claims the row at the chosen stage.
+  // MESITA-453: Enriching covers the whole pipeline (research|analysis|contents),
+  // so flip content_status back to generating for light re-enrich modes too.
+  await markProjectGenerating(admin, projectId);
   await advanceResearchStage(admin, projectId, stage);
   return json({ ok: true, enrichmentTriggered: true, mode, stage });
 });

@@ -82,9 +82,37 @@ export type AnalysisPayload = {
 
 // ── Row lifecycle ────────────────────────────────────────────────────────────
 
+/** True while the Enricher is mid-pipeline (any of the three live stages). */
+export function isEnrichingStage(
+  stage: string | null | undefined,
+): boolean {
+  return stage === "research" || stage === "analysis" || stage === "contents";
+}
+
+/**
+ * Flip projects.content_status → generating for the whole pipeline run.
+ * Contents is the only stage that lands ready; research/analysis must NOT
+ * clear Enriching. Re-enrich of an already-ready place MUST call this —
+ * otherwise consumer is_enriching (keyed on content_status) stays false.
+ */
+export async function markProjectGenerating(
+  admin: SupabaseClient,
+  projectId: string,
+): Promise<void> {
+  const { error } = await admin
+    .from("projects")
+    .update({ content_status: "generating" })
+    .eq("id", projectId);
+  if (error) {
+    console.error("[enrich-pipeline] markProjectGenerating:", error.message);
+  }
+}
+
 // Seed (or re-seed) the pipeline row for a project. Called by the create EFs
 // right after the minimal 'generating' place lands. Upsert: re-creating a
 // place (or manually re-enriching) resets the row to the research stage.
+// Also stamps content_status='generating' so Enriching stays on for the
+// full research → analysis → contents run (MESITA-453).
 export async function seedPlaceResearch(
   admin: SupabaseClient,
   projectId: string,
@@ -103,7 +131,9 @@ export async function seedPlaceResearch(
     created_by: createdBy,
     updated_at: new Date().toISOString(),
   }, { onConflict: "project_id" });
-  return error ? { ok: false, error: error.message } : { ok: true };
+  if (error) return { ok: false, error: error.message };
+  await markProjectGenerating(admin, projectId);
+  return { ok: true };
 }
 
 // Load the row a stage EF was invoked for, verifying it is actually claimed at
