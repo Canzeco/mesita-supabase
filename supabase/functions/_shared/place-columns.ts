@@ -3,7 +3,7 @@
 // Before this file existed, every EF that read places maintained its own
 // hand-typed PLACE_COLUMNS string and they drifted: consumer EFs were missing
 // the columns added by the Place redesign (timezone, hours, description,
-// menu_pdf_url, tags, whatsapp_pr_urls, instagram_pr_urls, the signal
+// menu_pdf_url, tags, the signal
 // fields, etc.), so consumers literally couldn't see what businesses had just
 // edited. Importing from here keeps every read in lock-step.
 //
@@ -77,8 +77,6 @@ const COLUMNS: readonly string[] = [
   "tripadvisor_url",
   "google_maps_url",
   "google_business_url",
-  "whatsapp_pr_urls",
-  "instagram_pr_urls",
   // Reservationist booking target + multi-contact list (MESITA-377).
   "reservation_endpoint",
   "reservation_contacts",
