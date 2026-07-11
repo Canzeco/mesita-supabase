@@ -232,10 +232,13 @@ export function applyProfileToUpdate(
   update: Record<string, unknown>,
   parsed: ProfileResult,
 ): void {
+  // Zone + city are Google-native (Product Rules §A): the Google spine seeds
+  // them onto `update` before synthesis runs. Synthesis is only a FALLBACK for
+  // when Google carried none — never let the LLM overwrite a native value.
   const zone = asProfileText(parsed.zone);
-  if (zone) update.zone = zone;
+  if (zone && !update.zone) update.zone = zone;
   const city = asProfileText(parsed.city);
-  if (city) update.city = city;
+  if (city && !update.city) update.city = city;
   const year = typeof parsed.established_year === "number"
     ? parsed.established_year
     : typeof parsed.established_year === "string"
