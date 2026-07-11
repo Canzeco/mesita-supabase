@@ -280,6 +280,54 @@ serveEnrichStage("research", async (admin, _env, row) => {
     sources.instagram_fallback = { attached_unverified: true, url: resolvedInstagram };
   }
 
+  // ━━━ Reservations target — every enriched place gets a contact channel ━━━
+  // The Reservationist dials ONE channel per place (products.reservations =
+  // { channel, value }). Enrichment selects a default when none is set —
+  // phone → whatsapp → instagram, the console's long-standing fallback order —
+  // and NEVER overwrites an existing selection (a business/admin pick wins).
+  // Like the phone write above it runs in the research stage only, so a
+  // lighter analysis/contents re-run can't re-apply a stale pick. Merged into
+  // the current products jsonb so menus are untouched.
+  {
+    const { data: current } = await admin
+      .from("places")
+      .select("phone, whatsapp_url, products")
+      .eq("id", projectId)
+      .maybeSingle();
+    const products =
+      current?.products && typeof current.products === "object" && !Array.isArray(current.products)
+        ? current.products as Record<string, unknown>
+        : {};
+    const existing = products.reservations as { channel?: unknown } | null | undefined;
+    const hasSelection = !!existing && typeof existing === "object" &&
+      typeof existing.channel === "string" && existing.channel.length > 0;
+    if (hasSelection) {
+      sources.reservations_default = { ok: true, kept: true };
+    } else {
+      const phoneVal = (basics.phone ?? current?.phone ?? null) as string | null;
+      const whatsappVal = (current?.whatsapp_url ?? null) as string | null;
+      const igVal = (place.instagram_url ?? null) as string | null;
+      const target = phoneVal
+        ? { channel: "phone", value: phoneVal }
+        : whatsappVal
+        ? { channel: "whatsapp", value: whatsappVal }
+        : igVal
+        ? { channel: "instagram", value: igVal }
+        : null;
+      if (target) {
+        const { error: resErr } = await admin
+          .from("places")
+          .update({ products: { ...products, reservations: target } })
+          .eq("id", projectId);
+        sources.reservations_default = resErr
+          ? { ok: false, error: resErr.message }
+          : { ok: true, ...target };
+      } else {
+        sources.reservations_default = { ok: false, reason: "no_contact_available" };
+      }
+    }
+  }
+
   // The beacon reports actual gather success, not mere "the call returned"
   // (fbR exists even when the page scrape failed).
   const fbOk = !!fbR && fbR.diag.ok === true;
