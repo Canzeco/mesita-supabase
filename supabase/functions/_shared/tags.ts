@@ -98,6 +98,17 @@ export function sanitizePlaceTags(slugs: readonly string[]): string[] {
   return out;
 }
 
+// Takes a best-first ranked slug list and returns exactly `limit` conflict-free
+// tags (or fewer only when the catalog itself cannot supply that many). Used by
+// Enricher so every place gets a full tag set — always the strongest matches.
+export function selectTopPlaceTags(
+  rankedSlugs: readonly string[],
+  limit: number = MAX_INFERRED_TAGS,
+): string[] {
+  if (limit <= 0 || rankedSlugs.length === 0) return [];
+  return sanitizePlaceTags(rankedSlugs).slice(0, limit);
+}
+
 // Reads the full, live tag vocabulary ordered by sort_order. Returns [] on
 // error so callers degrade gracefully rather than failing over a tag lookup.
 export async function fetchPlaceTags(
@@ -139,8 +150,9 @@ export type TagSignals = {
   serpSummary?: string | null;
 };
 
-// Evaluates the full vocabulary and returns the highest-scoring tag slugs strongly supported
-// by the place material. Returns [] when there's no OpenAI key, no vocabulary, or
+// Scores the full vocabulary and returns exactly the top MAX_INFERRED_TAGS
+// conflict-free slugs that best match the place (or fewer only if the catalog
+// itself is smaller). Returns [] when there's no OpenAI key, no vocabulary, or
 // the model errors — tags are additive polish, never worth failing a run over.
 // The vocabulary is passed in (the caller reads it once via fetchPlaceTags).
 export async function inferPlaceTags(
@@ -159,21 +171,25 @@ export async function inferPlaceTags(
     signals.serpSummary ? `Editorial: ${signals.serpSummary}` : "",
   ].filter(Boolean).join("\n");
 
+  const targetCount = Math.min(MAX_INFERRED_TAGS, vocabulary.length);
   const systemContent =
-    "You tag a place using ONLY slugs from a fixed vocabulary. Evaluate the ENTIRE " +
-    "vocabulary; do not stop after the first matching slugs or limit the number of matches. " +
-    "Respond with a single JSON object {\"tags\": [{\"slug\": \"<slug>\", \"score\": 0.0}, ...]}. " +
-    "Include every slug with positive evidence, copied verbatim from the vocabulary, and give " +
-    "each a confidence score from 0 to 1. Return tags best-first by score. Pick only slugs " +
-    "strongly supported by the place material. Deduplicate. Never invent a slug. " +
-    "Never combine mutually exclusive tags: reservations_required vs walk_ins_welcome " +
-    "vs accepts_reservations (at most one); cash_only vs cards/contactless/meal_vouchers; " +
-    "quiet vs lively; casual vs upscale; casual_dress vs formal_dress; " +
-    "adults_only vs family_friendly/families/kids_menu/kids_activity/all_ages.";
+    "You tag a place using ONLY slugs from a fixed vocabulary. Score EVERY slug " +
+    "in the vocabulary for how well it fits this place — do not skip weak matches " +
+    "and do not stop early. Respond with a single JSON object " +
+    "{\"tags\": [{\"slug\": \"<slug>\", \"score\": 0.0}, ...]}. Include every " +
+    "vocabulary slug exactly once, copied verbatim, each with a confidence score " +
+    "from 0 to 1 (1 = perfect fit, 0 = no fit). Return tags best-first by score. " +
+    "Never invent a slug. Prefer the poles that fit when tags conflict: " +
+    "reservations_required vs walk_ins_welcome vs accepts_reservations; " +
+    "cash_only vs cards/contactless/meal_vouchers; quiet vs lively; casual vs upscale; " +
+    "casual_dress vs formal_dress; adults_only vs family_friendly/families/kids_menu/" +
+    "kids_activity/all_ages — give the fitting pole a high score and the opposite a low one.";
   const userPrompt =
-    `Tag vocabulary (slugs):\n${vocabText}\n\nPlace:\n${placeLines}\n\n` +
-    `Evaluate every vocabulary slug. Return all supported matches as {"tags": [{"slug": "<slug>", "score": 0.0-1.0}, ...]}, ranked best-first. ` +
-    `We will select the best ${MAX_INFERRED_TAGS} after your full evaluation.`;
+    `Tag vocabulary (${vocabulary.length} slugs — score ALL of them):\n${vocabText}\n\n` +
+    `Place:\n${placeLines}\n\n` +
+    `Return {"tags": [{"slug": "<slug>", "score": 0.0-1.0}, ...]} with every vocabulary ` +
+    `slug scored, ranked best-first. We will keep exactly the top ${targetCount} ` +
+    `after conflict resolution — rank by true fit to this place.`;
 
   try {
     const r = await fetch(OPENAI_URL, {
@@ -217,12 +233,20 @@ export async function inferPlaceTags(
     }
     candidates.sort((a, b) => b.score - a.score || a.index - b.index);
     const seen = new Set<string>();
-    const ranked = candidates.flatMap(({ slug }) => {
-      if (seen.has(slug)) return [];
+    const ranked: string[] = [];
+    for (const { slug } of candidates) {
+      if (seen.has(slug)) continue;
       seen.add(slug);
-      return [slug];
-    });
-    return sanitizePlaceTags(ranked).slice(0, MAX_INFERRED_TAGS);
+      ranked.push(slug);
+    }
+    // Any vocabulary slug the model omitted is treated as score 0 (catalog order)
+    // so we can always fill to exactly targetCount after conflict sanitization.
+    for (const tag of vocabulary) {
+      if (seen.has(tag.slug)) continue;
+      seen.add(tag.slug);
+      ranked.push(tag.slug);
+    }
+    return selectTopPlaceTags(ranked, targetCount);
   } catch {
     return [];
   }
